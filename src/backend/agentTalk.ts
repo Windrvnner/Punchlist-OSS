@@ -6,7 +6,7 @@
  */
 import type { ModelThread } from '../ports';
 import { curable } from './retry';
-import type { AgentRun } from './agentRun';
+import { dealDocKey, type AgentRun } from './agentRun';
 import { codeOf, type Sent, type TalkAsk, type ToolMode, type Unusable } from './agentKit';
 import { NATIVE_TOOLS, toolSpecs } from './agentPrompts';
 
@@ -22,7 +22,7 @@ export interface Turn {
   listing: string;
   /** the turn's number, and whether it is the last */
   turnLine: string;
-  /** a document as listed to the main session, to be cited by its tag */
+  /** a document as listed to the main session, to be cited by its id */
   docLine(sent: Sent): string;
   /** the system prompt with the tools as JSON blocks, and what a reply must hold */
   system: string;
@@ -48,7 +48,7 @@ export class KeptConversation {
   private told = -1;
   /** how many of the opened documents the conversation has been told of */
   private listed = 0;
-  /** the documents attached to it last, by tag */
+  /** the documents attached to it last, by deal and docId */
   private attached = '';
   /** how tools are called; it steps down when the model refuses */
   private mode: ToolMode;
@@ -61,10 +61,12 @@ export class KeptConversation {
     private readonly width: number,
   ) {
     const { kit, question } = run;
-    const was = kit.talk && question.thread?.model === question.model ? question.thread : undefined;
+    // a thread kept without `opened` is an older one, whose model-side history names documents by label (#1162)
+    const kept = Array.isArray(question.thread?.opened) ? question.thread : undefined;
+    const was = kit.talk && kept?.model === question.model ? kept : undefined;
     this.id = was && was.tokens < compactAt(question.model) ? was.id : undefined;
     this.tokens = this.id ? was!.tokens : 0;
-    this.transcript = kit.talk ? question.thread?.transcript : undefined;
+    this.transcript = kit.talk ? kept?.transcript : undefined;
     this.mode = kit.talk ? kit.toolMode?.(question.model) ?? 'inline' : 'inline';
     this.calls = this.id && was?.call ? [was.call] : [];
   }
@@ -75,7 +77,7 @@ export class KeptConversation {
     // full: carried on in a new conversation
     if (this.id && this.tokens >= this.compactAt(question.model)) this.id = undefined;
     const fresh = !this.id;
-    const now = this.run.whole.map((s) => s.tag).join(',');
+    const now = this.run.whole.map(dealDocKey).join(',');
     if (fresh) await this.keepTranscript();
     const message = this.message(turn, fresh, now);
     const system = this.mode !== 'inline' ? `${NATIVE_TOOLS}\n\n${kit.rules}` : turn.system;
@@ -108,12 +110,12 @@ export class KeptConversation {
   thread(): ModelThread | undefined {
     if (!this.id) return undefined;
     const { opened, gone, question } = this.run;
-    const tags = [...opened.map((s) => ({ tag: s.tag, dealId: s.dealId, docId: s.rec.docId })), ...gone];
+    const kept = [...opened.map((s) => ({ dealId: s.dealId, docId: s.rec.docId })), ...gone];
     return {
       id: this.id,
       model: question.model,
       tokens: this.tokens,
-      tags,
+      opened: kept,
       ...(this.transcript ? { transcript: this.transcript } : {}),
       ...(this.calls[0] ? { call: this.calls[0] } : {}),
     };
@@ -161,7 +163,7 @@ export class KeptConversation {
     const { opened, quiet } = this.run;
     const newDocs = opened.slice(this.listed).filter((s) => !quiet.has(s));
     const opensSince = newDocs.length
-      ? `Documents opened since (cite them by tag):\n${newDocs.map(turn.docLine).join('\n')}\n\n`
+      ? `Documents opened since (cite them by id):\n${newDocs.map(turn.docLine).join('\n')}\n\n`
       : '';
     const attaching = now && now !== this.attached ? `Given to you whole with this message:\n${turn.listing}\n\n` : '';
     return `${opensSince}${attaching}${turn.turnLine}`;

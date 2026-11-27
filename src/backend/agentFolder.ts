@@ -11,6 +11,7 @@ import { codeOf, type AgentKit, type Cited, type DealDoc, type Run, type Sent } 
 import type { ResearchStep } from '../ports';
 import type { DocRecord } from './documents';
 import { batchAsk, noun, oneLine, quoted, shorten } from './agentPrompts';
+import { docsUnusable } from './recordIds';
 
 /** batches of a folder review read at the same time */
 const AT_ONCE = 3;
@@ -19,8 +20,15 @@ const AT_ONCE = 3;
  * large the folder
  */
 const FOLDER_TEXT = 24_000;
-/** about how many characters listing one document to cite adds to the main session's prompt */
+/** the fields a batch's reply is read for */
+const BATCH_KEYS = ['text', 'sources'];
+/** about how many characters listing one document to cite adds to the main session's prompt, apart from its handle */
 const LISTING_CHARS = 60;
+/**
+ * about how many characters listing one document to cite adds to the main session's prompt: its path and pages, and
+ * the handle it is listed by: its docId, or `<deal id>/<doc id>` in a run that spans deals (#1162)
+ */
+export const listingChars = (handle: string): number => LISTING_CHARS + handle.length;
 /** how many conversations the agent keeps folder reads and asks for */
 const KEPT = 30;
 
@@ -34,8 +42,8 @@ type FolderList = { label: string; docs: DealDoc[] };
 /** one batch of a folder read: its documents, and the places in the folder of the first and last it reads */
 export type Batch = { first: number; last: number; recs: DealDoc[] };
 /** what a batch found, for the main session */
-type BatchFinding = { at: string; tags: string; text: string; places: string; got: Sent[] };
-/** one batch being read: its step, and the documents tagged for it, with those tagged before it */
+type BatchFinding = { at: string; ids: string; text: string; places: string; got: Sent[] };
+/** one batch being read: its step, and the documents opened for it, with those opened before it */
 type BatchReading = { index: number; batch: Batch; at: string; step: ResearchStep; sent: Sent[]; had: Set<Sent> };
 
 /** keep the last few of a map, the most recent last */
@@ -246,10 +254,13 @@ class FolderPass {
     const { kit } = this.run;
     const reading = this.startBatch(index);
     try {
-      const { files, listing, got } = await kit.send(reading.sent, this.fast);
+      const { files, listing, got } = await kit.send(reading.sent, this.fast, this.run.spansDeals);
       if (!got.length) return this.notRead(reading, 'they could not be opened on this PC', 'could not be opened');
-      const ask = { kind: 'folder', model: this.fast, system: kit.rules, files, prompt: this.ask(reading, listing) };
-      const reply = await kit.askJson(ask, ['text', 'sources'], '{"text": "…", "sources": […]}');
+      const prompt = this.ask(reading, listing);
+      // a reply citing a document the batch was not given is asked again (#1162)
+      const unusable = docsUnusable(got, this.run.spansDeals, BATCH_KEYS, kit.where);
+      const ask = { kind: 'folder', model: this.fast, system: kit.rules, files, prompt, unusable };
+      const reply = await kit.askJson(ask, BATCH_KEYS, '{"text": "…", "sources": […]}');
       if (!reply) return this.notRead(reading, 'the reply on them could not be read', 'could not be read');
       this.keep(reading, got, reply);
     } catch (e) {
@@ -262,15 +273,15 @@ class FolderPass {
     }
   }
 
-  /** a batch's step, and its documents tagged to be listed to the model */
+  /** a batch's step, and its documents opened to be listed to the model */
   private startBatch(index: number): BatchReading {
     const batch = this.batches[index];
     const at = batch.first === batch.last ? `Document ${batch.first}` : `Documents ${batch.first}–${batch.last}`;
     const text = `Reviewed ${at.toLowerCase()} of ${this.folder.toRead} in ${quoted(this.folder.label)}`;
     const step = this.run.step({ kind: 'read', text });
-    // tagged to be listed to the model; a document it was not given after all loses its new tag and is not counted
+    // opened to be listed to the model; a document it was not given after all is not opened, nor counted
     const had = new Set(this.run.opened);
-    const sent = batch.recs.map((x) => this.run.tagOf(x.dealId, x.rec));
+    const sent = batch.recs.map((x) => this.run.open(x.dealId, x.rec));
     return { index, batch, at, step, sent, had };
   }
 
@@ -285,11 +296,11 @@ class FolderPass {
   private keep(reading: BatchReading, got: Sent[], reply: Record<string, unknown>): void {
     const { kit } = this.run;
     const { batch, step } = reading;
-    this.untagNew(reading, got);
+    this.unopenNew(reading, got);
     this.readCount += got.length;
     for (const x of batch.recs) if (got.some((g) => sameDoc(g, x))) this.readNow.add(dealDocKey(x));
     const { text, sources } = kit.fit(prose(reply.text).join(' '), reply.sources as Cited[], got, true);
-    const tags = this.run.tagsOf(sources);
+    const ids = this.run.idsOf(sources);
     // a document that said nothing on this is not listed to the model again; one cited is
     for (const s of got) {
       if (sources.some((x) => cites(x, s))) this.run.quiet.delete(s);
@@ -303,24 +314,24 @@ class FolderPass {
     }
     this.findings[reading.index] = {
       at: reading.at,
-      tags: got.map((x) => x.tag).join(', '),
-      text: shorten(withPlaces(text, tags, sources), 1200),
-      places: [...new Set(sources.map((x, i) => `${tags[i]} ${x.loc}`))].join(', '),
+      ids: got.map((x) => this.run.idOf(x)).join(', '),
+      text: shorten(withPlaces(text, ids, sources), 1200),
+      places: [...new Set(sources.map((x, i) => `${ids[i]} ${x.loc}`))].join(', '),
       got,
     };
     finish(step, `${sources.length} ${noun(sources.length, 'passage')}`);
   }
 
-  /** a batch that could not be read: its documents lose their new tags, and why is told to the main session */
+  /** a batch that could not be read: its new documents are not opened, and why is told to the main session */
   private notRead(reading: BatchReading, why: string, result: string): void {
-    this.untagNew(reading, []);
+    this.unopenNew(reading, []);
     this.failed[reading.index] = `${reading.at.toLowerCase()} (${why})`;
     finish(reading.step, result);
   }
 
-  /** the documents tagged for this batch that were new to it and the model was not given lose their tags */
-  private untagNew(reading: BatchReading, keep: Sent[]): void {
-    for (const s of reading.sent) if (!keep.includes(s) && !reading.had.has(s)) this.run.untag(s);
+  /** the documents opened for this batch that were new to it and the model was not given are not opened */
+  private unopenNew(reading: BatchReading, keep: Sent[]): void {
+    for (const s of reading.sent) if (!keep.includes(s) && !reading.had.has(s)) this.run.unopen(s);
   }
 
   /** what the batches found, bounded, with what found nothing and what could not be read */
@@ -345,10 +356,10 @@ class FolderPass {
     const lines: string[] = [];
     for (const finding of this.findings) {
       if (!finding) continue;
-      const full = `${finding.at}: ${finding.tags}. ${finding.text}`;
+      const full = `${finding.at}: ${finding.ids}. ${finding.text}`;
       const short = `${finding.at}: passages at ${finding.places}.`;
       const newDocs = finding.got.filter((x) => !this.before.has(x));
-      const listing = newDocs.length * LISTING_CHARS;
+      const listing = newDocs.reduce((sum, x) => sum + listingChars(this.run.idOf(x)), 0);
       const line = used + full.length + listing <= FOLDER_TEXT / 2 ? full
         : used + short.length + listing <= FOLDER_TEXT ? short
         : '';

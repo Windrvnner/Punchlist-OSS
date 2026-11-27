@@ -17,14 +17,14 @@ export const noun = (count: number, one: string, many = `${one}s`) => (count ===
 
 const ROLE = 'You are researching a question about a project-finance deal from its data room, its findings and its Q&A '
   + 'log. You work in turns.';
-const CITE_RULE = 'Cite only documents listed under "Documents opened so far", by their tag. A finding or a response '
+const CITE_RULE = 'Cite only documents listed under "Documents opened so far", by their ids. A finding or a response '
   + 'from the Q&A log is not a document: say what it is in words and give it no marker. Name a question of the Q&A log '
   + 'only as "response <id>", with the id its row is shown by.';
 const SEARCH_HELP = 'A helper searches the documents by their words, file names and folder paths, reads a page of '
   + 'the best matches, and returns passages with document and page. "findings" and "qa" search the deal\'s findings '
   + 'and its questions and responses. Search in other words, or for a document by the name it is likely to have, when '
   + 'a search finds nothing useful. Results come a page at a time: give "page" for the next one.';
-const readHelp = (width: number) => `Have up to ${width} documents attached to your next turn, by tag or by path, so `
+const readHelp = (width: number) => `Have up to ${width} documents attached to your next turn, by id or by path, so `
   + 'that you can look through them yourself. Do this when the passages a search returned are not enough to answer.';
 const FOLDER_WHEN = 'Have every document in a folder read, the most important first, when you are asked to read or '
   + 'review a folder, or when the answer needs all of a folder rather than a few documents from it.';
@@ -44,13 +44,13 @@ export const inlineTools = (width: number) => [
   '{"tool": "search", "what": "documents" | "findings" | "qa" | "all", "query": "a few words to search for", '
     + '"page": 1, "notes": "what you have learned so far, with document and page"}',
   `  ${SEARCH_HELP}`,
-  '{"tool": "read", "docs": ["D3", "D7"], "notes": "…"}',
+  '{"tool": "read", "docs": ["a document\'s id", "or its path"], "notes": "…"}',
   `  ${readHelp(width)}`,
   '{"tool": "folder", "folder": "Permits", "lookFor": "what to look for in it", "notes": "…"}',
   `  ${FOLDER_WHEN} ${FOLDER_NAMED} ${FOLDER_RESULT} add "all": true once they have.`,
   '{"tool": "brief", "notes": "…"}',
   `  ${BRIEF_HELP}`,
-  '{"text": "the answer, with [n] markers", "sources": [{"doc": "D3", "page": 12, "quote": "a few words from that '
+  '{"text": "the answer, with [n] markers", "sources": [{"doc": "its id", "page": 12, "quote": "a few words from that '
     + 'page"}], "offer": {"action": "new deal" | "open page" | "add unresolved" | "log question", "deal": "…", '
     + '"page": "overview" | "findings" | "checklist" | "qa", "question": "…"}}',
   `  Your answer, once you have what you need. ${CITE_RULE} "offer" is optional. ${OFFER_HELP}`,
@@ -115,7 +115,7 @@ export const toolSpecs = (width: number): ToolSpec[] => [
     description: readHelp(width),
     parameters: {
       type: 'object',
-      properties: { docs: { type: 'array', items: { type: 'string' }, description: 'Tags (D3) or paths.' }, notes },
+      properties: { docs: { type: 'array', items: { type: 'string' }, description: 'Ids or paths.' }, notes },
       required: ['docs'],
     },
   },
@@ -169,6 +169,6 @@ export function batchAsk(at: { listing: string; first: number; last: number; cou
   return `Documents:\n${at.listing}\n\nThese are documents ${at.first} to ${at.last} of the ${at.count} in `
     + `${at.label}, which is being read a batch at a time, the most important first. `
     + `${findAsk('they', lookFor, question)}\n`
-    + 'Reply as JSON: {"text": "what they say, with [n] markers", "sources": [{"doc": "D3", "page": 2, "quote": "a '
+    + 'Reply as JSON: {"text": "what they say, with [n] markers", "sources": [{"doc": "its id", "page": 2, "quote": "a '
     + 'few words from that page"}]}';
 }

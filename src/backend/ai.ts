@@ -41,7 +41,7 @@ import { withoutDraftCredits } from './draftReply';
 import { MODEL_TEXT_MAX, fitText, fitParas } from '../domain/importExport';
 import { withoutMarkers } from '../domain/cite';
 import { ok, fail, type Failure, type Result } from '../domain/result';
-import type { AiService, Repository, CheckSummary, CheckState, DealProgress, ChecklistRow } from '../ports';
+import type { AiService, Repository, CheckSummary, CheckState, DealProgress, ChecklistRow, PhraseItem } from '../ports';
 import { WORKSTREAMS, CHECK_REASON, type Provenance, type Question, type Source } from '../domain/model';
 import type { ConverseInput, Conversed, ModelService } from './service';
 import type { ToolMode } from './agent';
@@ -54,9 +54,9 @@ import { createHash } from 'node:crypto';
 import { ListRecord, Item, firmOf, orderItems, key } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
-import { coversPrompt, readCovers } from './covers';
+import { coversPrompt, readCovers, tagsFor } from './covers';
 import {
-  readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, tagNumber, isObject,
+  readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, isObject,
 } from './lenient';
 import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
@@ -75,7 +75,8 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
-import { AI_DRAFTED, namesOnlyShown, questionIdsIn, questionsForIds, responseHeader } from './qaRow';
+import { AI_DRAFTED, questionIdsIn, questionsForIds, responseHeader } from './qaRow';
+import { citesUnsent, docHandle, docsUnusable, namesOnlyShown, sentAs, unknownIds, unknownInPairs } from './recordIds';
 import type { DealDoc, Looked, Unusable } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
@@ -252,9 +253,15 @@ const stoppedOn = (stopped: unknown) => (stopped as { code?: string }).code === 
 /** sent after a prompt whose reply was cut off at the length limit, to ask for the whole reply again in less room */
 const SHORTER = 'Your reply to this was cut off at the length limit. Send the whole reply again in the same form, about half as long: keep what matters most and say less about the rest.';
 
+/** how a pick introduces the files it lists (#1162) */
+const PICK_INTRO = 'These are files from the data room of a project-finance deal, the likeliest first. Each is given '
+  + 'by its id, then its full path from the root of the data room, with a short description where there is one, or '
+  + 'else the words it uses most. The deal\'s core documents are marked *.';
+
 const RULES = `Answer only from the documents you are given. Reply with one JSON object and nothing else.
 Cite like this: put [1], [2] … after each sentence that rests on a document, and list the sources in the same order:
-"sources": [{"doc": "D1", "page": 12, "quote": "a few words from that page"}]. For a spreadsheet give "cell": "Sheet name!B12" in place of "page".
+"sources": [{"doc": "its id", "page": 12, "quote": "a few words from that page"}]. \
+For a spreadsheet give "cell": "Sheet name!B12" in place of "page".
 Cite pages only: no clause, section or paragraph numbers. A sentence with no document behind it gets no marker. Never cite a document you were not given.
 Never refer to a finding by an id or a code: say what it is about in words.
 A calculation may use plain symbols (+ − × ÷ * / = %) without writing them out in words, like this: "CFADS / debt service = 41.2m / 31.2m = 1.32x". No LaTeX or other math markup: no \\frac, \\times, ^{…} or _{…}, and no $ around a formula.
@@ -346,9 +353,14 @@ const deeper = (f: FullCheck | undefined) => (f?.mode === 'quick' && f.sample &&
 export const workstreamOf = (w: unknown) => (typeof w === 'string' ? WORKSTREAMS.find((x) => x.toLowerCase() === w.trim().toLowerCase()) ?? '' : '');
 /** what the model is told when it checks checklist items against documents; `redo` holds why its last replies failed */
 type Redo = Map<string, { why: string; said?: unknown }>;
+/**
+ * A checklist item as a check prompt lists it: by its permanent id, never a running number its words could be
+ * confused with, and its words; parts are sized by this line, id included (#1162)
+ */
+const checkLine = (it: ChecklistItem) => `${it.id}: ${it.text}`;
 function checkPrompt(listing: string, items: ChecklistItem[], quick: boolean, redo?: Redo) {
   const where = quick ? '' : ' Add "where": the one or two places that show it, each naming a document you were given, '
-    + 'by its D number, and its page (or sheet and cell for a spreadsheet), with a short "quote" of the words there.';
+    + 'by its id, and its page (or sheet and cell for a spreadsheet), with a short "quote" of the words there.';
   const finding = '"finding" when they do not: what a lender needs is wrong, '
     + 'missing from a document that should have it, or differs between documents. Write it up: a one-line "title", '
     + `a "workstream" (one of ${WORKSTREAMS.join(' | ')}, or "" when unsure), `
@@ -357,12 +369,13 @@ function checkPrompt(listing: string, items: ChecklistItem[], quick: boolean, re
   const more = '"more" when these documents do not settle it: none of them deals with it, '
     + 'or they only report what other documents say (a report that says the permits are in place is not the permits). '
     + 'Add "need": a few words describing the documents that would settle it.';
-  const okShape = quick ? '' : ', "where": [{"doc": "D1", "page": 12, "quote": "…"}]';
-  const shape = `Reply as JSON: {"items": [{"id": "I1", "result": "ok"${okShape}}, `
-    + '{"id": "I2", "result": "finding", "title": "…", "workstream": "…", "body": ["…"], "sources": [...]}, '
-    + '{"id": "I3", "result": "more", "need": "…"}]}';
-  const asked = items.map((it, i) => `I${i + 1}: ${it.text}`).join('\n');
-  return `Documents:\n${listing}\n\nCheck each of these checklist items against the documents:\n${asked}\n\n`
+  const okShape = quick ? '' : ', "where": [{"doc": "its id", "page": 12, "quote": "…"}]';
+  const shape = `Reply as JSON: {"items": [{"id": "its id", "result": "ok"${okShape}}, `
+    + '{"id": "its id", "result": "finding", "title": "…", "workstream": "…", "body": ["…"], "sources": [...]}, '
+    + '{"id": "its id", "result": "more", "need": "…"}]}';
+  const asked = items.map(checkLine).join('\n');
+  return `Documents:\n${listing}\n\nCheck each of these checklist items, each with its id, against the documents:\n`
+    + `${asked}\n\n`
     + `Give each item one "result":\n"ok" when the documents satisfy it.${where}\n${finding}\n${more}\n${shape}`
     + secondLook(items, redo);
 }
@@ -370,10 +383,10 @@ function checkPrompt(listing: string, items: ChecklistItem[], quick: boolean, re
 /** a second look names each item whose first reply could not be used, with why and what was sent */
 function secondLook(items: ChecklistItem[], redo?: Redo) {
   if (!redo) return '';
-  const fixes = items.map((it, i) => {
+  const fixes = items.map((it) => {
     const r = redo.get(it.id);
     if (!r) return '';
-    return `I${i + 1}: ${r.why}${r.said !== undefined ? ` You sent: ${JSON.stringify(r.said)}` : ''}`;
+    return `${it.id}: ${r.why}${r.said !== undefined ? ` You sent: ${JSON.stringify(r.said)}` : ''}`;
   }).filter(Boolean).join('\n');
   return `\n\nThis is a second look. Your first replies on these items could not be used. Put each right:\n${fixes}`;
 }
@@ -428,6 +441,18 @@ export function unid(text: string, ids: Set<string>): string {
     return t;
   }
 }
+
+/** A memo reply naming a finding by any id but one it was shown, in its words or in `named`: asked again (#1162) */
+const memoUnusable = (shown: string[], named: (text: string) => unknown[]) => (text: string) =>
+  !namesOnlyShown(text, shown) || unknownIds(named(text), shown).length > 0;
+/** the ids a ratings reply rates */
+const ratedIds = (text: string) => listOf(json(text, 'ratings')?.ratings).filter(isObject).map((row) => row.id);
+/** the ids a grouping reply puts in its risks */
+const groupedIds = (text: string) =>
+  listOf(json(text, 'risks')?.risks).filter(isObject).flatMap((row) => listOf(row.findings));
+/** the ids a brief's links name: {a few words|its id} */
+const linkedIds = (text: string) => strings(json(text, 'paragraphs')?.paragraphs)
+  .flatMap((p) => [...p.matchAll(/\{[^{}|]+\|([^{}]*)\}/g)].map((m) => m[1]));
 
 /** Ignore malformed entries individually so a usable group beside one still stands (#658). */
 function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
@@ -609,8 +634,12 @@ export function nodeAi(o: AiOptions) {
   };
   /** every call to the model is asked again quietly when it fails or comes back empty (src/backend/retry.ts) */
   const retried = retrier(o.retry);
-  /** a reply that failed: nothing in it, or what its caller cannot use (#1105); asked again (retry.ts) */
-  const failedReply = async (text: string, unusable?: Unusable) => !text.trim() || (!!unusable && await unusable(text));
+  /**
+   * a reply that failed: nothing in it, or what its caller cannot use (#1105); asked again (retry.ts). One that stops
+   * before its end is left to the cut-off handling (`whole`), since its last citation may itself be cut short (#1162)
+   */
+  const failedReply = async (text: string, unusable?: Unusable) =>
+    !text.trim() || (!!unusable && !unfinished(text) && await unusable(text));
   const complete = async ({ kind, split: _split, unusable, ...input }: Ask): Promise<string> => {
     const b = kind === 'describe' ? undefined : budget.getStore();
     // each try is counted in the usage log and against a search's calls, since each is paid for; a search out of calls is not asked again
@@ -633,32 +662,25 @@ export function nodeAi(o: AiOptions) {
   // points that failed alone, per deal, by their key: asking again (Retry) puts them last, after the points that were only
   // held up beside them, so those come back first; they are still split and asked alone like any other
   const phraseFailed = new Map<string, Set<string>>();
-  /**
-   * n tags of three consonants, different from each other, to name the points of one `phrase` call: drawn at random, so
-   * they do not run in order, and with no vowel, so none is a word
-   */
-  const tagsFor = (n: number): string[] => {
-    const C = 'bcdfghjkmnpqrstvwxz'; const seen = new Set<string>();
-    while (seen.size < n) seen.add(Array.from({ length: 3 }, () => C[Math.floor(Math.random() * C.length)]).join(''));
-    return [...seen];
-  };
-  /** a point `phrase` is asked to put as a question (ports: AiService.phrase) */
-  type PhrasePoint = { kind: 'gap' | 'finding'; what: string; need: string };
+  /** a point `phrase` is asked to put as a question, by its record id (ports: AiService.phrase) */
+  type PhrasePoint = PhraseItem;
   /** a point's key, by which `phraseKept` and `phraseFailed` know it from one run to the next */
   const phraseKey = (x: PhrasePoint) => JSON.stringify([x.kind, x.what, x.need]);
   /** a point as one line of a `phrase` call: its kind, what is unresolved, and what would settle it */
   const phraseLine = (x: PhrasePoint) =>
     `[${x.kind}] ${x.what.replace(/\s+/g, ' ')}${x.need ? ` — needed: ${x.need.replace(/\s+/g, ' ')}` : ''}`;
-  /** what one `phrase` call asks, each point named by its tag */
-  const phrasePrompt = (points: PhrasePoint[], tags: string[]) => [
+  /** a point as a `phrase` call lists it: by its record id, never a per-prompt label, so parts count the id (#1162) */
+  const phrasePromptLine = (x: PhrasePoint) => `${x.id}: ${phraseLine(x)}`;
+  /** what one `phrase` call asks, each point named by its record id */
+  const phrasePrompt = (points: PhrasePoint[]) => [
     'These are unresolved points in the due diligence of a project-finance deal: checklist items no document'
       + ' settles yet ("gap"), and open findings ("finding"). Each starts with its id.',
-    ...points.map((x, m) => `${tags[m]}: ${phraseLine(x)}`),
+    ...points.map(phrasePromptLine),
     '',
     'Write one question for the counterparty for each point, asking plainly for the document or confirmation that'
       + ' would settle it. One or two sentences each, polite and specific, in the deal team\'s voice; keep every name'
       + ' and figure; say nothing about how the point was found. Give every point a question, with that point\'s id.',
-    `Reply as JSON: {"items": [{"id": "${tags[0]}", "text": "…"}]}`,
+    `Reply as JSON: {"items": [{"id": "${points[0].id}", "text": "…"}]}`,
   ].join('\n');
   /** why a `phrase` reply brought no question back, as the run's failure says it when no point gets one */
   const phraseWhy = (cut: boolean, reply: { items?: unknown } | null) => {
@@ -666,11 +688,11 @@ export function nodeAi(o: AiOptions) {
     if (reply && Array.isArray(reply.items)) return `${SERVICE} left a point without a question, so nothing was added`;
     return `${SERVICE}’s reply could not be read, so nothing was added`;
   };
-  /** the entries of a `phrase` reply: each one's place in the call, by its tag, and its text */
-  const phraseEntries = (reply: { items?: unknown } | null, tags: string[]) => {
-    const at = new Map(tags.map((t, m) => [t, m]));
+  /** the entries of a `phrase` reply: each one's place in the call, by its id exactly (#1162), and its text */
+  const phraseEntries = (reply: { items?: unknown } | null, ids: string[]) => {
+    const at = new Map(ids.map((id, m) => [id, m]));
     return (listOf(reply?.items) as { id?: unknown; text?: unknown }[]).map((x) => ({
-      m: typeof x?.id === 'string' ? at.get(x.id.trim().toLowerCase()) : undefined,
+      m: typeof x?.id === 'string' ? at.get(x.id) : undefined,
       text: typeof x?.text === 'string' && x.text.trim() ? x.text : '',   // as the model wrote it (#1215)
     }));
   };
@@ -678,7 +700,24 @@ export function nodeAi(o: AiOptions) {
   const givenTwice = (items: { m?: number }[]) =>
     new Set(items.filter((x, j) => x.m !== undefined && items.findIndex((y) => y.m === x.m) !== j).map((x) => x.m));
   /**
-   * The questions of a `phrase` reply, by place in the call: only an entry with one of the call's tags is kept, even
+   * A `phrase` reply that names a point by an id it was not shown, in its words or as an entry's id, is asked again
+   * (#1162); an entry with no id is left to `phraseGot`, as before
+   */
+  const phraseUnusable = (ids: string[]) => (text: string) => {
+    const entries = listOf(readJson(text, ['items'])?.items) as { id?: unknown }[];
+    const named = entries.filter((x) => isObject(x) && x.id !== undefined).map((x) => x.id);
+    return !namesOnlyShown(text, ids) || unknownIds(named, ids).length > 0;
+  };
+  /**
+   * Whether the entries of a `phrase` reply name an id the call did not show, as `phraseUnusable` reads them; the
+   * last entry of a cut reply is left out, since it may be cut short, its id with it (#1162)
+   */
+  const namesUnshown = (reply: { items?: unknown } | null, cut: boolean, unusable: (text: string) => boolean) => {
+    const entries = listOf(reply?.items);
+    return unusable(JSON.stringify({ items: cut ? entries.slice(0, -1) : entries }));
+  };
+  /**
+   * The questions of a `phrase` reply, by place in the call: only an entry with one of the call's ids is kept, even
    * for a point asked alone, so stray text is never taken for a question; the last entry of a cut reply may be cut
    * short, so it is left out
    */
@@ -696,18 +735,19 @@ export function nodeAi(o: AiOptions) {
   };
   /**
    * One `phrase` call: the questions that came back whole, by place in `points`, whether the reply was cut off, and
-   * why, when none came back. Each point is named by a short tag of its own, not a running number, and a question is
-   * taken only for a tag of this call, so a reply that leaves a point out, or puts two in another order, cannot move a
+   * why, when none came back. Each point is named by its record id, not a running number, and a question is
+   * taken only for an id of this call, so a reply that leaves a point out, or puts two in another order, cannot move a
    * question onto another point. A reply cut off, whether the service says so or its JSON is left open, keeps what
    * came before its last entry; a whole reply with a stray quote in it is read as whole. Any other error is thrown.
    */
   async function askPhrase(model: string, points: PhrasePoint[]) {
-    const tags = tagsFor(points.length);
-    const prompt = phrasePrompt(points, tags);
+    const ids = points.map((x) => x.id);
+    const prompt = phrasePrompt(points);
+    const unusable = phraseUnusable(ids);
     let raw = '';
     let cut = false;
     try {
-      raw = String(await complete({ kind: 'phrase', model, system: JSON_ONLY, prompt }) ?? '');
+      raw = String(await complete({ kind: 'phrase', model, system: JSON_ONLY, prompt, unusable }) ?? '');
     } catch (e) {
       if (!isCutOff(e)) throw e;
       cut = true;
@@ -715,7 +755,10 @@ export function nodeAi(o: AiOptions) {
     }
     const reply = json<{ items?: unknown }>(raw, 'items');
     if (jsonEnd(raw, 'items') === 'open') cut = true;
-    const got = phraseGot(phraseEntries(reply, tags), cut);
+    // a reply still naming an id it was not shown when its tries ran out brings nothing: the part fails (#1162)
+    const none = new Map<number, string>();
+    if (namesUnshown(reply, cut, unusable)) return { got: none, cut: false, why: phraseWhy(false, null) };
+    const got = phraseGot(phraseEntries(reply, ids), cut);
     return { got, cut, why: got.size ? '' : phraseWhy(cut, reply) };
   }
   /** some points of a `phrase` run, by kind (gaps, then findings), leaving out a kind with none */
@@ -800,6 +843,27 @@ export function nodeAi(o: AiOptions) {
   const MEMO_RATE_BATCH = 40;   // open findings rated in one call for the deal memo
   /** a reply's text with its white space collapsed */
   const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
+  /** the findings an issues-list call shows, from and to: a share of them, or all when there is no share */
+  type FindingShare = [number, number];
+  /** the ids of the findings an issues-list call shows (#1162) */
+  const shownFindingIds = (findings: { id: string }[], share?: FindingShare) =>
+    findings.slice(...(share ?? [0, findings.length])).map((f) => f.id);
+  /** what a point repeats: an earlier point, or a finding by its id, exactly, among those its call showed (#1162) */
+  const sameOf = (findings: { id: string }[], said: unknown, k: number, share?: FindingShare) => {
+    const point = /^P\s*(\d+)$/i.exec(clean(said));
+    if (point) return +point[1] >= 1 && +point[1] <= k ? { point: +point[1] - 1 } : undefined;
+    return typeof said === 'string' && shownFindingIds(findings, share).includes(said) ? { finding: said } : undefined;
+  };
+  /**
+   * An issues-list reply whose "same" names a finding its call did not show, asked again (#1162); none ("") and an
+   * earlier point are not finding ids
+   */
+  const sameUnusable = (findings: { id: string }[], share?: FindingShare) => (text: string) => {
+    const shown = shownFindingIds(findings, share);
+    const rows = listOf(json<{ points?: unknown }>(text, 'points')?.points).filter(isObject);
+    const named = rows.map((row) => row.same).filter((v) => clean(v) !== '' && !/^P\s*\d+$/i.test(clean(v)));
+    return !namesOnlyShown(text, shown) || unknownIds(named, shown).length > 0;
+  };
 
   /**
    * An issues list's points, read from its file in one call, as every other document is read: the model gives each
@@ -1033,8 +1097,9 @@ export function nodeAi(o: AiOptions) {
       claim: (keys) => claimReports(dealId, keys),
       release: async (keys) => { if (o.shared) await release(dealId, keys).catch(() => undefined); },
       ask: (input, keys) => askJson(input, keys),
+      unusable: (sent, keys, shown) => docsUnusable(sent, false, keys, where, shown),
       send: async (rec, model) => {
-        const r = await send(tagged(dealId, [rec]), model);
+        const r = await send(sentOf(dealId, [rec]), model);
         return r.got.length ? { files: r.files, listing: r.listing, sent: r.got } : null;
       },
       fit: (text, cited, sent) => fit(text, cited, sent, false, true),
@@ -1212,6 +1277,43 @@ export function nodeAi(o: AiOptions) {
     for (const r of order) (sec.has(r.docId) && n++ >= SECONDARY_AHEAD ? after : ahead).push(r);
     return [...ahead, ...after];
   }
+  /** the ranking as a pick lists it: each file by its docId, a core document marked *, then its path (#1162) */
+  function pickListing(list: DocRecord[], core: string[], dealId: string): string {
+    const isCore = starred(core);
+    return list.map((r) => `${r.docId}${isCore.has(r.docId) ? ' *' : ''}: ${shown(r, 12, dealId)}`).join('\n');
+  }
+  /** the files a pick's reply names by docId, in its order, each once, `most` at most */
+  function pickedFrom(list: DocRecord[], named: unknown, most: number): DocRecord[] {
+    const byId = new Map(list.map((r) => [r.docId, r]));
+    const ids = [...new Set(listOf(named))].filter((id): id is string => typeof id === 'string');
+    return ids.map((id) => byId.get(id)).filter((r): r is DocRecord => !!r).slice(0, most);
+  }
+  /**
+   * The fast model's pick from a listing of `list`; null when it could not be asked or its reply cannot be read.
+   * `items`: the ids of the checklist items a pick for several items is keyed by.
+   */
+  async function askPick(list: DocRecord[], listed: string, items?: string[]): Promise<{ read?: unknown } | null> {
+    const prompt = `${PICK_INTRO}\n${listed}`;
+    const model = (await models()).fast;
+    const unusable = pickUnusable(list, items);
+    const input: Ask = { kind: 'pick', split: true, model, system: JSON_ONLY, unusable, prompt };
+    try {
+      return await askJson<{ read?: unknown }>(input, ['read']);
+    } catch (e) {
+      if (unreachable(e)) throw e;
+      return null;
+    }
+  }
+  /**
+   * A pick whose reply names a file, or keys a checklist item of `items`, by an id it was not shown is a failed reply,
+   * asked again (#1162)
+   */
+  const pickUnusable = (list: DocRecord[], items?: string[]) => (text: string) => {
+    const read = json<{ read?: unknown }>(text, 'read')?.read;
+    const named = isObject(read) ? Object.values(read).flatMap(listOf) : listOf(read);
+    const keyed = items && isObject(read) ? unknownIds(Object.keys(read), items) : [];
+    return unknownIds(named, list.map((r) => r.docId)).length > 0 || keyed.length > 0;
+  };
   /**
    * What to read for something, in two steps: the keyword ranking, then the fast model's pick from the top of it, each
    * file shown by its full path and summary with core documents marked. `room` at most, none if nothing bears on it.
@@ -1222,11 +1324,12 @@ export function nodeAi(o: AiOptions) {
   async function pick(dealId: string, what: string, not: Set<string>, room: number, core: string[], rankBy = what, found: DocRecord[] = []): Promise<DocRecord[] | null> {
     // what searches found heads the list, still with two at most of the sources that are never a main one ahead
     const list = aside(dealId, headed(found, ranked(dealId, rankBy, not, core), not)); if (!list.length || room < 1) return [];
-    const isCore = starred(core); let reply: { read?: unknown } | null;
-    try { reply = await askJson({ kind: 'pick', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These are files from the data room of a project-finance deal, the likeliest first. Each is given by its full path from the root of the data room, with a short description where there is one, or else the words it uses most. The deal's core documents are marked *.\n${list.map((r, i) => `${i + 1}${isCore.has(r.docId) ? '*' : ''}: ${shown(r, 12, dealId)}`).join('\n')}\n\nWhich of them should be read for this?\n${what}\n\nChoose up to ${room}, the most useful first. Start from the core documents, and choose another only when this needs it. If none of them bears on it, choose none.\nReply as JSON: {"read": [12, 3]}` }, ['read']); }
-    catch (e) { if (unreachable(e)) throw e; return null; }
+    const ask = `Which of them should be read for this?\n${what}\n\nChoose up to ${room}, the most useful first. `
+      + 'Start from the core documents, and choose another only when this needs it. If none of them bears on it, '
+      + 'choose none.\nReply as JSON: {"read": ["an id", "another id"]}';
+    const reply = await askPick(list, `${pickListing(list, core, dealId)}\n\n${ask}`);
     if (!reply || !('read' in reply)) return null;
-    return listOf(reply.read).map(int).filter((n): n is number => n !== null && n >= 1 && n <= list.length).map((n) => list[n - 1]).filter((r, i, all) => all.indexOf(r) === i).slice(0, room);
+    return pickedFrom(list, reply.read, room);
   }
   /**
    * The chat's document search as fixed pages (#1102): the keyword ranking as `top` gives it with no room set, only the
@@ -1277,15 +1380,28 @@ export function nodeAi(o: AiOptions) {
    */
   async function pickFor(dealId: string, things: { id: string; what: string; rankBy: string }[], not: Set<string>, each: number, core: string[], found?: Map<string, DocRecord[]>): Promise<Map<string, DocRecord[]> | null> {
     const list = headed(found ? interleave(things.map((t) => found.get(t.id) ?? [])) : [], ranked(dealId, things.map((t) => t.rankBy).join(' '), not, core), not); const out = new Map<string, DocRecord[]>(things.map((t) => [t.id, []]));
-    const hint = (t: { id: string }) => { const at = (found?.get(t.id) ?? []).map((r) => list.indexOf(r) + 1).filter((n) => n > 0); return found?.has(t.id) ? ` (its searches found ${at.length ? at.join(', ') : 'none of them'})` : ''; };
+    const hint = (t: { id: string }) => {
+      const at = (found?.get(t.id) ?? []).filter((r) => list.includes(r)).map((r) => r.docId);
+      return found?.has(t.id) ? ` (its searches found ${at.length ? at.join(', ') : 'none of them'})` : '';
+    };
     if (!list.length || each < 1 || !things.length) return out;
-    const isCore = starred(core); let reply: { read?: unknown } | null;
-    try { reply = await askJson({ kind: 'pick', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These are files from the data room of a project-finance deal, the likeliest first. Each is given by its full path from the root of the data room, with a short description where there is one, or else the words it uses most. The deal's core documents are marked *.\n${list.map((r, i) => `${i + 1}${isCore.has(r.docId) ? '*' : ''}: ${shown(r, 12, dealId)}`).join('\n')}\n\nWhich of them should be read for each of these?\n${things.map((t, i) => `I${i + 1}: ${t.what.replace(/\n/g, ' ')}${hint(t)}`).join('\n')}\n\nFor each, choose up to ${each}, the most useful first. If none of the files bears on one, choose none for it.\nReply as JSON: {"read": {"I1": [12, 3], "I2": []}}` }, ['read']); }
-    catch (e) { if (unreachable(e)) throw e; return null; }
+    // each item is shown by its permanent id, never a running number its words could be confused with (#1162)
+    const asked = things.map((t) => `${t.id}: ${t.what.replace(/\n/g, ' ')}${hint(t)}`).join('\n');
+    const ask = `Which of them should be read for each of these?\n${asked}\n\nFor each, choose up to ${each}, the most `
+      + 'useful first. If none of the files bears on one, choose none for it.\n'
+      + `Reply as JSON: {"read": {"${things[0].id}": ["an id", "another id"]}}`;
+    const ids = things.map((t) => t.id);
+    const reply = await askPick(list, `${pickListing(list, core, dealId)}\n\n${ask}`, ids);
     if (!reply || !('read' in reply) || !reply.read || typeof reply.read !== 'object') return null;
-    const numbers = (v: unknown) => listOf(v).map(int).filter((n): n is number => n !== null && n >= 1 && n <= list.length).map((n) => list[n - 1]).filter((r, i, all) => all.indexOf(r) === i).slice(0, each);
-    if (Array.isArray(reply.read)) { for (const t of things) out.set(t.id, numbers(reply.read)); return out; }      // one list for all of them: each is given it
-    for (const [k, v] of Object.entries(reply.read as Record<string, unknown>)) { const n = tagNumber(k, 'I'); const t = n ? things[n - 1] : undefined; if (t) out.set(t.id, numbers(v)); }
+    const picked = (v: unknown) => pickedFrom(list, v, each);
+    // one list for all of them: each is given it
+    if (Array.isArray(reply.read)) {
+      for (const t of things) out.set(t.id, picked(reply.read));
+      return out;
+    }
+    for (const [k, v] of Object.entries(reply.read as Record<string, unknown>)) {
+      if (out.has(k)) out.set(k, picked(v));
+    }
     return out;
   }
   /**
@@ -1330,18 +1446,50 @@ export function nodeAi(o: AiOptions) {
   const isSearch = (x: string) => kept(x).some((w) => !NO_SEARCH.has(w));
   const SEARCHES = 3;                                                            // searches the fast model may give one item at a time
   const FOUND = 12;                                                              // documents one item's searches put at the head of the pick list
+  /** a checklist item for a search, and the searches already made for it that found nothing */
+  const triedLine = (t: { id: string; what: string }, tried?: Map<string, Trail>) => {
+    const done = tried?.get(t.id) ?? [];
+    const before = done.length ? ` (searched already, finding nothing: ${done.map((x) => `"${x.q}"`).join(', ')})` : '';
+    // each item is shown by its permanent id, never a running number its words could be confused with (#1162)
+    return `${t.id}: ${t.what.replace(/\s+/g, ' ')}${before}`;
+  };
+  /** what the fast model is asked for the searches for some checklist items; `tried`, when it is asked once more */
+  const queryPrompt = (them: { id: string; what: string }[], tried?: Map<string, Trail>) => {
+    const again = tried ? ' Each has been searched for already and nothing answered: search in other words.' : '';
+    return [
+      'These are items of a due diligence checklist for a project-finance deal, each with its id:',
+      ...them.map((t) => triedLine(t, tried)),
+      '',
+      'The documents in the data room are searched by the words in their file names, folder names and text. For each'
+        + ` item, write up to ${SEARCHES} short searches, a few words each, for the documents that would settle it: the`
+        + ' names such documents usually have, and the words and defined terms they use. If you have no search for an'
+        + ` item, give it an empty list.${again}`,
+      `Reply as JSON: {"queries": {"${them[0].id}": ["…", "…"]}}`,
+    ].join('\n');
+  };
+  /** a search reply naming an item, in its words or as a key, by an id it was not shown is asked again (#1162) */
+  const queryUnusable = (ids: string[]) => (text: string) => {
+    const queries = readJson(text, ['queries'])?.queries;
+    return !namesOnlyShown(text, ids) || (isObject(queries) && unknownIds(Object.keys(queries), ids).length > 0);
+  };
   async function searchFor(
     dealId: string, things: { id: string; what: string }[], not: Set<string>, core: string[],
   ): Promise<{ found: Map<string, DocRecord[]>; trails: Map<string, Trail> } | null> {
     if (!things.length) return { found: new Map(), trails: new Map() };
     const ask = async (them: typeof things, tried?: Map<string, Trail>): Promise<Map<string, string[]> | null> => {
       let reply: { queries?: unknown } | null;
-      try { reply = await askJson({ kind: 'query', model: (await models()).fast, system: JSON_ONLY, prompt: `These are items of a due diligence checklist for a project-finance deal:\n${them.map((t, i) => `I${i + 1}: ${t.what.replace(/\s+/g, ' ')}${tried?.get(t.id)?.length ? ` (searched already, finding nothing: ${tried.get(t.id)!.map((x) => `"${x.q}"`).join(', ')})` : ''}`).join('\n')}\n\nThe documents in the data room are searched by the words in their file names, folder names and text. For each item, write up to ${SEARCHES} short searches, a few words each, for the documents that would settle it: the names such documents usually have, and the words and defined terms they use. If you have no search for an item, give it an empty list.${tried ? ' Each has been searched for already and nothing answered: search in other words.' : ''}\nReply as JSON: {"queries": {"I1": ["…", "…"], "I2": ["…"]}}` }, ['queries'], undefined, false); }
+      const input: Ask = { kind: 'query', model: (await models()).fast, system: JSON_ONLY,
+        prompt: queryPrompt(them, tried), unusable: queryUnusable(them.map((t) => t.id)) };
+      try { reply = await askJson(input, ['queries'], undefined, false); }
       catch (e) { if (unreachable(e)) throw e; return null; }                  // out of calls for this search, or the call failed: no search
       if (!reply?.queries || typeof reply.queries !== 'object' || Array.isArray(reply.queries)) return null;
       const out = new Map<string, string[]>();
       // a "search" with no word the index can look for ("N/A", "-", only filler words), or only placeholders ("None", "TBD"), is how a model gives none: it is not counted as one
-      for (const [k, v] of Object.entries(reply.queries as Record<string, unknown>)) { const n = tagNumber(k, 'I'); const t = n ? them[n - 1] : undefined; if (t) out.set(t.id, strings(v).map((x) => cut(x.replace(/\s+/g, ' ').trim(), 60)).filter((x) => isSearch(x)).slice(0, SEARCHES)); }
+      for (const [k, v] of Object.entries(reply.queries as Record<string, unknown>)) {
+        const t = them.find((x) => x.id === k);
+        const said = strings(v).map((x) => cut(x.replace(/\s+/g, ' ').trim(), 60));
+        if (t) out.set(t.id, said.filter((x) => isSearch(x)).slice(0, SEARCHES));
+      }
       return out;
     };
     // a search's count is of every document that answers to it, read already or not, so a trail never says nothing answered when something did
@@ -1375,12 +1523,13 @@ export function nodeAi(o: AiOptions) {
    * what and when. They are listed while their tokens fit in `room`, what is left of the prompt's budget for tracked
    * changes, and the rest is counted (#1092). `used` is the tokens the listed passages took.
    */
-  async function changesOf(dealId: string, tag: string, docId: string, room: number): Promise<ChangeLines> {
+  async function changesOf(dealId: string, id: string, docId: string, room: number): Promise<ChangeLines> {
     const none: ChangeLines = { lines: [], used: 0 };
     if (!o.docs.changes) return none;
     let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return none; }
     if (!r.ok || !r.value.passages.length) return none;
-    const out = [`  The changes in ${tag}, read from the file itself (these are fact, not a reading):`]; let used = 0, left = 0;
+    const out = [`  The changes in ${id}, read from the file itself (these are fact, not a reading):`];
+    let used = 0, left = 0;
     for (const p of r.value.passages) {
       const who = p.changes.map((c) => `${c.kind}${c.text ? ` "${c.text.replace(/\s+/g, ' ').trim()}"` : ''}${c.by ? ` by ${c.by}` : ''}${c.at ? ` on ${c.at.slice(0, 10)}` : ''}`).join('; ');
       const line = `  - was: "${p.before.replace(/\s+/g, ' ').trim()}" / now: "${p.after.replace(/\s+/g, ' ').trim()}" (${who})`;
@@ -1401,10 +1550,15 @@ export function nodeAi(o: AiOptions) {
    * and a change it reports from the blackline is its reading of the markup, cited to the blackline's page. With
    * pipeline A the markup's strike-through and colors may not reach it, so deleted words can read as kept ones.
    */
-  function blacklineLine(s: Sent, mine: Sent[], cleanId: string | null | false, against: Against = 'own'): string {
+  function blacklineLine(s: Sent, mine: Sent[], cleanId: string | null | false, against: Against,
+    idOf: (x: Sent) => string): string {
+    const id = idOf(s);
     const clean = cleanId ? mine.find((x) => x.rec.docId === cleanId) : undefined; const rec = cleanId ? o.docs.records(s.dealId).find((r) => r.docId === cleanId) : undefined;
     // a standalone blackline: no clean draft is in the data room, so what it shows is never taken as the deal's terms
-    const of = clean ? `its clean draft is ${clean.tag}. ${clean.tag} is what the deal's terms are` : rec ? `its clean draft is ${where(rec)}, which is not given here. The terms are what that clean draft says`
+    const of = clean
+      ? `its clean draft is ${idOf(clean)}. ${idOf(clean)} is what the deal's terms are`
+      : rec
+        ? `its clean draft is ${where(rec)}, which is not given here. The terms are what that clean draft says`
       : cleanId === false
         ? 'no clean draft of it was found by its cover or name. '
           + 'What it shows is not confirmed as the deal\'s terms: say so wherever you rely on it'
@@ -1412,20 +1566,31 @@ export function nodeAi(o: AiOptions) {
     const sees = (o.blackline ?? control.blackline.pipeline) === 'A' ? ' Its strike-through and colors may not come through to you, so deleted words can read as if they were kept: be careful which wording is the new one.' : ' Struck-through words are deleted and colored words are inserted.';
     // what it was compared against (docs/other-project-documents-design.md): only this deal's own earlier draft makes its changes the deal's
     const vs = against === 'own' ? '' : against === 'other' && cleanId === false
-      ? ` ${s.tag} was made on another project: neither side of it is this deal's. Use it only to compare, and cite it only beside a document of this deal.`
-      : against === 'other' ? ` ${s.tag} compares this deal's draft with another project's document. Its deleted wording is the other project's, not an earlier draft of this deal: never report a deletion or insertion as a change made in this deal.`
-      : ` ${s.tag} compares its clean draft with another document, which may be an earlier draft of this deal or another project's. Do not report a difference as a change made in this deal unless a draft of this deal shows it.`;
+      ? ` ${id} was made on another project: neither side of it is this deal's. Use it only to compare, and cite it `
+        + 'only beside a document of this deal.'
+      : against === 'other'
+        ? ` ${id} compares this deal's draft with another project's document. Its deleted wording is the other `
+          + 'project\'s, not an earlier draft of this deal: never report a deletion or insertion as a change made in '
+          + 'this deal.'
+      : ` ${id} compares its clean draft with another document, which may be an earlier draft of this deal or another `
+        + 'project\'s. Do not report a difference as a change made in this deal unless a draft of this deal shows it.';
     const alone = against === 'own' ? '' : ` By itself it never shows that a finding is put right or that its problem is back.`;
-    return `  ${s.tag} is a blackline: a comparison of two ${against === 'own' ? 'drafts' : 'documents'} with the changes marked, made by a comparison tool; ${of}. Read ${s.tag} only for what changed, and give each change as what ${s.tag} appears to show, citing its page.${sees}${vs}${alone}`;
+    const compared = against === 'own' ? 'drafts' : 'documents';
+    return `  ${id} is a blackline: a comparison of two ${compared} with the changes marked, made by a comparison `
+      + `tool; ${of}. Read ${id} only for what changed, and give each change as what ${id} appears to show, citing `
+      + `its page.${sees}${vs}${alone}`;
   }
   /**
    * Put these documents in the store and describe them for the prompt. `got` are the ones that are really there: a
    * document whose file cannot be found on this PC is left out, and nothing may be recorded as read from it. `model`
    * is the one the prompt goes to: the drafts' tracked changes share one budget, the share of its input limit that a
-   * part may fill, drawn on in the order the drafts are listed (#1092).
+   * part may fill, drawn on in the order the drafts are listed (#1092). `spansDeals`: the prompt spans several deals,
+   * so each document is named with its deal (#1162).
    */
-  async function send(sent: Sent[], model: string): Promise<{ files: string[]; listing: string; got: Sent[] }> {
+  async function send(sent: Sent[], model: string, spansDeals = false):
+    Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
+    const idOf = (s: Sent) => docHandle(s, spansDeals);
     let changesRoom = Math.floor((inLimit(model) * control.limits.partShare) / 100);
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
@@ -1433,19 +1598,25 @@ export function nodeAi(o: AiOptions) {
       for (const s of mine) {
         const id = ids[s.rec.docId]; if (!id) continue; files.push(id); got.push(s);
         const rec = o.docs.records(dealId).find((r) => r.docId === s.rec.docId) ?? s.rec;          // a Word file's pages are counted when it is first sent, just now
-        lines.push(`${s.tag}: ${where(rec)}${rec.pages ? ` (${rec.pages} pages)` : ''}`);
+        lines.push(`${idOf(s)}: ${where(rec)}${rec.pages ? ` (${rec.pages} pages)` : ''}`);
         // a draft's pages show its tracked changes as markup: say so, and send the changes themselves, read from the
         // file, which are fact
         if (rec.tracked) {
-          lines.push(`  ${s.tag} has ${rec.tracked} tracked changes. Its pages show them as markup, `
+          lines.push(`  ${idOf(s)} has ${rec.tracked} tracked changes. Its pages show them as markup, `
             + 'so its wording is proposed, not agreed.');
-          const changes = await changesOf(dealId, s.tag, rec.docId, changesRoom);
+          const changes = await changesOf(dealId, idOf(s), rec.docId, changesRoom);
           lines.push(...changes.lines);
           changesRoom -= changes.used;
         }
-        const k = kindsOf(dealId); if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, k.against.get(rec.docId)));
+        const k = kindsOf(dealId);
+        const against = k.against.get(rec.docId) ?? 'own';
+        if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, against, idOf));
         // another project's document (docs/other-project-documents-design.md): read, never a main source
-        else if (k.precedents.has(rec.docId)) lines.push(`  ${s.tag} is another project's document, not this deal's. Its terms are never this deal's: use it only to compare, and cite it only beside a document of this deal. By itself it never shows that a finding is put right or that its problem is back.`);
+        else if (k.precedents.has(rec.docId)) {
+          lines.push(`  ${idOf(s)} is another project's document, not this deal's. Its terms are never this deal's: `
+            + 'use it only to compare, and cite it only beside a document of this deal. By itself it never shows that '
+            + 'a finding is put right or that its problem is back.');
+        }
       }
     }
     return { files, listing: lines.join('\n'), got };
@@ -1477,20 +1648,13 @@ export function nodeAi(o: AiOptions) {
   };
   /** whether any of these documents, which could not be sent, is one whose folder cannot be reached just now */
   const awayAmong = (dealId: string, docIds: string[]) => docIds.length > 0 && (o.docs.away?.(dealId, docIds).length ?? 0) > 0;
-  /** which of the documents that were sent a citation means: by its tag, however written ("D2", "d2", "[D2]"), or by its name or path */
-  function sentAs(doc: unknown, sent: Sent[]): Sent | undefined {
-    if (typeof doc !== 'string' && typeof doc !== 'number') return undefined;
-    const said = String(doc).trim().replace(/^["'`]+|["'`]+$/g, '').toLowerCase(); const named = sent.filter((x) => x.rec.name.toLowerCase() === said || where(x.rec).toLowerCase() === said);
-    if (named.length === 1) return named[0];
-    const n = tagNumber(doc, 'D'); return n === null ? undefined : sent.find((x) => x.tag === `D${n}`);
-  }
   /** Keep the sources we can stand behind, in order, and renumber the markers in the text to match. */
   function fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean, once = false): { text: string; sources: Source[] } {
     const seen = new Map<string, Map<string, string | null | false>>(); const blacklines = (dealId: string) => { let m = seen.get(dealId); if (!m) { m = cleanOf(dealId); seen.set(dealId, m); } return m; };
     const pre = new Map<string, Set<string>>(); const precedents = (dealId: string) => pre.get(dealId) ?? (pre.set(dealId, kindsOf(dealId).precedents), pre.get(dealId)!);
     const sources: Source[] = []; const renumber = new Map<number, number>(); const placed = new Map<string, number>();
     (listOf(cited) as Cited[]).forEach((c, i) => {
-      const s = sentAs(c?.doc ?? c?.document, sent); if (!s) return;
+      const s = sentAs(c?.doc ?? c?.document, sent, where); if (!s) return;
       let loc: string;
       if (SHEET.test(s.rec.name)) { const cell = typeof c.cell === 'string' ? (c.cell.includes('!') || typeof c.sheet !== 'string' ? c.cell : `${c.sheet}!${c.cell}`).trim() : ''; if (!/^[^!]+!\$?[A-Za-z]{1,3}\$?\d+$/.test(cell)) return; loc = cell; }
       // a Word or PowerPoint file has its pages counted only when it is first sent, so the record is read again for them
@@ -1628,12 +1792,17 @@ export function nodeAi(o: AiOptions) {
     kind: string, deals: string[], model: string, ask: string, lookFor: string, must: Record<string, string[]>,
     shape: string,
     again?: {
-      escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string; unusable?: Unusable;
+      escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string; shown?: string[];
     },
     page?: DealDoc[],
   ): Promise<Result<{ reply: Record<string, unknown>; sent: Sent[] }>> {
     const keys = [...shape.matchAll(/"([a-z]+)":/g)].map((m) => m[1]).concat('need');                // the fields this question asks for
-    const sent: Sent[] = []; const add = (dealId: string, recs: DocRecord[]) => { for (const rec of withClean(dealId, recs)) if (!sent.some((s) => s.rec.docId === rec.docId && s.dealId === dealId)) sent.push({ tag: `D${sent.length + 1}`, dealId, rec }); };
+    const sent: Sent[] = [];
+    const add = (dealId: string, recs: DocRecord[]) => {
+      for (const rec of withClean(dealId, recs)) {
+        if (!sent.some((s) => s.rec.docId === rec.docId && s.dealId === dealId)) sent.push({ dealId, rec });
+      }
+    };
     const core: Record<string, string[]> = {};
     await Promise.all(deals.map(async (d) => { core[d] = await coreOf(d); }));
     try { for (const x of await firstRead(deals, lookFor, must, core, page)) add(x.dealId, x.recs); }
@@ -1642,11 +1811,13 @@ export function nodeAi(o: AiOptions) {
     let using = model;
     let pool: Sent[] | undefined;
     let canRetry = readCanRetry(model, again);
-    const unusable = again?.unusable;   // checked on every reply, whether or not it can be sent back (#1105)
+    // checked on every reply, whether or not it can be sent back: it names only the ids it was shown, and cites only
+    // the documents it was given (#1105, #1162)
+    const unusable = docsUnusable(sent, deals.length > 1, keys, where, again?.shown);
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
-        const { files, listing, got } = await send(sent, using);
+        const { files, listing, got } = await send(sent, using, deals.length > 1);
         // a finding is not reassessed on part of what was chosen while the rest is out of reach
         if (kind === 'reassess' && lostSome(sent, got)) return fail({ kind: 'failed', message: 'The documents for this could not be opened on this PC' });
         if (got.length < sent.length) sent.splice(0, sent.length, ...got);        // what could not be opened on this PC was not read, and cannot be cited
@@ -1684,7 +1855,8 @@ export function nodeAi(o: AiOptions) {
       const extras: { d: string; recs: DocRecord[] }[] = [];
       try { for (const d of deals) { const extra = (await pick(d, `${lookFor}\nWhat has been read does not settle it. Still needed: ${need.join('; ')}`, have, room, core[d], `${lookFor} ${need.join(' ')}`)) ?? top(d, need.join(' '), have, room, core[d], false); if (extra.length) extras.push({ d, recs: extra }); } }
       catch (e) { return failure(e, 'The documents could not be read'); }
-      const required = new Set(deals.flatMap((d) => (must[d] ?? []).map((id) => `${d}|${id}`))); const first = sent.splice(0);   // retagged from D1 for the new call
+      const required = new Set(deals.flatMap((d) => (must[d] ?? []).map((id) => `${d}|${id}`)));
+      const first = sent.splice(0);
       const kept = first.filter((x) => required.has(`${x.dealId}|${x.rec.docId}`)); const rest = first.filter((x) => !required.has(`${x.dealId}|${x.rec.docId}`));
       const taken: { d: string; rec: DocRecord }[] = []; const budget = Math.min(half, width - kept.length);
       for (let i = 0; taken.length < budget && extras.some((x) => i < x.recs.length); i++) for (const x of extras) if (i < x.recs.length && taken.length < budget) taken.push({ d: x.d, rec: x.recs[i] });
@@ -1885,6 +2057,23 @@ export function nodeAi(o: AiOptions) {
     const text = typeof it?.text === 'string' ? it.text : '';
     return { id, text };
   }
+  /** the rows of a check reply: a list of items, or the same keyed by item id: {"i_…": {…}} */
+  const checkRows = (items: unknown): Record<string, unknown>[] => (Array.isArray(items) ? items
+    : Object.entries(items as Record<string, unknown>)
+      .map(([id, v]) => (v && typeof v === 'object' ? { id, ...(v as object) } : { id, result: v })));
+  /**
+   * A check reply its caller cannot use (retry.ts): it cites a document it was not given, or names an item, in its
+   * words or as a row's id, by an id it was not shown (#1162)
+   */
+  const checkUnusable = (sent: Sent[], items: ChecklistItem[]) => {
+    const ids = items.map((it) => it.id);
+    const docs = docsUnusable(sent, false, ['items'], where, ids);
+    return (text: string) => {
+      const said = readJson(text, ['items'])?.items;
+      const rows = isObject(said) || Array.isArray(said) ? checkRows(said) : [];
+      return docs(text) || unknownIds(rows.map((r) => r?.id), ids).length > 0;
+    };
+  };
   /**
    * Ask one model about some checklist items against some documents. Null when its reply cannot be read at all. Throws
    * when the service fails. With `redo`, the items are ones whose first replies could not be used: each is sent back with
@@ -1901,26 +2090,33 @@ export function nodeAi(o: AiOptions) {
     // a reply cut off at the length limit keeps the items that came back whole: the caller asks about the rest in smaller parts
     let reply: { items?: unknown } | null; let cut = false;
     try {
+      // a reply naming a document it was not given, or an item it was not shown, is asked again (#1162)
       const asked: Ask = { kind: quick ? 'glance' : 'check', split: true, model, system: RULES, files,
-        prompt: checkPrompt(listing, items, quick, redo) };
+        prompt: checkPrompt(listing, items, quick, redo), unusable: checkUnusable(sent, items) };
       reply = await askJson<{ items?: unknown }>(asked, ['items'], undefined, fix && !redo);
     }
     catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { items?: unknown } | null }).partial ?? null; }
     if (cut && !reply) return Object.assign(new Map<string, Seen>(), { cut: items });
     if (!reply || !reply.items || typeof reply.items !== 'object') return null;
-    // a list of items, or the same keyed by item: {"I1": {…}}
-    const all = (Array.isArray(reply.items) ? reply.items : Object.entries(reply.items as Record<string, unknown>).map(([id, v]) => (v && typeof v === 'object' ? { id, ...(v as object) } : { id, result: v }))) as Record<string, unknown>[];
+    const all = checkRows(reply.items);
     const rows = cut ? all.slice(0, -1) : all;                                     // the last item before a cut may itself be cut short
+    // a whole item before the cut that cites a document it was not given makes the reply unusable, as it does a whole
+    // reply: the items are asked again, never kept without that citation (#1162)
+    if (cut && citesUnsent(rows, sent, false, where)) return null;
     const out: Map<string, Seen> & { cut?: ChecklistItem[] } = new Map<string, Seen>();
     for (const r of rows) {
-      const n = r && typeof r === 'object' ? tagNumber(r.id, 'I') : null; const it = n ? items[n - 1] : undefined; if (!it || out.has(it.id)) continue;
+      const it = items.find((x) => x.id === r?.id);
+      if (!it || out.has(it.id)) continue;
       const result = word(r.result);
       if (result === 'ok') {
         const where = fit('', r.where as Cited[], sent, false).sources;
         // a blackline's pages are the model's reading of a change, and another project's document is not this deal's:
         // alone they never settle an item
         if (!quick && where.length && where.every((x) => x.reading || x.precedent)) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only a blackline or another project's document: ${it.text}` }); continue; }
-        out.set(it.id, quick || where.length ? { kind: 'ok', where } : { kind: 'weak', why: 'As "ok" it needs "where": at least one place that shows it, naming a document you were given, by its D number, and a page that document has (or a sheet and cell for a spreadsheet).', said: r, reason: 'It was found satisfied, but no page that shows it could be pointed to.' });
+        const why = 'As "ok" it needs "where": at least one place that shows it, naming a document you were given, '
+          + 'by its id, and a page that document has (or a sheet and cell for a spreadsheet).';
+        const reason = 'It was found satisfied, but no page that shows it could be pointed to.';
+        out.set(it.id, quick || where.length ? { kind: 'ok', where } : { kind: 'weak', why, said: r, reason });
       }
       else if (result === 'more') out.set(it.id, { kind: 'none', need: prose(r.need).join('; ') || it.text });
       else if (result === 'finding') {
@@ -1930,7 +2126,7 @@ export function nodeAi(o: AiOptions) {
         // finding by itself
         if (fitted.sources.length && !fitted.sources.some((x) => mainIn(sent, x))) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only another project's document or a blackline against one: ${it.text}` }); continue; }
         // a finding stands on one source we can open: what matters most is often said in a single place
-        const needsCitation = 'it needs at least one citation naming a document you were given, by its D number, '
+        const needsCitation = 'it needs at least one citation naming a document you were given, by its id, '
           + 'and a page that document has (or a sheet and cell for a spreadsheet), and none of yours do';
         const short = [
           !title.trim() && 'it has no title',
@@ -2036,7 +2232,7 @@ export function nodeAi(o: AiOptions) {
     const wrong = `"text" must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters, and "reused" `
       + 'may name only the earlier responses above, by their ids: put it right';
     const unusable = (text: string) => !namesOnlyShown(text, ids);
-    return { escalate, usable, wrong, unusable };
+    return { escalate, usable, wrong, shown: ids, unusable };
   }
   let briefs = new Map<string, { key: string; paragraphs: string[] }>();
   const service: AiService = {
@@ -2125,10 +2321,9 @@ export function nodeAi(o: AiOptions) {
       const own = { [i.dealId]: f.sources.map((s) => s.docId).filter((x): x is string => !!x) };
       const shape = '{"body": ["one paragraph per string, with [n] markers"], "sources": [...]}';
       // a reply that names a question id it was not shown is a failed reply, asked again (#1105)
-      const ids = said.map((q) => q.id);
-      const unusable = (text: string) => !namesOnlyShown(text, ids);
+      const shown = said.map((q) => q.id);
       const usable = (reply: Record<string, unknown>) => parasOf(reply).length > 0;
-      const again = { escalate: m.thorough, usable, wrong: '"body" has no paragraphs in it', unusable };
+      const again = { escalate: m.thorough, usable, wrong: '"body" has no paragraphs in it', shown };
       const about = `${f.title} ${f.body.join(' ')}`;
       const r = await read('reassess', [i.dealId], m.standard, ask, about, own, shape, again);
       if (!r.ok) return r;
@@ -2166,9 +2361,16 @@ export function nodeAi(o: AiOptions) {
       let paragraphs: string[];
       try {
         const m = await models(); const prompt = `These are the open findings on a deal:\n${open.map((f) => `${f.id} (${f.workstream}): ${f.title}. ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}`).join('\n')}\n\nWrite two short paragraphs for someone opening the deal: what matters most and why. To point at a finding, write {a few of your own words|its id}. Never write an id anywhere else.\nReply as JSON: {"paragraphs": ["…", "…"]}`;
-        const firstTry = await askJson<{ paragraphs?: unknown }>({ kind: 'brief', model: m.standard, system: JSON_ONLY, prompt }, ['paragraphs']); paragraphs = parasOf(firstTry);
-        if (!paragraphs.length) paragraphs = parasOf(await askJson({ kind: 'brief', model: m.standard, system: JSON_ONLY, prompt: firstTry ? `${prompt}\n\nYou replied:\n${JSON.stringify(firstTry)}\n\nThat cannot be used: "paragraphs" has no paragraphs in it. Send the whole reply again, put right.` : prompt }, ['paragraphs'], undefined, false));
-        if (!paragraphs.length) paragraphs = parasOf(await askJson({ kind: 'brief', model: m.thorough, system: JSON_ONLY, prompt }, ['paragraphs'], undefined, false));
+        // a link naming a finding by an id it was not shown is a failed reply, asked again (#1162)
+        const unusable = memoUnusable([...ids], linkedIds);
+        const brief = (model: string, text: string, fix = false) => askJson<{ paragraphs?: unknown }>(
+          { kind: 'brief', model, system: JSON_ONLY, prompt: text, unusable }, ['paragraphs'], undefined, fix);
+        const firstTry = await brief(m.standard, prompt, true);
+        paragraphs = parasOf(firstTry);
+        const putRight = `${prompt}\n\nYou replied:\n${JSON.stringify(firstTry)}\n\nThat cannot be used: `
+          + '"paragraphs" has no paragraphs in it. Send the whole reply again, put right.';
+        if (!paragraphs.length) paragraphs = parasOf(await brief(m.standard, firstTry ? putRight : prompt));
+        if (!paragraphs.length) paragraphs = parasOf(await brief(m.thorough, prompt));
       } catch (e) { return failure(e, 'The summary could not be written'); }
       if (!paragraphs.length) return fail({ kind: 'failed', message: UNREAD_REPLY });
       briefs.set(dealId, { key, paragraphs }); if (briefs.size > 100) briefs = new Map([...briefs].slice(-50));
@@ -2194,19 +2396,41 @@ export function nodeAi(o: AiOptions) {
       // with no open finding there is nothing to rate, but the memo still opens with what the deal is
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       try {
-        const ask = (model: string, fs: typeof open) => askJson<{ ratings?: unknown }>({ kind: 'memoRatings', split: true, model, system: JSON_ONLY, prompt: `Rate each of these open findings on a deal as High, Medium or Low risk, by these definitions and nothing else:\nHigh: ${d.high}.\nMedium: ${d.medium}.\nLow: ${d.low}.\n\n${fs.map((f) => `${f.id} (${f.workstream}): ${plain(f)}`).join('\n')}\n\nReply as JSON, with every finding above once: {"ratings": [{"id": "its id", "rating": "High" | "Medium" | "Low"}]}` }, ['ratings']);
+        // a rating of a finding by an id the part did not show is a failed reply, asked again (#1162)
+        const rateUnusable = (fs: typeof open) => memoUnusable(fs.map((f) => f.id), ratedIds);
+        /** a finding as the ratings prompt lists it, its id counted (#1162) */
+        const rateLine = (f: (typeof open)[number]) => `${f.id} (${f.workstream}): ${plain(f)}`;
+        const ratePrompt = (fs: typeof open) => 'Rate each of these open findings on a deal as High, Medium or Low '
+          + `risk, by these definitions and nothing else:\nHigh: ${d.high}.\nMedium: ${d.medium}.\nLow: ${d.low}.\n\n`
+          + `${fs.map(rateLine).join('\n')}\n\n`
+          + 'Reply as JSON, with every finding above once: '
+          + '{"ratings": [{"id": "its id", "rating": "High" | "Medium" | "Low"}]}';
+        const ask = (model: string, fs: typeof open) => askJson<{ ratings?: unknown }>({ kind: 'memoRatings',
+          split: true, model, system: JSON_ONLY, unusable: rateUnusable(fs), prompt: ratePrompt(fs) }, ['ratings']);
         let rateRoom = Infinity;                                                   // the part size a cut-off has shown, carried to the next model's pass
         for (const model of [m.standard, m.standard, m.thorough]) {
           const fs = unratedFindings(open, ratings);
           if (!fs.length) break;
           // a deal with many findings is rated a part at a time, as the checks are: parts that fit the output limit, halved
           // after a cut-off, keeping the ratings that came whole (parts.ts). One left unrated is asked again by the next model.
-          const size = Math.min(rateRoom, partSize({ cap: MEMO_RATE_BATCH, out: control.limits.ratingReplyTokens, outLimit: outLimit(model), in: tokensEach(fs.map((f) => `${f.title} ${f.body.join(' ')}`)), inLimit: inLimit(model) }));
+          const fit = partSize({
+            cap: MEMO_RATE_BATCH, out: control.limits.ratingReplyTokens, outLimit: outLimit(model),
+            in: tokensEach(fs.map(rateLine)), inLimit: inLimit(model),
+          });
+          const size = Math.min(rateRoom, fit);
           const done = await inParts(fs, size, async (part) => {
             let reply: { ratings?: unknown } | null; let cut = false;
             try { reply = await ask(model, part); } catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { ratings?: unknown } | null }).partial ?? null; }
             const rows = listOf(reply?.ratings).map((x) => x as { id?: unknown; rating?: unknown }); const got = new Map<number, Rating>();
-            for (const x of cut ? rows.slice(0, -1) : rows) { const id = String(x.id ?? '').trim(); const r = RATINGS.find((k) => k.toLowerCase() === String(x.rating ?? '').trim().toLowerCase()); const k = part.findIndex((f) => f.id === id); if (r && k >= 0 && !got.has(k)) got.set(k, r); }
+            // a whole entry of a cut reply naming an id the part did not show fails the reply, as a whole
+            // reply's does: the findings are asked again by the next pass, none kept from it (#1162)
+            if (cut && unknownIds(rows.slice(0, -1).map((x) => x.id), part.map((f) => f.id)).length) return { got };
+            for (const x of cut ? rows.slice(0, -1) : rows) {
+              const r = RATINGS.find((k) => k.toLowerCase() === String(x.rating ?? '').trim().toLowerCase());
+              // the finding by its id, exactly (#1162)
+              const k = part.findIndex((f) => f.id === x.id);
+              if (r && k >= 0 && !got.has(k)) got.set(k, r);
+            }
             return { got, ...(cut ? { cut: part.map((_, k) => k).filter((k) => !got.has(k)) } : {}) };
           });
           if (done.size < size) rateRoom = done.size;
@@ -2224,7 +2448,17 @@ export function nodeAi(o: AiOptions) {
       if (open.length > 1) {
         try {
           const rows = open.map((f) => `${f.id} (${f.workstream || 'no workstream'}, ${ratings[f.id] ?? 'unrated'}): ${f.title}`);
-          const reply = await askJson<{ risks?: unknown }>({ kind: 'memoGroups', model: m.standard, system: JSON_ONLY, prompt: `These are the open findings on a deal, each with its workstream and risk rating:\n${rows.join('\n')}\n\nGroup them into the deal's risks for a memo to a senior banker. A risk is one underlying problem for the deal; findings that are evidence of the same problem, or that bear on the same term, figure or approval, go together, even across workstreams. A finding unlike any other is a risk on its own. Put every finding in exactly one risk. Give each risk a short plain title of your own (at most 12 words) that says what the problem is, as a fact, with no judging words.\nReply as JSON: {"risks": [{"title": "…", "findings": ["id", "id"]}]}` }, ['risks']);
+          // a risk naming a finding by an id it was not shown is a failed reply, asked again (#1162)
+          const unusable = memoUnusable([...ids], groupedIds);
+          const prompt = 'These are the open findings on a deal, each with its workstream and risk rating:\n'
+            + `${rows.join('\n')}\n\nGroup them into the deal's risks for a memo to a senior banker. A risk is one `
+            + 'underlying problem for the deal; findings that are evidence of the same problem, or that bear on the '
+            + 'same term, figure or approval, go together, even across workstreams. A finding unlike any other is a '
+            + 'risk on its own. Put every finding in exactly one risk. Give each risk a short plain title of your own '
+            + '(at most 12 words) that says what the problem is, as a fact, with no judging words.\n'
+            + 'Reply as JSON: {"risks": [{"title": "…", "findings": ["id", "id"]}]}';
+          const input: Ask = { kind: 'memoGroups', model: m.standard, system: JSON_ONLY, unusable, prompt };
+          const reply = await askJson<{ risks?: unknown }>(input, ['risks']);
           groups = memoGroupRows(reply?.risks, ids);
         } catch (e) { if (unreachable(e)) return failure(e, `${SERVICE} did not answer`); groups = []; }
       }
@@ -2382,6 +2616,7 @@ export function nodeAi(o: AiOptions) {
       let fast: string; try { fast = (await models()).fast; } catch (e) { return failure(e, UNREACHED); }
       const done = await inParts(i.items, partSize({ cap: CHECKLIST_BATCH, out: control.limits.rewordReplyTokens, outLimit: outLimit(fast), in: tokensEach(i.items), inLimit: inLimit(fast) }), async (part) => {
         let reply: { items?: unknown } | null; let cut = false;
+        // the items come as texts with no record ids, so they are numbered per prompt (#1162)
         try { reply = await askJson({ kind: 'reword', split: true, model: fast, system: JSON_ONLY, prompt: `These are items of a due diligence checklist for project-finance deals. Each will be checked against a deal's documents, so each should say plainly one thing that must be true.\n${part.map((t, n) => `${n + 1}: ${t.replace(/\s+/g, ' ')}`).join('\n')}\n\nPropose new wording only for an item that is unclear (shorthand, an abbreviation a reader may not know, a bare noun) or that joins two conditions (with "and", ";" or "/"). Keep its meaning exactly: add nothing, drop nothing, keep every figure. Write each item as one plain sentence saying what must be true. An item that joins two conditions becomes two or more items in "texts", one condition each; add "(if applicable)" only to one that may not apply to every deal, such as "Wetlands delineation complete (if applicable)" for a site that may have no wetlands, never to every item. Leave out every item that reads well already. "why": a few words on what was unclear.\nReply as JSON: {"items": [{"n": 3, "text": "…", "why": "…"}, {"n": 5, "texts": ["…", "…"], "why": "…"}]}` }, ['items']); }
         catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { items?: unknown } | null }).partial ?? null; }
         if (!cut && (!reply || !Array.isArray(reply.items))) {
@@ -2459,7 +2694,7 @@ export function nodeAi(o: AiOptions) {
       const run = phraseRunFor(i.dealId, i.items);
       const size = partSize({
         cap: CHECKLIST_BATCH, out: control.limits.phraseReplyTokens, outLimit: outLimit(fast),
-        in: tokensEach(i.items.map(phraseLine)), inLimit: inLimit(fast),
+        in: tokensEach(i.items.map(phrasePromptLine)), inLimit: inLimit(fast),
       });
       for (let list = run.queue.shift(); list; list = run.queue.shift()) {
         const done = await inParts(list, size, (part) => askPhrasePart(run, fast, part));
@@ -2491,6 +2726,7 @@ export function nodeAi(o: AiOptions) {
         if (stop) { missed[stop] += part.mine.length; lost.push(...part.mine); return; }     // a half begun after another part's service error
         const { mine } = part; const shown = [...mine, ...part.rest];
         let reply: { pairs?: unknown } | null = null; let cut = false;
+        // the items come as texts with no record ids, so they are numbered per prompt (#1162)
         try { reply = await askJson({ kind: 'sameMeaning', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These are items of a due diligence checklist for project-finance deals. Items 1 to ${mine.length} are being brought in; the others are already listed.\n${shown.map((g, k) => `${k + 1}: ${text(g)}`).join('\n')}\n\nWhich of items 1 to ${mine.length} ask for exactly the same thing as another item, so that checking one settles the other? Be strict: only pairs you are sure of, each named once. Two items on the same subject that ask for different things are not a pair (an executed agreement and its terms are different things). "why": a few words on what both ask for.\nReply as JSON: {"pairs": [{"a": 2, "b": 9, "why": "…"}]}` }, ['pairs']); }
         // An error from the service would most likely come again, and a service that does not answer may take the
         // connector's whole wait each time: no more parts are begun, and those not begun are counted as missed with it
@@ -2567,22 +2803,29 @@ export function nodeAi(o: AiOptions) {
       type Share = [number, number];                                                       // findings from, to (level 3)
       const promptOf = (mine: number[], level: number, share?: Share) => {
         const upto = mine[mine.length - 1] + 1; const own = new Set(mine);
-        const shown = level >= 3 ? titles.slice(share![0], share![1]).map((t, k) => `F${share![0] + k + 1}: ${t}`) : (level >= 2 ? titles : fs).map((t, k) => `F${k + 1}: ${t}`);
+        // each finding by its id (#1162)
+        const byId = (t: string, k: number) => `${i.findings[k].id}: ${t}`;
+        const shown = level >= 3
+          ? titles.slice(share![0], share![1]).map((t, k) => byId(t, share![0] + k))
+          : (level >= 2 ? titles : fs).map(byId);
         const findingsHead = `These are the findings already raised on a deal${level >= 3
-          ? `, F${share![0] + 1} to F${share![1]} of ${titles.length}, by their titles`
+          ? `, ${share![1] - share![0]} of ${titles.length}, by their titles`
           : level >= 2 ? ', by their titles' : ''}`;
         const pointsHead = `These are points of an issues list brought in${level >= 1 && upto > mine.length
           ? ', those not asked about here by their opening words' : ''}`;
+        // a point read from the list is no saved record: it keeps its per-prompt label (#1162)
         const pointLines = range(0, upto)
           .map((k) => `P${k + 1}: ${level === 0 || own.has(k) ? points[k].text : opening(points[k].text)}`);
         const asked = mine.length === upto ? 'the points' : `points ${mine.map((k) => `P${k + 1}`).join(', ')}`;
         return `${findingsHead}:\n${shown.join('\n') || '(none)'}\n\n${pointsHead}:\n${pointLines.join('\n')}\n\n`
           + `For each of ${asked}: "workstream": one of ${i.workstreams.join(', ')}; `
-          + '"same": the finding (F3) or the earlier point (P2) that raises the same issue, so that settling one '
-          + 'settles the other, or "" when none does. Be strict: only when you are sure. Two points on the same clause '
-          + 'that ask for different things are not the same.\n'
+          + '"same": the id of the finding, or the earlier point (P2), that raises the same issue, so that settling '
+          + 'one settles the other, or "" when none does. Be strict: only when you are sure. Two points on the same '
+          + 'clause that ask for different things are not the same.\n'
           + 'Reply as JSON: {"points": [{"p": 1, "workstream": "Legal", "same": ""}]}';
       };
+      // a finding's line in a share, counted with the id it is shown by (#1162)
+      const lineTokens = (f: number) => tokensOf(`${i.findings[f].id}: ${titles[f]}\n`);
       // the points whose "same" came from a call that showed either side shorter than it is: each is confirmed below
       const loose = new Set<number>();
       // `from`: the fullest form still to try, raised when the service refused a fuller one as too long though it was
@@ -2596,14 +2839,18 @@ export function nodeAi(o: AiOptions) {
           if (room < budget / 4) { if (mine.length > 1) return halved(); throw tooLong(TOO_LONG_ASK); }
           let at = 0;
           while (at < titles.length) {
-            let to = at, used = 0; while (to < titles.length && (to === at || used + tokensOf(`F${to + 1}: ${titles[to]}\n`) <= room)) used += tokensOf(`F${to + 1}: ${titles[to++]}\n`);
+            let to = at, used = 0;
+            while (to < titles.length && (to === at || used + lineTokens(to) <= room)) used += lineTokens(to++);
             if (!(await ask(mine, halves, 3, [at, to]))) return false;
             at = to;
           }
           return true;
         }
         let reply: { points?: unknown } | null = null; const own = new Set(mine);
-        try { reply = await tried(() => askJson({ kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, prompt: promptOf(mine, level, share) }, ['points'])); }
+        const prompt = promptOf(mine, level, share);
+        const input: Ask = { kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, prompt,
+          unusable: sameUnusable(i.findings, share) };
+        try { reply = await tried(() => askJson(input, ['points'])); }
         catch (e) {
           if (isTooLong(e)) { if (level < 2) return ask(mine, halves, level + 1); if (mine.length > 1) return halved(); }
           if ((e as { code?: string })?.code !== 'cutoff') throw e;
@@ -2617,9 +2864,7 @@ export function nodeAi(o: AiOptions) {
           if (!own.has(k)) continue;
           // the finding's title is the point's own text, never a model's wording (#1026)
           const title = points[k].text;
-          const m = /^([FP])\s*(\d+)$/i.exec(clean(r?.same)); const at = m ? +m[2] - 1 : -1;
-          const shown = (f: number) => !share || (f >= share[0] && f < share[1]);         // a share's call can name only the findings it was shown
-          const same = !m ? undefined : m[1].toUpperCase() === 'F' ? (i.findings[at] && shown(at) ? { finding: i.findings[at].id } : undefined) : at >= 0 && at < k ? { point: at } : undefined;
+          const same = sameOf(i.findings, r?.same, k, share);
           // a point asked about with several shares keeps its first title, and the first thing any share says it repeats
           const had = sorted.get(k);
           if (!had) sorted.set(k, { title, workstream, ...(same ? { same } : {}) }); else if (!had.same && same) had.same = same;
@@ -2648,6 +2893,7 @@ export function nodeAi(o: AiOptions) {
       if (pairs.length) {
         const done = await inParts(pairs, partSize({ cap: ISSUES_BATCH, out: 8, outLimit: outLimit(fast), in: tokensEach(pairs.map((p) => `${p.a} ${p.b}`)), inLimit: inLimit(fast) }), async (part) => {
           const reply = await tried(async () => {
+            // a pair is not a saved record, so the pairs are numbered per prompt (#1162)
             const r = await askJson<{ same?: unknown }>({ kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, prompt: `Each pair below is a point of an issues list brought in on a deal (A), and a finding already raised on the deal or an earlier point of the same list (B), each in full.\n\n${part.map((p, n) => `Pair ${n + 1}\nA: ${p.a}\nB: ${p.b}`).join('\n\n')}\n\nWhich pairs raise the same issue, so that settling one settles the other? Be strict: only when you are sure. Two points on the same clause that ask for different things are not the same.\nReply as JSON: {"same": [1, 3]}` }, ['same']);
             if (!r || !Array.isArray(r.same)) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
             return r;
@@ -2708,7 +2954,7 @@ export function nodeAi(o: AiOptions) {
       + 'by, and give it no [n] marker.';
     return `${heading}\n${responseLines(said)}\nTake these into account. ${named}`;
   }
-  const tagged = (dealId: string, docs: DocRecord[]): Sent[] => docs.map((rec, i) => ({ tag: `D${i + 1}`, dealId, rec }));
+  const sentOf = (dealId: string, docs: DocRecord[]): Sent[] => docs.map((rec) => ({ dealId, rec }));
   /** a finding as the checks see it; `closed`: a person closed it, and documents may bring that into question */
   type Raised = { id: string; rev: number; title: string; body: string[]; sources: Source[]; closed?: true };
   /**
@@ -2717,7 +2963,7 @@ export function nodeAi(o: AiOptions) {
    */
   async function verify(dealId: string, f: Raised, model: string, core: string[], also: string[] = [], heard: Asked[] = []): Promise<{ stands: boolean; why: string } | null> {
     const docs = await sendable(dealId, await start(dealId, `${f.title} ${f.body.join(' ')}`, [...also, ...f.sources.map((x) => x.docId).filter((x): x is string => !!x)]   /* what prompted the re-check first: the cap never drops it */, width, core)); if (!docs.length) return null;
-    const sent = tagged(dealId, docs); const { files, listing, got } = await send(sent, model);
+    const sent = sentOf(dealId, docs); const { files, listing, got } = await send(sent, model);
     if (!got.length || lostSome(sent, got)) return null;                        // a folder stopped answering since they were chosen: not judged on the rest
     // a closed finding is asked the other way round: "stands" is whether it stays closed
     const ask = f.closed ? `This finding was raised on the deal earlier, and a person has closed it.\nTitle: ${f.title}\nAs written: ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}\n\nGoing by the documents as they are now, does it stay closed? It does not if a document now shows the problem again, shows it was not settled, or makes it worse.\nReply as JSON: {"stands": true, "why": "one line"}`
@@ -2981,11 +3227,15 @@ export function nodeAi(o: AiOptions) {
       let pending = items; let rest = docs.filter((d) => !tooLongAlone.has(d.docId));
       while (pending.length && rest.length) {
         let using = rest.slice(0, r.docs); const todo = pending;
-        const size = Math.min(r.items, partSize({ cap: todo.length, out: model === m.fast ? control.limits.glanceReplyTokens : control.limits.checkReplyTokens, outLimit: outLimit(model), in: tokensEach(todo.map((it) => it.text)), inLimit: inLimit(model) }));
+        const replyEach = model === m.fast ? control.limits.glanceReplyTokens : control.limits.checkReplyTokens;
+        const inEach = tokensEach(todo.map(checkLine));
+        const replyRoom = { out: replyEach, outLimit: outLimit(model) };
+        const size = Math.min(r.items,
+          partSize({ cap: todo.length, ...replyRoom, in: inEach, inLimit: inLimit(model) }));
         const done = await inParts(todo, size, async (part) => {
           for (;;) {
             try {
-              const seen = await check(part, tagged(dealId, using), model, redo, fix);
+              const seen = await check(part, sentOf(dealId, using), model, redo, fix);
               return { got: new Map(part.flatMap((it, k) => (seen?.has(it.id) ? [[k, seen.get(it.id)!] as const] : []))), ...(seen?.cut ? { cut: seen.cut.map((it) => part.indexOf(it)) } : {}) };
             } catch (e) {
               if (!isTooLong(e)) throw e;
@@ -3195,12 +3445,20 @@ export function nodeAi(o: AiOptions) {
      */
     const filler = chatAgent(agentKit, agentOpts);
     let filling = true;
+    /** an item as a plain line of the fill message: no number, as no reply is mapped back to a line (#1162) */
+    const fillLine = (it: ChecklistItem) => {
+      const need = needOf.get(it.id);
+      const tried = (trailOf.get(it.id) ?? []).filter((t) => !t.n).map((t) => `"${t.q}"`);
+      const needed = need ? ` Still needed: ${need}` : '';
+      const searched = tried.length ? ` (searched already, finding nothing: ${tried.join(', ')})` : '';
+      return `- ${it.text.replace(/\s+/g, ' ')}${needed}${searched}`;
+    };
     const fill = async () => {
       const open = [...held.values()]; held.clear(); const byId = new Map(o.docs.records(dealId).map((r) => [r.docId, r]));
       for (let k = 0; k < open.length; k += GAPS_AT_ONCE) {
         const part = open.slice(k, k + GAPS_AT_ONCE); let docs: DocRecord[] = [];
         if (filling) {
-          const listed = part.map(({ it }, i) => { const need = needOf.get(it.id); const tried = (trailOf.get(it.id) ?? []).filter((t) => !t.n).map((t) => `"${t.q}"`); return `${i + 1}. ${it.text.replace(/\s+/g, ' ')}${need ? ` Still needed: ${need}` : ''}${tried.length ? ` (searched already, finding nothing: ${tried.join(', ')})` : ''}`; }).join('\n');
+          const listed = part.map(({ it }) => fillLine(it)).join('\n');
           const message = 'These items of the due diligence checklist were not settled by the documents first chosen '
             + `for them:\n${listed}\n\n`
             + 'Find the documents in the data room that settle each item: those that show it is met, or that show a '
@@ -3330,26 +3588,128 @@ export function nodeAi(o: AiOptions) {
     const renote = async (it: ChecklistItem) => { const l = latest.get(it.id)!; readFor.set(it.id, new Set(l.docs ?? [])); await note(it, 'finding', l.finding); };
     return ok({ about, recs, list, m, latest, prior, known, fresh, current, findings, closed, owned, why, stale, written, work, glance, finish, reworded, renote, here, have: have.value, tombs: tombs.value, gaps: () => gapsOf(latest, done), unsettled: () => list.filter((it) => latest.get(it.id)?.result === 'unsettled').map((it) => it.id), first: !known, everChecked });
   }
+  /** what `affects` found: what the arrivals touch, and the targets (by id) the model gave no answer on */
+  type Affected = { findings: Map<string, DocRecord[]>; items: Set<string>; unsaid: Set<string> };
+  /** a finding or a settled item an affects call may name: its id, the line that lists it, and what it is */
+  type Target = { id: string; line: string; finding?: Raised; item?: ChecklistItem };
   /**
    * Which of a deal's open findings and settled items some new documents could affect, and for each finding which of
    * the new documents it is: the fast model's view, knock-on effects included. A hundred arrivals to a question, so a
-   * large folder arriving is several questions and not one too long to answer. Null when it cannot say.
+   * large folder arriving is several questions and not one too long to answer, and the findings and items in parts
+   * sized to the limits (`affectsSize`, parts.ts). What the parts that answered named is kept when another part cannot
+   * be read: the targets that part held are `unsaid`, for the caller to place by shared words.
    */
-  async function affects(arrived: DocRecord[], findings: Raised[], items: ChecklistItem[]): Promise<{ findings: Map<string, DocRecord[]>; items: Set<string> } | null> {
-    const out = { findings: new Map<string, DocRecord[]>(), items: new Set<string>() };
+  async function affects(arrived: DocRecord[], findings: Raised[], items: ChecklistItem[]): Promise<Affected> {
+    const out: Affected = { findings: new Map(), items: new Set(), unsaid: new Set() };
     if (!arrived.length || (!findings.length && !items.length)) return out;
+    const fast = (await models()).fast;
+    const targets: Target[] = [
+      ...findings.map((f) => ({ id: f.id, line: findingLine(f), finding: f })),
+      ...items.map((it) => ({ id: it.id, line: itemLine(it), item: it })),
+    ];
+    let failed = false;
     for (let at = 0; at < arrived.length; at += ARRIVALS) {
-      const part = arrived.slice(at, at + ARRIVALS); let reply: { affected?: unknown } | null;
-      try { reply = await askJson({ kind: 'affects', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These documents have just arrived in the data room of a project-finance deal:\n${part.map((r, n) => `N${n + 1}: ${shown(r)}`).join('\n')}\n\nThese are the deal's open findings (F)${findings.some((f) => f.closed) ? ', findings a person has closed, marked (closed), which new documents may bring into question,' : ''} and the checklist items already settled (C):\n${[...findings.map((f, n) => `F${n + 1}: ${f.title}${f.closed ? ' (closed)' : ''}`), ...items.map((it, n) => `C${n + 1}: ${it.text}`)].join('\n')}\n\nWhich of them could the new documents change? Think of knock-on effects, not only of matching words: a contract that ends changes everything that rested on it. Name each with the new document that could change it.\nReply as JSON: {"affected": ["F2 N3", "C7 N1"]}` }, ['affected']); }
-      catch (e) { if (unreachable(e)) throw e; return null; }
-      if (!reply || !('affected' in reply)) return null;
-      for (const t of strings(reply.affected)) {
-        const f = /^\W*F\s*(\d+)\b/i.exec(t); const c = /^\W*C\s*(\d+)\b/i.exec(t); const by = [...t.matchAll(/\bN\s*(\d+)\b/gi)].map((m) => part[+m[1] - 1]).filter((r): r is DocRecord => !!r);
-        if (f && findings[+f[1] - 1]) { const id = findings[+f[1] - 1].id; const had = out.findings.get(id) ?? []; for (const r of by) if (!had.includes(r)) had.push(r); out.findings.set(id, had); }
-        if (c && items[+c[1] - 1]) out.items.add(items[+c[1] - 1].id);
+      if (failed) {
+        for (const t of targets) out.unsaid.add(t.id);
+        continue;
       }
+      const part = arrived.slice(at, at + ARRIVALS);
+      const done = await inParts(targets, affectsSize(part, targets, fast), (these) => askAffected(part, these, fast));
+      if (done.stopped !== undefined && unreachable(done.stopped)) throw done.stopped;
+      for (const k of [...done.left, ...done.unasked]) out.unsaid.add(targets[k].id);
+      failed = done.stopped !== undefined && !isCutOff(done.stopped) && !isTooLong(done.stopped);
+      for (const [k, named] of done.got) takeAffected(named, targets[k], out);
     }
     return out;
+  }
+  /** the new documents an affects prompt lists, one line each, by docId */
+  const arrivalLines = (part: DocRecord[]) => part.map((r) => `${r.docId}: ${shown(r)}`);
+  /**
+   * How many targets one affects call takes: as many as fit the input limit beside the arrivals it lists, and as
+   * have a reply that fits the output limit when each is named with one arrival, as the ids are written (#1162). A
+   * target named with more is a longer reply: cut off, it is asked again in smaller parts, keeping what came whole.
+   */
+  function affectsSize(part: DocRecord[], targets: Target[], model: string): number {
+    const share = control.limits.partShare / 100;
+    const room = Math.max(1, inLimit(model) - Math.ceil(tokensOf(arrivalLines(part).join('\n')) / share));
+    return partSize({
+      cap: targets.length, out: tokensEach(targets.map((t) => `"${t.id} ${part[0].docId}", `)),
+      outLimit: outLimit(model), in: tokensEach(targets.map((t) => t.line)), inLimit: room,
+    });
+  }
+  /** the values an affects reply gives under "affected" */
+  const affectedIn = (text: string) => listOf(json<{ affected?: unknown }>(text, 'affected')?.affected);
+  /** a finding as the affects prompt lists it: by its id, with its title */
+  const findingLine = (f: Raised) => `${f.id}: ${f.title}${f.closed ? ' (closed)' : ''}`;
+  /** a settled checklist item as the affects prompt lists it: by its id, with its words */
+  const itemLine = (it: ChecklistItem) => `${it.id}: ${it.text}`;
+  /** the affects prompt for some arrivals, findings and items, each listed by its permanent id (#1162) */
+  function affectsPrompt(part: DocRecord[], findings: Raised[], items: ChecklistItem[]) {
+    const closed = findings.some((f) => f.closed)
+      ? ', and findings a person has closed, marked (closed), which new documents may bring into question' : '';
+    const arrivals = arrivalLines(part).join('\n');
+    const blocks = [
+      `These documents have just arrived in the data room of a project-finance deal:\n${arrivals}`,
+      ...(findings.length ? [`These are the deal's open findings${closed}:\n${findings.map(findingLine).join('\n')}`]
+        : []),
+      ...(items.length ? [`These are the checklist items already settled:\n${items.map(itemLine).join('\n')}`] : []),
+    ];
+    const question = 'Which of them could the new documents change? Think of knock-on effects, not only of matching '
+      + 'words: a contract that ends changes everything that rested on it. Name each by its id, with the id of the new '
+      + 'document that could change it.';
+    return `${blocks.join('\n\n')}\n\n${question}\nReply as JSON: {"affected": ["<finding or item id> <document id>"]}`;
+  }
+  /**
+   * The fast model's answer on some arrivals and targets, by place in `these`: for each target the answer covers, the
+   * arrivals named beside it, or null when it was not named. A reply naming any id it was not shown, on either side of
+   * a pair, is a failed reply, asked again (#1162), and fails the part when its tries run out. A reply cut off keeps
+   * the targets named in its whole entries, as the last entry may be cut short, and the rest are asked again; a
+   * target a cut reply does not name is not known to be unaffected.
+   */
+  async function askAffected(
+    part: DocRecord[], these: Target[], model: string,
+  ): Promise<PartReply<DocRecord[] | null>> {
+    const ids = these.map((t) => t.id);
+    const docIds = part.map((r) => r.docId);
+    const unusable = (text: string) => !namesOnlyShown(text, [...ids, ...docIds])
+      || unknownInPairs(affectedIn(text), ids, docIds).length > 0;
+    const findings = these.flatMap((t) => (t.finding ? [t.finding] : []));
+    const items = these.flatMap((t) => (t.item ? [t.item] : []));
+    const prompt = affectsPrompt(part, findings, items);
+    const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt, unusable };
+    let reply: { affected?: unknown } | null;
+    let cut = false;
+    try {
+      reply = await askJson<{ affected?: unknown }>(input, ['affected']);
+    } catch (e) {
+      if (!isCutOff(e)) throw e;
+      cut = true;
+      reply = (e as { partial?: { affected?: unknown } | null }).partial ?? null;
+    }
+    const unread = () => Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
+    if (!reply || !('affected' in reply)) throw unread();
+    const pairs = strings(reply.affected);
+    const whole = cut ? pairs.slice(0, -1) : pairs;
+    if (cut && await unusable(JSON.stringify({ affected: whole }))) throw unread();
+    const got = new Map<number, DocRecord[] | null>(cut ? [] : these.map((_, k) => [k, null]));
+    for (const pair of whole) {
+      const [target, ...named] = pair.split(' ');
+      const k = ids.indexOf(target);
+      if (k < 0) continue;
+      const had = got.get(k) ?? [];
+      for (const r of part.filter((x) => named.includes(x.docId))) if (!had.includes(r)) had.push(r);
+      got.delete(k);   // so the named come in the order the reply gave them
+      got.set(k, had);
+    }
+    return { got, ...(cut ? { cut: these.map((_, k) => k).filter((k) => !got.has(k)) } : {}) };
+  }
+  /** what an answer on one target puts in the result: a finding with the arrivals beside it, or an item */
+  function takeAffected(named: DocRecord[] | null, target: Target, out: Affected) {
+    if (!named) return;
+    if (target.item) out.items.add(target.id);
+    const had = out.findings.get(target.id) ?? [];
+    for (const r of named) if (!had.includes(r)) had.push(r);
+    if (target.finding) out.findings.set(target.id, had);
   }
 
   const extras = {
@@ -3488,20 +3848,22 @@ export function nodeAi(o: AiOptions) {
   const HEARD_AT_ONCE = 50;
   /**
    * The fast model's question on responses tied to no finding: which of the open findings `listed` each could change.
-   * Each question is named by its id, never by its number (#1105).
+   * Each question is named by its id, never by its number (#1105), and each finding by its id (#1162).
    */
   async function askAffects(group: Asked[], listed: Raised[]): Promise<{ affected?: unknown } | null> {
     const intro = 'These responses have been received to questions asked on a project-finance deal. '
       + 'None of the questions is tied to a finding.';
-    const open = listed.map((f, i) => `F${i + 1}: ${f.title}`).join('\n');
+    const open = listed.map((f) => `${f.id}: ${f.title}`).join('\n');
     const question = 'Which findings could a response change? Think of knock-on effects, not only of matching words. '
       + 'Pair each finding with the question whose response bears on it; if no finding is touched, give an empty list.';
     const prompt = `${intro}\n${responseLines(group)}\n\nThese are open findings on the deal:\n${open}\n\n${question}\n`
-      + 'Reply as JSON: {"affected": ["F2 <id>", "F5 <id>"]}';
+      + 'Reply as JSON: {"affected": ["<finding id> <question id>"]}';
     const model = (await models()).fast;
-    // a reply naming a question id it was not shown is a failed reply, asked again (#1105)
-    const shown = group.map((q) => q.id);
-    const unusable = (text: string) => !namesOnlyShown(text, shown);
+    // a reply naming a question or finding id it was not shown is a failed reply, asked again (#1105, #1162)
+    const questions = group.map((q) => q.id);
+    const findings = listed.map((f) => f.id);
+    const unusable = (text: string) => !namesOnlyShown(text, [...questions, ...findings])
+      || unknownInPairs(affectedIn(text), findings, questions).length > 0;
     const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt, unusable };
     return askJson<{ affected?: unknown }>(input, ['affected']);
   }
@@ -3521,9 +3883,10 @@ export function nodeAi(o: AiOptions) {
         const reply = await askAffects(group, listed);
         if (!reply || !('affected' in reply)) return fail({ kind: 'failed', message: 'The responses could not be looked at' });      // nothing is recorded, so they are looked at the next time
         for (const t of strings(reply.affected)) {
-          const f = listed[+(/F\s*(\d+)/i.exec(t)?.[1] ?? 0) - 1]; if (!f) continue;
-          const tokens = t.split(/\W+/);
-          const named = group.filter((q) => tokens.includes(q.id));
+          const [id, ...asked] = t.split(' ');
+          const f = listed.find((x) => x.id === id);
+          if (!f) continue;
+          const named = group.filter((q) => asked.includes(q.id));
           const qs = bearsOn.get(f.id) ?? []; for (const q of (named.length ? named : group).filter((y) => todo(y).includes(f))) if (!qs.includes(q)) qs.push(q); if (qs.length) bearsOn.set(f.id, qs);       // a finding named with no question we know: every response in the call is put beside it
         }
       }
@@ -3968,12 +4331,24 @@ export function nodeAi(o: AiOptions) {
           const settledItems = x.list.filter((it) => !x.owned(it) && x.why(it) !== 'new' && !!x.latest.get(it.id)); const open = x.findings.filter((f) => !marked.includes(f.id));
           const hit = await affects(x.fresh, [...open, ...x.closed], settledItems);
           const nearTo = (f: Raised) => { const q = words(`${f.title} ${f.body.join(' ')}`, dealId); return x.fresh.map((r) => ({ r, n: score(r, q, dealId) })).sort((a, b) => b.n - a.n); };
-          revisit = [...revisit, ...(hit ? [...hit.items].map((id) => settledItems.find((it) => it.id === id)!) : x.list.filter((it) => x.why(it) === 'word'))].filter((it, i, all) => all.indexOf(it) === i);
+          // what the model gave no answer on (all of it, when it could not say) goes by shared words
+          const byWords = x.list.filter((it) => hit.unsaid.has(it.id) && x.why(it) === 'word');
+          const seenItems = [...hit.items].map((id) => settledItems.find((it) => it.id === id)!);
+          revisit = [...revisit, ...seenItems, ...byWords].filter((it, i, all) => all.indexOf(it) === i);
           // each finding with the arrivals named beside it. Where the model named the finding and no arrival, the arrivals that words cannot place
           // (a scan has none) come first, then the nearest in words; where it could not say at all, the nearest in words
           const blind = x.fresh.filter((r) => !r.words?.length && !r.summary);
-          look = hit ? [...hit.findings].map(([id, by]) => { const f = [...open, ...x.closed].find((y) => y.id === id)!; return { f, also: (by.length ? by : [...blind, ...nearTo(f).map((y) => y.r).filter((r) => !blind.includes(r))]).slice(0, 3) }; })
-            : open.filter((f) => nearTo(f).some((y) => y.n > 0)).map((f) => ({ f, also: nearTo(f).slice(0, 3).map((y) => y.r) }));
+          const everyFinding = [...open, ...x.closed];
+          const nameless = (f: Raised) => [...blind, ...nearTo(f).map((y) => y.r).filter((r) => !blind.includes(r))];
+          const asNamed = ([id, by]: [string, DocRecord[]]) => {
+            const f = everyFinding.find((y) => y.id === id)!;
+            return { f, also: (by.length ? by : nameless(f)).slice(0, 3) };
+          };
+          const named = [...hit.findings].map(asNamed);
+          const unsaid = open.filter((f) => hit.unsaid.has(f.id) && !hit.findings.has(f.id));
+          const nearer = unsaid.filter((f) => nearTo(f).some((y) => y.n > 0))
+            .map((f) => ({ f, also: nearTo(f).slice(0, 3).map((y) => y.r) }));
+          look = [...named, ...nearer];
         }
       }
       return [...must.map((it) => item(it, 'check', x.why(it) ?? 'new')), ...revisit.filter((it) => !must.includes(it)).map((it) => item(it, 'revisit', x.why(it) ?? 'touched')), ...look.map(({ f, also }) => ({ key: `finding:${f.id}`, also: also.map((r) => r.docId) }))];

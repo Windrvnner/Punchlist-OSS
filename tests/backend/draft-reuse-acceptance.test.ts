@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-import { setup, doc, val } from './reviewKit';
+import { setup, doc, val, nth } from './reviewKit';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { Store } from '../../src/app/store';
 import { MemoryLocal } from '../../src/adapters/local';
@@ -51,7 +51,7 @@ async function mixedDraft(earlierResponse = savedResponse) {
     return {
       status: 'found',
       text: `${documentText} [1]`,
-      sources: [{ doc: 'D1', page: 14 }],
+      sources: [{ doc: nth(call, 1), page: 14 }],
       reused: [/^Response to (q_\w+)/m.exec(call.prompt)![1]],
     };
   }, { [dealId]: [agreement] });

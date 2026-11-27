@@ -1,5 +1,5 @@
 /**
- * One answer of the chat agent (agent.ts) as it is worked out: the documents a model was given and their tags, the
+ * One answer of the chat agent (agent.ts) as it is worked out: the documents a model was given, cited by id, the
  * steps the window shows, what each tool found for the main session, and the read tool, which attaches documents to
  * the main session's next turn.
  */
@@ -9,6 +9,7 @@ import type { DocRecord } from './documents';
 import type { AgentKit, AgentQuestion, DealDoc, Run, Sent } from './agentKit';
 import { oneLine } from './agentPrompts';
 import { questionIdsIn } from './qaRow';
+import { docHandle } from './recordIds';
 
 /** a document's key across deals, as a folder read keeps what it has read */
 export const dealDocKey = (doc: { dealId: string; rec: DocRecord }) => `${doc.dealId}|${doc.rec.docId}`;
@@ -20,9 +21,9 @@ export const cites = (source: Source, doc: Sent) => source.dealId === doc.dealId
 /** a source as a step shows it: where it is and the words it quotes */
 export const foundAt = (source: Source) =>
   ({ where: `${source.doc}, ${source.loc}`, quote: source.quote ? `“${oneLine(source.quote)}”` : '' });
-/** a text's [n] markers as the main session reads them: the tag and place of the source each one names */
-export const withPlaces = (text: string, tags: string[], sources: Source[]) =>
-  text.replace(/\[(\d+)\]/g, (_m, n) => `[${tags[+n - 1] ?? '?'} ${sources[+n - 1]?.loc ?? ''}]`);
+/** a text's [n] markers as the main session reads them: the id and place of the source each one names */
+export const withPlaces = (text: string, ids: string[], sources: Source[]) =>
+  text.replace(/\[(\d+)\]/g, (_m, n) => `[${ids[+n - 1] ?? '?'} ${sources[+n - 1]?.loc ?? ''}]`);
 
 export class AgentRun {
   /** every document a model was given in this conversation: what may be cited */
@@ -34,8 +35,8 @@ export class AgentRun {
    * small (they can still be cited or read by path)
    */
   readonly quiet = new Set<Sent>();
-  /** tags of documents no longer here: kept, so that their numbers are not used again */
-  readonly gone: ModelThread['tags'] = [];
+  /** documents the conversation opened that are no longer here: kept with it */
+  readonly gone: ModelThread['opened'] = [];
   /** the documents attached to the main session's turns, until the next read */
   whole: Sent[] = [];
   /** what each tool found, in order: what the main session is told it has done so far */
@@ -44,9 +45,6 @@ export class AgentRun {
   readonly searched = new Set<string>();
   /** what the main session has learned so far, as it last wrote it */
   notes = '';
-  /** the number of the next tag */
-  private nextTag = 1;
-
   /**
    * `pages`: how many a search gives at a time, documents (`width`) and findings or questions (`searchPage`), as the
    * agent's limits set them; `chars`: the most characters a page of findings or questions may hold (agent.ts
@@ -58,23 +56,30 @@ export class AgentRun {
     readonly progress: Run,
     readonly pages: { width: number; searchPage: number; chars: number },
   ) {
-    if (kit.talk) this.keepTags(question.thread?.tags ?? []);
+    if (kit.talk) this.keepOpened(question.thread?.opened ?? []);
+  }
+
+  /**
+   * whether the run's prompts name each document with its deal (#1162): whenever the conversation may span deals (asked
+   * on Home), however many it spans now, so that a later turn names a document by the id it was first shown by
+   */
+  get spansDeals(): boolean {
+    return this.question.withDeal;
+  }
+
+  /** the id a document is cited by in this run's prompts */
+  idOf(doc: DealDoc): string {
+    return docHandle(doc, this.spansDeals);
   }
 
   get steps(): ResearchStep[] {
     return this.progress.steps;
   }
 
-  /**
-   * A kept conversation already showed the model some documents, by tag: they keep their tags, and new ones number
-   * on from them.
-   */
-  private keepTags(tags: ModelThread['tags']): void {
+  /** a kept conversation already showed the model some documents: they may still be cited, by their ids */
+  private keepOpened(opened: ModelThread['opened']): void {
     const deals = this.question.deals;
-    for (const kept of tags) {
-      const number = /^D(\d+)$/.exec(kept.tag);
-      if (!number) continue;
-      this.nextTag = Math.max(this.nextTag, +number[1] + 1);
+    for (const kept of opened) {
       const rec = deals.includes(kept.dealId)
         ? this.kit.records(kept.dealId).find((r) => r.docId === kept.docId)
         : undefined;
@@ -83,16 +88,15 @@ export class AgentRun {
         continue;
       }
       const doc = { dealId: kept.dealId, rec };
-      const known = this.opened.some((x) => x.tag === kept.tag || sameDoc(x, doc));
-      if (!known) this.opened.push({ tag: kept.tag, ...doc });
+      if (!this.opened.some((x) => sameDoc(x, doc))) this.opened.push(doc);
     }
   }
 
-  /** a document a model is given in this run: its tag, a new one if it has none yet */
-  tagOf(dealId: string, rec: DocRecord): Sent {
+  /** a document a model is given in this run, opened if it was not yet */
+  open(dealId: string, rec: DocRecord): Sent {
     let sent = this.opened.find((x) => sameDoc(x, { dealId, rec }));
     if (!sent) {
-      sent = { tag: `D${this.nextTag++}`, dealId, rec };
+      sent = { dealId, rec };
       this.opened.push(sent);
     }
     this.touched.add(sent);
@@ -116,15 +120,18 @@ export class AgentRun {
     return numbers;
   }
 
-  /** a document tagged for a model that was not given it after all: it loses its tag and is not counted */
-  untag(sent: Sent): void {
+  /** a document opened for a model that was not given it after all: it is not opened, nor counted */
+  unopen(sent: Sent): void {
     this.opened.splice(this.opened.indexOf(sent), 1);
     this.touched.delete(sent);
   }
 
-  /** the tags of the documents these sources cite, '?' for one not given to a model */
-  tagsOf(sources: Source[]): string[] {
-    return sources.map((s) => this.opened.find((x) => cites(s, x))?.tag ?? '?');
+  /** the ids of the documents these sources cite, '?' for one not given to a model */
+  idsOf(sources: Source[]): string[] {
+    return sources.map((s) => {
+      const doc = this.opened.find((x) => cites(s, x));
+      return doc ? this.idOf(doc) : '?';
+    });
   }
 
   /** the documents listed to the main session: those opened, less the quiet ones */
@@ -150,9 +157,8 @@ export class AgentRun {
       // quote is found; only when nothing matches is the model's wrapping quote or bracket taken off
       const said = name.trim();
       const unwrapped = said.replace(/^["'`[]+|["'`\]]+$/g, '');
-      const tag = /^d\s*(\d+)$/i.exec(unwrapped);
-      const sent = tag ? this.opened.find((x) => x.tag === `D${+tag[1]}`)
-        : this.byPath(said, recs) ?? this.byPath(unwrapped, recs);
+      const sent = this.opened.find((x) => this.idOf(x) === name)
+        ?? this.byPath(said, recs) ?? this.byPath(unwrapped, recs);
       if (sent && !picked.includes(sent)) picked.push(sent);
       else if (!sent) missing.push(unwrapped);
     }
@@ -164,11 +170,11 @@ export class AgentRun {
       this.steps.push({ kind: 'read', text: `Reviewed ${s.rec.name}`, result: pages, done: true });
     }
     const attached = this.whole.length
-      ? `You asked to read ${this.whole.map((s) => s.tag).join(', ')}: they are attached to this message.`
+      ? `You asked to read ${this.whole.map((s) => this.idOf(s)).join(', ')}: they are attached to this message.`
       : 'No document was attached.';
     const capped = picked.length > width ? ` Only the first ${width} were attached: ${width} at most at a time.` : '';
     const notFound = missing.length
-      ? ` Not found: ${missing.join('; ')}. Name a document by its tag or its path as listed.`
+      ? ` Not found: ${missing.join('; ')}. Name a document by its id or its path as listed.`
       : '';
     return `${attached}${capped}${notFound}`;
   }
@@ -177,7 +183,7 @@ export class AgentRun {
   private byPath(said: string, recs: DealDoc[]): Sent | undefined {
     const low = said.toLowerCase();
     const found = recs.find((x) => this.kit.where(x.rec).toLowerCase() === low || x.rec.name.toLowerCase() === low);
-    return found ? this.tagOf(found.dealId, found.rec) : undefined;
+    return found ? this.open(found.dealId, found.rec) : undefined;
   }
 
   /** these documents with each blackline's clean draft put just before it, each once */
@@ -187,7 +193,7 @@ export class AgentRun {
     const cleans = new Map([...deals].map((dealId) => [dealId, this.kit.cleanDrafts!(dealId)]));
     const paired = picked.flatMap((s) => {
       const clean = cleans.get(s.dealId)?.get(s.rec.docId);
-      return clean ? [this.tagOf(s.dealId, clean), s] : [s];
+      return clean ? [this.open(s.dealId, clean), s] : [s];
     });
     return paired.filter((s, i, all) => all.indexOf(s) === i);
   }

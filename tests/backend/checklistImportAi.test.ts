@@ -16,6 +16,9 @@ const isSame = (c: { prompt: string }) => c.prompt.includes('ask for exactly the
 const asking = (c: { prompt: string }) => Number(/Items 1 to (\d+)/.exec(c.prompt)![1]);
 const mineIn = (c: { prompt: string }) => lines(c).slice(0, asking(c));
 const items = (n: number) => Array.from({ length: n }, (_, i) => `Item ${i + 1} is in place`);
+/** the record id of the `i`th point to phrase, shaped as the app gives it: an item id for a gap, else a finding id */
+const recordId = (kind: 'gap' | 'finding', i: number) =>
+  (kind === 'gap' ? `i_${i.toString(16).padStart(24, '0')}` : `f_${String(i).padStart(26, '0')}`);
 
 describe('rewording a checklist being brought in', () => {
   it('asks in parts of 120 and gives each suggestion its place in the whole list; numbers out of range, unchanged wording and repeats are left out', async () => {
@@ -65,12 +68,15 @@ describe('what the duplicate check and the question wording keep as written', ()
 
 describe('questions for the counterparty on what is unresolved (#2)', () => {
   const isPhrase = (c: Call) => c.prompt.includes('Write one question for the counterparty');
-  // each point is asked with a tag of its own: "kqz: [gap] …"
-  const TAG = /^([bcdfghjkmnpqrstvwxz]{3}): (\[(?:gap|finding)\] .*)$/;
+  // each point is asked by its record id (#1162): "i_…: [gap] …"
+  const TAG = /^((?:i|f)_[0-9A-Za-z]+): (\[(?:gap|finding)\] .*)$/;
   const tagged = (c: { prompt: string }) => c.prompt.split('\n').flatMap((l) => { const m = TAG.exec(l); return m ? [{ id: m[1], line: m[2] }] : []; });
   const lines = (c: { prompt: string }) => tagged(c).map((x) => x.line);
   const ids = (c: { prompt: string }) => tagged(c).map((x) => x.id);
-  const points = (n: number) => Array.from({ length: n }, (_, i) => ({ kind: (i % 5 ? 'gap' : 'finding') as 'gap' | 'finding', what: `Point ${i + 1}`, need: i % 5 ? `The signed copy ${i + 1}` : '' }));
+  const kindOf = (i: number) => (i % 5 ? 'gap' : 'finding') as 'gap' | 'finding';
+  const points = (n: number) => Array.from({ length: n }, (_, i) => ({
+    kind: kindOf(i), id: recordId(kindOf(i), i), what: `Point ${i + 1}`, need: i % 5 ? `The signed copy ${i + 1}` : '',
+  }));
   it('keeps a question as the model wrote it, spacing and all', async () => {
     const reply = (c: Call) => (isPhrase(c) ? { items: ids(c).map((id) => ({ id, text: ' Please send\n the copy.\t' })) } : {});
     const s = setup(reply, {}, { shared: new Mem(), installId: 'pc' });
@@ -177,7 +183,9 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     }
     // a cut-off that follows the length of what is asked: short points first, then long ones, cut above 15 short points' worth
     const long = points(2000).map((p, k) => (k < 120 ? p : { ...p, what: `${p.what} ${'x'.repeat(200)}` }));
-    const room = lines({ prompt: points(15).map((p) => `bcd: [${p.kind}] ${p.what}${p.need ? ` — needed: ${p.need}` : ''}`).join('\n') }).join('').length * 4;
+    const asLine = (p: ReturnType<typeof points>[number]) =>
+      `${p.id}: [${p.kind}] ${p.what}${p.need ? ` — needed: ${p.need}` : ''}`;
+    const room = lines({ prompt: points(15).map(asLine).join('\n') }).join('').length * 4;
     let cuts = 0;
     const t = setup((c) => { if (!isPhrase(c)) return {}; if (lines(c).join('').length > room) { cuts++; return cut(); } return { items: lines(c).map((l, n) => ({ id: ids(c)[n], text: `Q ${l.slice(0, 20)}` })) }; }, {}, { shared: new Mem(), installId: 'pc' });
     val(await t.ai.phrase!({ dealId: 'd', items: long }));
@@ -190,9 +198,19 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
       val(await v.ai.phrase!({ dealId: 'd', items: points(2000) })); const went = v.calls.filter(isPhrase).length; console.log('outage', m, went);
       expect(went).toBeLessThan(80);
     }
-    // a stray item with no tag, or one not of the part, moves nothing; a tag in capitals or with spaces is still its point's
-    const w = setup((c) => (!isPhrase(c) ? {} : { items: [{ text: 'Here are the questions' }, { id: 'zzz', text: 'Thank you' }, ...answer(c).items.map((x) => ({ ...x, id: ` ${x.id.toUpperCase()} ` }))] }), {}, { shared: new Mem(), installId: 'pc' });
+    // a stray item with no id moves nothing
+    const strays = [{ text: 'Here are the questions' }];
+    const stand = { shared: new Mem(), installId: 'pc' };
+    const w = setup((c) => (!isPhrase(c) ? {} : { items: [...strays, ...answer(c).items] }), {}, stand);
     expect(val(await w.ai.phrase!({ dealId: 'd', items: points(300) }))).toEqual(points(300).map((p, k) => `Q for [${p.kind}] Point ${k + 1}`));
+    // a stray item under an id the part did not show makes every reply unusable: nothing is kept (#1162)
+    const withUnshown = (c: Call) => ({ items: [{ id: 'zzz', text: 'Thank you' }, ...answer(c).items] });
+    const unshown = setup((c) => (!isPhrase(c) ? {} : withUnshown(c)), {}, stand);
+    expect((await unshown.ai.phrase!({ dealId: 'd', items: points(3) })).ok).toBe(false);
+    // an id is matched exactly (#1162): one in capitals or with spaces is not its point's, and no question is placed
+    const mangled = (c: Call) => answer(c).items.map((x) => ({ ...x, id: ` ${x.id.toUpperCase()} ` }));
+    const m = setup((c) => (!isPhrase(c) ? {} : { items: mangled(c) }), {}, { shared: new Mem(), installId: 'pc' });
+    expect((await m.ai.phrase!({ dealId: 'd', items: points(3) })).ok).toBe(false);
   });
   it('a limit on the reply\'s length, one that falls, cut-offs at random, and a stray item not read as renumbering', async () => {
     const text = (c: Call) => lines(c).join('\n').length;
@@ -228,13 +246,15 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     let seed = 5; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     const d = await retried((c) => { if (rnd() < 1 / 3) throw cut(); return answer(c); }, points(2000));
     expect([d.got, d.runs <= 4, d.most <= bound(2000)]).toEqual([want(points(2000)), true, true]);
-    // a stray preface with the last point left out, or the first left out with a stray item after: nothing misplaced.
-    // The stray item's id has vowels, so it can never be one of the call's tags, which are drawn at random from
-    // consonants only ('xxx' could be drawn, and then the stray item was rightly placed as that point's question)
-    for (const f of [(it: { id?: string; text: string }[]) => [{ text: 'Here are the questions:' }, ...it.slice(0, -1)], (it: { id?: string; text: string }[]) => [...it.slice(1), { id: 'aei', text: 'Thank you.' }]]) {
-      const e = await run((c) => ({ items: f(answer(c).items) }), points(500));
-      val(e.r).forEach((t, k) => { expect([null, want(points(500))[k]]).toContain(t); });
-    }
+    // a stray preface with the last point left out: nothing misplaced
+    const preface = (c: Call) => ({ items: [{ text: 'Here are the questions:' }, ...answer(c).items.slice(0, -1)] });
+    const prefaced = await run(preface, points(500));
+    val(prefaced.r).forEach((t, k) => { expect([null, want(points(500))[k]]).toContain(t); });
+    // the first left out with a stray item after, under an id the call did not show: every reply is unusable, and
+    // nothing is placed (#1162)
+    const after = (c: Call) => ({ items: [...answer(c).items.slice(1), { id: 'aei', text: 'Thank you.' }] });
+    const stray = await run(after, points(5));
+    expect(stray.r.ok).toBe(false);
   });
   // a run's asks are bounded by the halving: each part that brings nothing is split down to single points (#1109)
   const bound = (n: number) => 2 * n - 1;
@@ -303,10 +323,11 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
   }, 30_000);
   it('on a real checklist, a reply that leaves points out, swaps them or numbers them puts no question on the wrong point; a Retry is bounded as the first run', async () => {
     // the first 2,000 items of a deal-scale list, whose neighbors share most of their words: a question is taken only for
-    // a tag of its part, so a model that leaves the third (and fourth, or sixth) point out, swaps the third and seventh,
-    // reverses the third to sixth, or gives running numbers in place of the tags, places nothing wrongly (retrying checks
-    // every question against its point), and all come back
-    const real = dealList().items.slice(0, 2000).map((what) => ({ kind: 'gap' as const, what, need: '' }));
+    // an id of its part, so a model that leaves the third (and fourth, or sixth) point out, swaps the third and
+    // seventh, reverses the third to sixth, or gives running numbers in place of the ids, places nothing wrongly
+    // (retrying checks every question against its point), and all come back
+    const gap = (what: string, k: number) => ({ kind: 'gap' as const, id: recordId('gap', k), what, need: '' });
+    const real = dealList().items.slice(0, 2000).map(gap);
     type It = { id?: string; n?: number; text: string };
     const drop = (at: number[]) => (it: It[]) => (it.length <= Math.max(...at) + 1 ? it : it.filter((_, k) => !at.includes(k)));
     const swap = (it: It[]) => (it.length < 8 ? it : it.map((x, k) => (k === 2 ? it[6] : k === 6 ? it[2] : x)));
@@ -317,7 +338,7 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
       const bounded = a.runs.every((r) => r.ok && r.calls <= bound(2000));
       expect([name, a.left, bounded, a.runs.length <= most]).toEqual([name, [], true, true]);
     }
-    // a model that gives running numbers in place of the tags is never understood, even for a point asked alone: no
+    // a model that gives running numbers in place of the ids is never understood, even for a point asked alone: no
     // question lands on any point, each run is bounded, and every point is offered for Retry
     const n = await retrying(2000, (c) => ({ items: numbered(answer(c).items) }), 4, real);
     expect([n.left.length, n.runs.every((r) => !r.ok && r.calls <= bound(2000))]).toEqual([2000, true]);
@@ -338,12 +359,17 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     const full = (c: Call) => JSON.stringify({ items: lines(c).map((l, n) => ({ id: ids(c)[n], text: `Please provide the signed and dated copy for ${l.split(' — ')[0]}` })) });
     const want = (n: number) => points(n).map((p, k) => `Please provide the signed and dated copy for [${p.kind}] Point ${k + 1}`);
     // brackets in the words before the JSON are not its end: nothing half-written is kept, and the parts come down to what fits
-    const s = setup((c) => (!isPhrase(c) ? {} : `Here are the questions for the [gap] and [finding] points:\n\`\`\`json\n${full(c)}`.slice(0, 3000)), {}, { shared: new Mem(), installId: 'pc' });
+    // a reply stops at 4,000 characters: about 36 questions, each under its record id (#1162)
+    const stop = (text: string) => text.slice(0, 4000);
+    const preface = 'Here are the questions for the [gap] and [finding] points:\n```json\n';
+    const prefaced = (c: Call) => stop(`${preface}${full(c)}`);
+    const s = setup((c) => (!isPhrase(c) ? {} : prefaced(c)), {}, { shared: new Mem(), installId: 'pc' });
     expect(val(await s.ai.phrase!({ dealId: 'd', items: points(2000) }))).toEqual(want(2000));
     const sizes = s.calls.filter(isPhrase).map((c) => lines(c).length);
     expect(sizes.length).toBeLessThan(80); expect(Math.max(...sizes.slice(4))).toBeLessThan(120);
     // the same when those words name the field, and the size is kept for the run: far fewer calls than asking 120 each time
-    const s2 = setup((c) => (!isPhrase(c) ? {} : `Here is the "items" list you asked for:\n${full(c)}`.slice(0, 3000)), {}, { shared: new Mem(), installId: 'pc' });
+    const named = (c: Call) => stop(`Here is the "items" list you asked for:\n${full(c)}`);
+    const s2 = setup((c) => (!isPhrase(c) ? {} : named(c)), {}, { shared: new Mem(), installId: 'pc' });
     expect(val(await s2.ai.phrase!({ dealId: 'd', items: points(2000) }))).toEqual(want(2000));
     expect(s2.calls.filter(isPhrase).length).toBeLessThan(80);
     // a model that answers only its first 50 points and closes the reply is asked 50 at a time from then on
@@ -539,11 +565,10 @@ describe('reading a list in, line by line', () => {
 
 describe('model-written text is kept whole up to one Excel cell (#1104)', () => {
   const isPhrase = (c: Call) => c.prompt.includes('Write one question for the counterparty');
-  const tagOf = (c: { prompt: string }) => /^([bcdfghjkmnpqrstvwxz]{3}): /m.exec(c.prompt)![1];
-  const point = [{ kind: 'gap' as const, what: 'Point 1', need: 'The signed copy' }];
+  const point = [{ kind: 'gap' as const, id: recordId('gap', 0), what: 'Point 1', need: 'The signed copy' }];
   const stand = { shared: new Mem(), installId: 'pc' };
   const phraseWith = (text: string) => setup(
-    (c) => (isPhrase(c) ? { items: [{ id: tagOf(c), text }] } : {}),
+    (c) => (isPhrase(c) ? { items: [{ id: point[0].id, text }] } : {}),
     {},
     stand,
   );

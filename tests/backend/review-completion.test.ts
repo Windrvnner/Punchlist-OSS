@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { setup, doc, val, ask, deal, finding, question, sentNames, itemsIn, thingsIn, Mem, checkLines, type Call, OK } from './reviewKit';
+import { setup, doc, val, ask, deal, finding, question, sentNames, itemsIn, thingsIn, Mem, checkLines, type Call, OK,
+  nth, heardAs } from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
 import { tokenHolder } from '../../src/backend/signInToken';
 
@@ -38,7 +39,8 @@ describe('what is recorded and shown as checked', () => {
 
   it('documents that cannot be found on this PC are not read: no model is asked without them, nothing is recorded as satisfied against them, and an answer says so', async () => {
     const shared = new Mem();
-    const s = setup((c) => (c.prompt.includes('Check each of these') ? okAll(c) : { text: 'The margin is 2.25%. [1]', sources: [{ doc: 'D1', page: 7, quote: 'Margin means 2.25 percent' }] }), room(),
+    const s = setup((c) => (c.prompt.includes('Check each of these')
+      ? okAll(c) : { text: 'The margin is 2.25%.', sources: [] }), room(),
       { shared, installId: 'pc', checklist: list(3), wanted: async () => [] });                         // as when the deal's folder is not at that path on this PC, or the files were replaced
     await deal(s.repo); const r = val(await s.ai.firstPass('d1')); const lines = checkLines(shared).filter((l) => l.item);
     expect(s.calls.length).toBe(0); expect(s.pickForCalls.length).toBe(0); expect(r.unsettled.length).toBe(3); expect(lines.every((l) => l.result === 'unsettled' && l.docs.length === 0)).toBe(true); expect(val(await s.ai.checked('d1')).at).toBeNull();
@@ -49,8 +51,23 @@ describe('what is recorded and shown as checked', () => {
     await finding(s.repo, 'f_1', 'Margin differs', { sources: [{ doc: FA.name, loc: 'p. 2', docId: FA.docId }] }); const ca = val(await s.ai.checkAll({ dealId: 'd1' }));
     expect(s.verifyCalls.length).toBe(0); expect(ca).toMatchObject({ at: null, unchecked: { items: 3, findings: 1 } });
     // some can be opened and some cannot: only those that can are read, cited and recorded
-    const part = setup((c) => (c.prompt.includes('Check each of these') ? okAll(c) : { text: 'The margin is 2.25%. [1] The term sheet agrees. [2]', sources: [{ doc: 'D1', page: 7 }, { doc: 'D2', page: 3 }] }), room(),
-      { shared: new Mem(), installId: 'pc', checklist: list(1), pick: () => ({ read: [1, 2, 3] }), wanted: async (_d, ids) => [TS].filter((x) => ids.includes(x.docId)).map((x) => ({ docId: x.docId, name: x.name, read: () => new TextEncoder().encode(x.name) })) });
+    const part = setup(
+      (c) =>
+        c.prompt.includes('Check each of these')
+          ? okAll(c)
+          : { text: 'The term sheet agrees. [1]', sources: [{ doc: nth(c, 1), page: 3 }] },
+      room(),
+      {
+        shared: new Mem(),
+        installId: 'pc',
+        checklist: list(1),
+        pick: (c) => ({ read: [1, 2, 3].map((k) => nth(c as Call, k)) }),
+        wanted: async (_d, ids) =>
+          [TS]
+            .filter((x) => ids.includes(x.docId))
+            .map((x) => ({ docId: x.docId, name: x.name, read: () => new TextEncoder().encode(x.name) })),
+      },
+    );
     await deal(part.repo); const b = val(await part.ai.answer(ask('What is the margin?'))); expect(sentNames(part.calls[0])).toEqual(['Term sheet.pdf']); expect(b.sources.map((x) => x.doc)).toEqual(['Term sheet.pdf']); expect(b.read).toEqual({ docs: 1, of: 3 });
     val(await part.ai.firstPass('d1')); expect(val(await part.ai.progress('d1')).folders).toEqual([{ folder: 'vdr', files: 3, read: 1, core: 1, coreRead: 0 }]);
   });
@@ -77,20 +94,25 @@ describe('what is recorded and shown as checked', () => {
   it('when the fast model says a new document touches a finding, the check that follows is given that document, and the reason on the mark names it', async () => {
     const recs: Record<string, DocRecord[]> = room(); const LIST = { broad: [{ id: 'k1', text: 'The margin is as in the term sheet' }], product: [], sector: [] };
     const s = setup(okAll, recs, { checklist: () => LIST, verify: (c) => ({ stands: c.files.some((f) => f.name.includes('Notice')), why: 'x' }).stands ? { stands: false, why: 'the offtaker has terminated' } : (c.model === 'fast' ? { stands: true, why: 'nothing new' } : { stands: true, why: 'nothing new' }),
-      affects: (c) => ({ affected: ['F1'] }) });
+      affects: () => ({ affected: ['f_1'] }) });
     await deal(s.repo); await finding(s.repo, 'f_1', 'Revenue contract covers less capacity than the base case assumes', { body: ['The offtake contract covers part of the capacity only. [1]'], sources: [{ doc: IM.name, loc: 'p. 2', docId: IM.docId }] });
     val(await s.ai.firstPass('d1'));
     recs.d1.push(doc(11, 'Capacity study.pdf', { words: ['capacity', 'base', 'case'] }), doc(12, 'Revenue forecast.pdf', { words: ['revenue', 'capacity'] }), doc(13, 'Offtake pricing note.pdf', { words: ['offtake', 'contract'] }), doc(14, 'Notice March 14.pdf', { words: [] }));   // the last is a scanned termination notice
     const r = val(await s.ai.firstPass('d1'));
     expect(s.verifyCalls.map((c) => c.model)).toEqual(['fast', 'standard']); expect(sentNames(s.verifyCalls[0])).toContain('Notice March 14.pdf'); expect(r.marked).toEqual(['f_1']);   // the model named the finding and no document: the arrival that words cannot place goes first
     // and when the model names the document, that is the one the check is given and the one the reason names, however little its words say
-    const s2 = setup(okAll, recs, { checklist: () => LIST, verify: () => ({ stands: false, why: 'terminated' }), affects: () => ({ affected: ['F1 N2'] }) });
+    const s2 = setup(okAll, recs, { checklist: () => LIST, verify: () => ({ stands: false, why: 'terminated' }),
+      affects: () => ({ affected: [`f_1 ${doc(14, '').docId}`] }) });
     recs.d1 = [FA, TS, IM]; await deal(s2.repo); await finding(s2.repo, 'f_1', 'Revenue contract covers less capacity than the base case assumes', { body: ['The offtake contract covers part of the capacity only. [1]'], sources: [{ doc: IM.name, loc: 'p. 2', docId: IM.docId }] });
     val(await s2.ai.firstPass('d1')); recs.d1.push(doc(11, 'Capacity study.pdf', { words: ['capacity', 'base', 'case'] }), doc(14, 'Notice March 14.pdf', { words: [] }));
     val(await s2.ai.firstPass('d1')); const f = val(await s2.repo.get('finding', 'f_1'))!.envelope.data as any;
-    expect(s2.affectCalls[0].prompt).toContain('N1: vdr/Capacity study.pdf — words: capacity, base, case\nN2: vdr/Notice March 14.pdf\n'); expect(sentNames(s2.verifyCalls[0])).toContain('Notice March 14.pdf'); expect(f.updatedWhy).toBe('Notice March 14.pdf arrived');
+    const study = `${doc(11, '').docId}: vdr/Capacity study.pdf — words: capacity, base, case`;
+    expect(s2.affectCalls[0].prompt).toContain(`${study}\n${doc(14, '').docId}: vdr/Notice March 14.pdf\n`);
+    expect(sentNames(s2.verifyCalls[0])).toContain('Notice March 14.pdf');
+    expect(f.updatedWhy).toBe('Notice March 14.pdf arrived');
     // the document the model names is the one, even when another arrival has no words to go by
-    const s3 = setup(okAll, recs, { checklist: () => LIST, verify: () => ({ stands: false, why: 'superseded' }), affects: () => ({ affected: ['F1 N1'] }) });
+    const s3 = setup(okAll, recs, { checklist: () => LIST, verify: () => ({ stands: false, why: 'superseded' }),
+      affects: () => ({ affected: [`f_1 ${doc(11, '').docId}`] }) });
     recs.d1 = [FA, TS, IM]; await deal(s3.repo); await finding(s3.repo, 'f_1', 'Revenue contract covers less capacity than the base case assumes', { sources: [{ doc: IM.name, loc: 'p. 2', docId: IM.docId }] });
     val(await s3.ai.firstPass('d1')); recs.d1.push(doc(11, 'Capacity study.pdf', { words: ['capacity', 'base', 'case'] }), doc(14, 'Notice March 14.pdf', { words: [] })); val(await s3.ai.firstPass('d1'));
     expect((val(await s3.repo.get('finding', 'f_1'))!.envelope.data as any).updatedWhy).toBe('Capacity study.pdf arrived'); expect(sentNames(s3.verifyCalls[0])).not.toContain('Notice March 14.pdf');
@@ -98,7 +120,7 @@ describe('what is recorded and shown as checked', () => {
 
   it('a PC signed out while looking at responses lets go of the look after the cap, so another PC can look', async () => {
     const shared = new Mem();
-    const hears = () => ({ affected: ['F1 q_7'] });
+    const hears = (c: Call) => heardAs(c, 'F1 q_7');
     const s = setup(() => 'x', room(), { shared, installId: 'pc', timing: { giveUp: 50 }, hears });
     await deal(s.repo); await finding(s.repo, 'f_1', 'Margin differs between the credit agreement and the term sheet', { sources: [{ doc: FA.name, loc: 'p. 2', docId: FA.docId }] });
     await question(s.repo, 'q_7', 7, 'What margin was agreed?', 'The margin was corrected to 2.25% in the signed credit agreement.');
@@ -111,7 +133,7 @@ describe('what is recorded and shown as checked', () => {
 
   it('a response is not recorded as looked at when the look failed or there was nothing to look at, and it is set against a finding raised later', async () => {
     const shared = new Mem();
-    const hears = () => ({ affected: ['F1 q_7'] });
+    const hears = (c: Call) => heardAs(c, 'F1 q_7');
     const s = setup(() => 'x', room(), { shared, installId: 'pc', hears, verify: () => 'I cannot say.' });
     await deal(s.repo); await finding(s.repo, 'f_1', 'Margin differs between the credit agreement and the term sheet', { sources: [{ doc: FA.name, loc: 'p. 2', docId: FA.docId }] });
     await question(s.repo, 'q_7', 7, 'What margin was agreed?', 'The margin was corrected to 2.25% in the signed credit agreement.');
@@ -129,7 +151,21 @@ describe('what is recorded and shown as checked', () => {
 
   // what matters most is often said in one place only, such as a one-page letter refusing a permit
   it('a finding stands on a single page that opens, at the first call', async () => {
-    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, result: 'finding', title: 'The use permit was refused', workstream: 'Legal', body: ['The county denied the conditional use permit. [1]'], next: 'Ask the sponsor for the appeal.', sources: [{ doc: 'D1', page: 1, quote: 'denied the conditional use permit' }] })) }), room(), { checklist: list(1) });
+    const s = setup(
+      (c) => ({
+        items: itemsIn(c).map((it) => ({
+          id: it.tag,
+          result: 'finding',
+          title: 'The use permit was refused',
+          workstream: 'Legal',
+          body: ['The county denied the conditional use permit. [1]'],
+          next: 'Ask the sponsor for the appeal.',
+          sources: [{ doc: nth(c, 1), page: 1, quote: 'denied the conditional use permit' }],
+        })),
+      }),
+      room(),
+      { checklist: list(1) },
+    );
     await deal(s.repo); const r = val(await s.ai.firstPass('d1'));
     expect(r.written.length).toBe(1); expect(r.unsettled).toEqual([]); expect(s.calls.length).toBe(1);
     const f = val(await s.repo.get('finding', r.written[0])) as { envelope: { data: { sources: { loc: string }[]; body: string[] } } };
@@ -137,7 +173,24 @@ describe('what is recorded and shown as checked', () => {
   });
 
   it('the same page cited twice is one source, with one marker', async () => {
-    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, result: 'finding', title: 'Margin looks high', workstream: 'Legal', body: ['It is high. [1][2]', 'Set in the margin clause. [2]'], next: '', sources: [{ doc: 'D1', page: 3 }, { doc: 'D1', page: 3, quote: 'margin' }] })) }), room(), { checklist: list(1) });
+    const s = setup(
+      (c) => ({
+        items: itemsIn(c).map((it) => ({
+          id: it.tag,
+          result: 'finding',
+          title: 'Margin looks high',
+          workstream: 'Legal',
+          body: ['It is high. [1][2]', 'Set in the margin clause. [2]'],
+          next: '',
+          sources: [
+            { doc: nth(c, 1), page: 3 },
+            { doc: nth(c, 1), page: 3, quote: 'margin' },
+          ],
+        })),
+      }),
+      room(),
+      { checklist: list(1) },
+    );
     await deal(s.repo); const r = val(await s.ai.firstPass('d1')); expect(r.written.length).toBe(1);
     const f = val(await s.repo.get('finding', r.written[0])) as { envelope: { data: { sources: { loc: string; quote?: string }[]; body: string[] } } };
     expect(f.envelope.data.sources).toMatchObject([{ loc: 'p. 3', quote: 'margin' }]); expect(f.envelope.data.sources.length).toBe(1);
@@ -146,14 +199,51 @@ describe('what is recorded and shown as checked', () => {
 
   it('a cell written two ways is one source, and a quote of only spaces gives way to a real one', async () => {
     const MODEL = doc(77, 'Credit agreement model.xlsx', { words: ['facility', 'agreement'] });
-    const s = setup((c) => { const m = /^(D\d+): [^\n]*Credit agreement model\.xlsx/m.exec(c.prompt)?.[1] ?? 'D1'; return { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'finding', title: 'Sizing differs', workstream: 'Financial', body: ['A. [1] B. [2] C. [3]', 'D. [4] [5]'], next: '', sources: [{ doc: m, cell: 'Debt!$B$2', quote: '   ' }, { doc: m, cell: 'debt!b2', quote: '1.20x' }, { doc: m, cell: 'Debt!B2' }, { doc: m, cell: 'Debt!C3' }, { doc: m, sheet: 'Debt', cell: 'C3' }] })) }; }, { d1: [MODEL] }, { checklist: list(1) });
+    const s = setup(
+      (c) => {
+        const m = /^(doc_[0-9a-f]{24}): [^\n]*Credit agreement model\.xlsx/m.exec(c.prompt)?.[1] ?? nth(c, 1);
+        return {
+          items: itemsIn(c).map((it) => ({
+            id: it.tag,
+            result: 'finding',
+            title: 'Sizing differs',
+            workstream: 'Financial',
+            body: ['A. [1] B. [2] C. [3]', 'D. [4] [5]'],
+            next: '',
+            sources: [
+              { doc: m, cell: 'Debt!$B$2', quote: '   ' },
+              { doc: m, cell: 'debt!b2', quote: '1.20x' },
+              { doc: m, cell: 'Debt!B2' },
+              { doc: m, cell: 'Debt!C3' },
+              { doc: m, sheet: 'Debt', cell: 'C3' },
+            ],
+          })),
+        };
+      },
+      { d1: [MODEL] },
+      { checklist: list(1) },
+    );
     await deal(s.repo); const r = val(await s.ai.firstPass('d1')); expect(r.written.length).toBe(1);
     const f = val(await s.repo.get('finding', r.written[0])) as { envelope: { data: { sources: { loc: string; quote?: string }[]; body: string[] } } };
     expect(f.envelope.data.sources.map((x) => [x.loc, x.quote])).toEqual([['Debt!$B$2', '1.20x'], ['Debt!C3', undefined]]); expect(f.envelope.data.body).toEqual(['A. [1] B. [1] C. [1]', 'D. [2]']);
   });
 
   it('a finding with no citation that opens is sent back, and is not raised', async () => {
-    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, result: 'finding', title: 'Margin looks high', workstream: 'Legal', body: ['It is high. [1]'], next: '', sources: [{ doc: 'D99', page: 3 }] })) }), room(), { checklist: list(1) });
+    const s = setup(
+      (c) => ({
+        items: itemsIn(c).map((it) => ({
+          id: it.tag,
+          result: 'finding',
+          title: 'Margin looks high',
+          workstream: 'Legal',
+          body: ['It is high. [1]'],
+          next: '',
+          sources: [{ doc: nth(c, 1), page: 999 }],
+        })),
+      }),
+      room(),
+      { checklist: list(1) },
+    );
     await deal(s.repo); const r = val(await s.ai.firstPass('d1'));
     expect(r.written).toEqual([]); expect(r.unsettled).toEqual(['c1']); expect(s.calls[1].prompt).toContain('it needs at least one citation naming a document you were given');
   });
@@ -163,7 +253,24 @@ describe('what is recorded and shown as checked', () => {
       let phase = 0; const shared = new Mem(); const s = setup((c) => (phase === 0 || c.model === 'fast' ? okAll(c) : second(c)), room(), { shared, installId: 'pc', checklist: list(10) }); await deal(s.repo); val(await s.ai.firstPass('d1')); phase = 1; return { ...s, shared }; };
     const latest = (shared: Mem) => { const m = new Map<string, string>(); for (const l of checkLines(shared)) if (l.item) m.set(l.item, l.result); return [...m.values()].reduce((acc: Record<string, number>, r) => ({ ...acc, [r]: (acc[r] ?? 0) + 1 }), {}); };
     // the standard model, looking at the sample of five, raises a finding on one of them
-    const a = await mk((c) => ({ items: itemsIn(c).map((it, i) => (i === 0 ? { id: it.tag, result: 'finding', title: `Problem with ${it.text}`, workstream: 'Legal', body: ['Bad. [1] Worse. [2]'], next: '', sources: [{ doc: 'D1', page: 1 }, { doc: 'D1', page: 2 }] } : { id: it.tag, ...OK(c) })) }));
+    const a = await mk((c) => ({
+      items: itemsIn(c).map((it, i) =>
+        i === 0
+          ? {
+              id: it.tag,
+              result: 'finding',
+              title: `Problem with ${it.text}`,
+              workstream: 'Legal',
+              body: ['Bad. [1] Worse. [2]'],
+              next: '',
+              sources: [
+                { doc: nth(c, 1), page: 1 },
+                { doc: nth(c, 1), page: 2 },
+              ],
+            }
+          : { id: it.tag, ...OK(c) },
+      ),
+    }));
     const ra = val(await a.ai.checkAll({ dealId: 'd1' })); expect(ra.sample).toEqual({ size: 5, overturned: 1 }); expect(ra.offerDeep).toBe(false);          // one in five is not more than one in five: the rule as it was set
     // the standard model's replies on the sample cannot be read at all
     const b = await mk(() => 'Sorry?'); const was = val(await b.ai.checked('d1')).at; const rb = val(await b.ai.checkAll({ dealId: 'd1' }));
@@ -175,8 +282,31 @@ describe('cost', () => {
   it('items that say "more" share their second looks: one question to the fast model for five of them, and a call to the standard model for four', async () => {
     const many = Array.from({ length: 300 }, (_, i) => doc(100 + i, `Report ${String(i).padStart(3, '0')}.pdf`, { words: ['report', 'facility', 'agreement', 'checklist', 'point'] }));
     const seenOnce = new Set<string>();
-    const s = setup((c) => ({ items: itemsIn(c).map((it) => { const first = !seenOnce.has(it.text); seenOnce.add(it.text); return first ? { id: it.tag, result: 'more', need: `the report on point ${it.text.split(' ')[2]}` } : { id: it.tag, ...OK(c) }; }) }), { d1: [FA, TS, IM, ...many] },
-      { checklist: list(40), pick: () => ({ read: [1, 2, 3] }), pickFor: (c, n) => ({ read: Object.fromEntries(thingsIn(c as Call).map((t, i) => [t, [n * 10 + i * 2 + 1, n * 10 + i * 2 + 2]])) }) });   // every item wants two documents of its own
+    const s = setup(
+      (c) => ({
+        items: itemsIn(c).map((it) => {
+          const first = !seenOnce.has(it.text);
+          seenOnce.add(it.text);
+          return first
+            ? { id: it.tag, result: 'more', need: `the report on point ${it.text.split(' ')[2]}` }
+            : { id: it.tag, ...OK(c) };
+        }),
+      }),
+      { d1: [FA, TS, IM, ...many] },
+      {
+        checklist: list(40),
+        pick: (c) => ({ read: [1, 2, 3].map((k) => nth(c as Call, k)) }),
+        pickFor: (c, n) => ({
+          read: Object.fromEntries(
+            // every item wants two documents of its own
+            thingsIn(c as Call).map((t, i) => [
+              t,
+              [n * 10 + i * 2 + 1, n * 10 + i * 2 + 2].map((k) => nth(c as Call, k)),
+            ]),
+          ),
+        }),
+      },
+    );
     await deal(s.repo); const r = val(await s.ai.firstPass('d1'));
     expect(s.pickCalls.length).toBe(2); expect(s.pickForCalls.length).toBe(8); expect(s.calls.length).toBe(2 + 10); expect(r.gaps).toEqual([]); expect(r.unsettled).toEqual([]);
     expect(Math.max(...s.calls.map((c) => c.files.length))).toBeLessThanOrEqual(8);                                                                  // and no call is given more than a handful

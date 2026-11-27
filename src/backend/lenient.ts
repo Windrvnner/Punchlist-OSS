@@ -95,7 +95,7 @@ export function pageOf(x: unknown): number | null {
 }
 /** a word chosen from a few, however it was capitalized or spaced */
 export const word = (x: unknown): string => (typeof x === 'string' ? x.trim().toLowerCase() : '');
-/** the number in a tag like "D3", "d3", "[D3]", "D3: name", "Document 3", "I7" or plain 3; `letter` is the tag's letter */
+/** the number in a tag like "E7", "e7", "[E7]", "E7: text" or plain 7; `letter` is its letter (#1162) */
 export function tagNumber(x: unknown, letter: string): number | null {
   if (typeof x === 'number') return Number.isInteger(x) && x > 0 ? x : null;
   if (typeof x !== 'string') return null;

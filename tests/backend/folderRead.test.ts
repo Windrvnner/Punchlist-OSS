@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { nodeAi, type AiOptions } from '../../src/backend/ai';
+import { listingChars } from '../../src/backend/agentFolder';
 import { StandInService } from '../../src/backend/service';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
 import { memRepo } from '../adapters/memRepo';
@@ -29,8 +30,12 @@ function room() {
 const isTurn = (c: Call) => !!c.system?.includes('You work in turns');
 const isPriority = (c: Call) => c.prompt.includes('In what order should they be read?');
 const isBatch = (c: Call) => c.prompt.includes('which is being read a batch at a time');
-/** the tags a batch's listing gives its documents, in order */
-const listed = (c: Call) => [...c.prompt.matchAll(/^(D\d+): (.*?)(?: \(\d+ pages\))?$/gm)].map((m) => ({ tag: m[1], path: m[2] }));
+/** the ids a batch's listing gives its documents, in order (#1162) */
+const listed = (c: Call) =>
+  [...c.prompt.matchAll(/^((?:\w+\/)?doc_[0-9a-f]{24}): (.*?)(?: \(\d+ pages\))?$/gm)].map((m) => ({
+    tag: m[1],
+    path: m[2],
+  }));
 
 function setup(recs: DocRecord[], turn: (c: Call, n: number) => unknown, more: Partial<AiOptions> & { reads?: (c: Call, n: number) => unknown; talks?: boolean } = {}) {
   const turns: Call[] = []; const priorities: Call[] = []; const batches: Call[] = []; const others: Call[] = [];
@@ -141,7 +146,10 @@ describe('reading a whole folder from the chat', () => {
     expect(new Set(order).size).toBe(400); expect(order.every((p) => p.startsWith('VDR/07. Permits/'))).toBe(true);
     expect(order[0]).toBe('VDR/07. Permits/Interconnection permit.pdf');
     expect(s.turns[3].prompt).toContain('You had all 400 documents in VDR/07. Permits read for “expiry dates”, the most important first; 400 were read.');
-    expect(s.turns[3].prompt).toMatch(/What they say:\nDocuments 1–8: D\d+(, D\d+){7}\. It expires on March 1, 2031\. \[D\d+ p\. 1\]\n49 batches said nothing about it/);
+    expect(s.turns[3].prompt).toMatch(
+      new RegExp(String.raw`What they say:\nDocuments 1–8: doc_\w+(, doc_\w+){7}\. It expires on March 1, 2031\. `
+        + String.raw`\[doc_\w+ p\. 1\]\n49 batches said nothing about it`),
+    );
     // only the document that said something is listed to cite; the 399 that said nothing are not
     expect(s.turns[3].prompt).toContain(`${seen.tag}: VDR/07. Permits/Interconnection permit.pdf`); expect(s.turns[3].prompt).not.toContain('Local/Permit 001.pdf');
     // the same folder for the same thing, however written, is not read again
@@ -172,7 +180,9 @@ describe('reading a whole folder from the chat', () => {
     expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
     expect(s.batches.length).toBe(250);
     const next = s.turns[1].prompt; expect(next.length).toBeLessThan(40_000);
-    expect(next).toContain('You had all 2000 documents in VDR/Permits read'); expect(next).toMatch(/Documents \d+–\d+: passages at D\d+ p\. 1/); expect(next).toMatch(/\d+ more batches found passages, past what fits here/);
+    expect(next).toContain('You had all 2000 documents in VDR/Permits read');
+    expect(next).toMatch(/Documents \d+–\d+: passages at doc_\w+ p\. 1/);
+    expect(next).toMatch(/\d+ more batches found passages, past what fits here/);
   }, 30_000);
 
   it('a folder read through says so; a name that matches none gets the folders that are there', async () => {
@@ -303,3 +313,9 @@ function setupWithout(recs: DocRecord[], missing: Set<string>) {
   const s = setup(recs.map((r) => r), (_c, k) => (k === 1 ? { tool: 'folder', folder: 'permits' } : { text: 'ok', sources: [] }), { reads: (_c, k) => (k === 2 ? 'not json at all' : { text: '', sources: [] }), docs: { records: (d) => (d === 'd1' ? recs : []), wanted: async (_d, ids) => recs.filter((r) => ids.includes(r.docId) && !missing.has(r.docId)).map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) })) } });
   return s;
 }
+
+it('counts a document\'s listing by the handle it is listed by, deal id included across deals (#1162)', () => {
+  const docId = `doc_${'a'.repeat(24)}`;
+  expect(listingChars(`d1/${docId}`) - listingChars(docId)).toBe('d1/'.length);
+  expect(listingChars(docId)).toBeGreaterThan(docId.length);
+});
