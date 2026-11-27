@@ -1,6 +1,7 @@
 // Match syntax, so examples in comments, strings, regexes and JSX text never count as UI dependencies.
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
+import { ruleChecks } from './pane-of-glass-rules.mjs';
 import { literalText, unwrapped } from './pane-of-glass-syntax.mjs';
 
 // Persistence and network access belong in src/app and src/backend: browser storage, cookies, the Cache API, and
@@ -104,6 +105,17 @@ function moduleChecks(file, record) {
   };
 }
 
+// Runs every handler given for a node type, so two sets that both handle one type both run.
+function composed(...handlerSets) {
+  const byType = {};
+  for (const handlers of handlerSets) {
+    for (const [type, handler] of Object.entries(handlers)) (byType[type] ??= []).push(handler);
+  }
+  return Object.fromEntries(Object.entries(byType).map(([type, list]) => [type, (node) => {
+    for (const handler of list) handler(node);
+  }]));
+}
+
 export function matchesIn(file, source) {
   const parsed = parseSync(file, source, { range: true });
   if (parsed.errors.length) throw new Error(`${file}: ${parsed.errors[0].message}`);
@@ -138,8 +150,7 @@ export function matchesIn(file, source) {
     }
   }
   const { readsEnv, usesRequire, ...modules } = moduleChecks(file, record);
-  new Visitor({
-    ...modules,
+  new Visitor(composed(modules, ruleChecks(record), {
     MemberExpression(node) {
       readsEnv(node);
       checkMember(node);
@@ -152,15 +163,20 @@ export function matchesIn(file, source) {
       if (storageNames.has(node.name)) record('storage', node);
       if (networkNames.has(node.name)) record('network', node);
     },
-  }).visit(parsed.program);
+  })).visit(parsed.program);
   return matchingLines(offsets, source);
+}
+
+// Line numbers count every kind of line break, as the editor does.
+export function splitLines(text) {
+  return text.split(/\r\n|[\r\n\u2028\u2029]/);
 }
 
 function matchingLines(offsets, source) {
   const lines = {};
   for (const kind of Object.keys(offsets).sort()) {
     lines[kind] = [...offsets[kind]].sort((a, b) => a - b)
-      .map((offset) => source.slice(0, offset).split(/\r\n|[\r\n\u2028\u2029]/).length);
+      .map((offset) => splitLines(source.slice(0, offset)).length);
   }
   return lines;
 }

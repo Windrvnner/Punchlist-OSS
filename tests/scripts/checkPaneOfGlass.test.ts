@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
 const baselineFile = 'scripts/pane-of-glass-baseline.json';
 const directories: string[] = [];
-type Baseline = Record<string, Partial<Record<'import' | 'storage' | 'network' | 'services' | 'repo', number>>>;
+type Baseline = Record<string, Partial<Record<'import' | 'storage' | 'network' | 'services' | 'repo' | 'pattern', number>>>;
 
 function git(dir: string, ...args: string[]) {
   const identity = ['-c', 'user.name=test', '-c', 'user.email=test@example.com'];
@@ -184,7 +184,8 @@ describe('UI dependency checks', () => {
   });
 
   it('ignores test files, comments and literal text and checks expressions in templates and JSX', () => {
-    const repo = fixture();
+    // The regex literal below is itself a pattern match, which the baseline allows.
+    const repo = fixture({ 'src/ui/view.tsx': { pattern: 1 } });
     const examples = "import '../backend/table'; localStorage.getItem(key); store.services.repo.read()";
     const page = 'src/ui/view.tsx';
     const clean = [
