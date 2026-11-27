@@ -42,7 +42,8 @@ const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '[::1]', '::1'];
 
 // The issues endpoint for the environment's repository; the token only ever goes to https or a loopback stub.
 function issuesEndpoint({ GITHUB_REPOSITORY: repository, GITHUB_API_URL: apiUrl = 'https://api.github.com' }) {
-  if (!/^(?!\.+\/)[\w.-]+\/(?!\.+$)[\w.-]+$/.test(repository ?? '')) throw new Error('GITHUB_REPOSITORY must be owner/name');
+  const ownerAndName = /^(?!\.+\/)[\w.-]+\/(?!\.+$)[\w.-]+$/;
+  if (!ownerAndName.test(repository ?? '')) throw new Error('GITHUB_REPOSITORY must be owner/name');
   const refusal = new Error('GITHUB_API_URL must be https, or http on a loopback host');
   let api;
   try {
