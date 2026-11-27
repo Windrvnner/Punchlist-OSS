@@ -6,8 +6,8 @@
 
 import { tokens } from './words';
 
-/** a leading folder number ("04. ", "04.1 ", or "04 1 " once tokenized) */
-const LEADING_NUMBER = /^\d+(?:[.\s]+\d+)*[.\s-]+/;
+/** a leading folder number ("04. ", "04.1 ", "2024-25 ", or "04 1 " once tokenized), as written or tokenized */
+const LEADING_NUMBER = /^\d+(?:[.\s-]+\d+)*[.\s-]+/;
 
 /** a folder's name as a person says it: lower case, without a leading number, "the" or the word "folder", spaces collapsed */
 export const folderKey = (s: string) => plain(s).replace(LEADING_NUMBER, '').replace(/^the /, '').trim();

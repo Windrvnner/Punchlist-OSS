@@ -104,6 +104,13 @@ describe('marks and ampersands in folder names (#1154)', () => {
   });
 });
 
+describe('a number set aside from a folder name', () => {
+  it('is set aside as folderKey does: "2024-25 Budget" is "Budget", so "25 budget" names both', () => {
+    const dirs = foldersOf(['VDR/2024-25 Budget/A.pdf', 'VDR/Budget/B.pdf']);
+    expect(matchFolders(dirs, '25 budget')).toEqual(['VDR/2024-25 Budget', 'VDR/Budget']);
+  });
+});
+
 describe('reading a whole folder from the chat', () => {
   /** the grid permit's tag, as the batch that read it gave it, and a stand-in that finds the expiry in it alone */
   const gridReads = (seen: { tag?: string }) => (c: Call) => { const g = listed(c).find((x) => x.path.endsWith('Interconnection permit.pdf')); if (g) seen.tag = g.tag; return g ? { text: 'It expires on March 1, 2031. [1]', sources: [{ doc: g.tag, page: 1, quote: 'expires on March 1, 2031' }] } : { text: '', sources: [] }; };
