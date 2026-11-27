@@ -54,10 +54,8 @@ describe('a CSV log, awkwardly written', () => {
     const written = ['-5% vs plan', '"=HYPERLINK(""x"")"', '@sum', '+ see note', '-5%'];
     expect(out).toBe(`No.,Question,Response\r\n${written.map((v, i) => `${i + 1},Q${i + 1},${v}\r\n`).join('')}`);
   });
-  it('keeps the accents of a Windows-1252 file with a UTF-8 mark in front', () => {
-    const before = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('No.,Question,Response\r\n1,Caf'), 0xe9, ...new TextEncoder().encode('?,\r\n')]);
-    const after = encodeLike(editCsv(decodeText(before), [{ kind: 'cell', row: 1, col: 2, value: 'Yes' }]), before);
-    expect(decodeText(after)).toBe('No.,Question,Response\r\n1,Café?,Yes\r\n'); expect([...after.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+  it('refuses a file whose UTF-8 mark is followed by bytes that are not UTF-8', () => {
+    expect(() => decodeText(new Uint8Array([0xef, 0xbb, 0xbf, 0x31, 0x2c, 0xe9]))).toThrow('not valid UTF-8');
   });
   it('names the character a Windows-1252 file can\'t hold', () => {
     expect(() => encodeLike('a,≥1.20x', new Uint8Array([0x61, 0xe9]))).toThrow(/“≥”/);

@@ -450,5 +450,5 @@ These decisions are built and wait to be confirmed:
   for its length (#1147).
 - The browser demo's word-comparing stand-ins use the words the search index keeps (one split, the control file's
   filler left out) and drop no word, letter or number for its length (#1220).
-- A plain-text list (.txt, .text, .md) is read as a CSV file is: UTF-8, UTF-16 or Windows-1252, with or without a
-  byte-order mark (#382).
+- A text or CSV file is decoded by its byte-order mark (UTF-8 or UTF-16); with none, as UTF-8, else Windows-1252.
+  A plain-text list (.txt, .text, .md) is read the same way (#382).
