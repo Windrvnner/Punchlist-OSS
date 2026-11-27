@@ -206,6 +206,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Each PC keeps its own word index of the data room; nothing is added to the shared folder.
 - A folder's name is compared with the typed name by the search index's word split, so letters of any alphabet are kept (#1154).
 - The index's word split keeps a letter's combining marks (vowel signs, accents) inside its word and normalizes nothing: a composed and a decomposed accent are different words (#1154).
+- A folder named exactly as typed ranks ahead of folders that only share its words; the equality check changes nothing in either name (#1154, #1157).
 - Documents open in reading mode beside the conversation, with page keys and zoom.
 - Switching PDFs opens the cited page at the top and keeps the zoom (#447).
 - In the browser demo, a PDF without a preview shows its title, page number, and a preview status (#443).
