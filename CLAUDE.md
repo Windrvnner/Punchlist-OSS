@@ -120,7 +120,10 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   Wording stays provider-neutral, since the app supports several model providers. Changes are described in technical
   terms. A breach blocks a merge, like attribution.
 - Commit at each natural stopping point. Each commit has about 100 changed lines at most, an accurate plain-English message, and `(#N)` for its issue. A pull request that fixes a bug or finishes an item says `Fixes #N`.
-- Every issue fills in its template in full (`.github/ISSUE_TEMPLATE/`), sets its issue type, and carries its type label (`bug` or `build list`), a severity label, its area labels, and its status label, as in docs/development.md.
+- Every issue fills in its template in full (`.github/ISSUE_TEMPLATE/`), sets its issue type, and carries its type
+  label (`bug` or `build list`), a severity label, its area labels, and its status label, as in
+  docs/development.md. A batch uses the Batch template: its fixes are sub-issues, listed as plain bullets, never
+  checkboxes.
 - Use the contributor's own Git identity for commits. No AI-tool trailers, "Requested by" headers, or links to an
   AI chat, session, project, or thread appear in commits, pull requests, issues, or comments. A coding tool's plain
   "Generated with" footer (the tool's name, with at most a link to its product page) is allowed and never blocks a
