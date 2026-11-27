@@ -6,7 +6,7 @@ import { Icon } from './icons';
 import { AI_LABEL } from '../control';
 import type { Deal } from '../domain/model';
 import { askAbout, dealHash, dealTwin, type UiState } from '../app/state';
-import { checklistListCounts, checklistStandingCounts, findingCounts, questionCounts } from '../app/dealCounts';
+import { checklistListCounts, checklistStandingCounts, checklistStandingParts, findingCounts, questionCounts } from '../app/dealCounts';
 import { folderProgress, overviewStatus, type FolderProgressNotice } from '../app/indexing';
 import { openLocate } from '../app/relink';
 import { PageTop, Stalled, NoRoom, INDEXING_LINE, INDEXING_TIP, useDealLock } from './deal';
@@ -133,22 +133,21 @@ function checklistLine(
   dealId: string, counts: NonNullable<ReturnType<typeof checklistStandingCounts>>,
   filter: (kind: UiState['checklistFilter']) => () => void,
 ): Line {
-  const offLabel = `${num(counts.off)} turned off`
-    + (counts.offOpen ? `, ${num(counts.offOpen)} with an open finding` : '');
+  const { parts, off } = checklistStandingParts(counts);
+  const subLabel = (word: string, n: number) => {
+    if (n === 1) return word;
+    if (word === 'gap') return 'gaps';
+    return word === 'finding deleted' ? 'findings deleted' : word;
+  };
   return {
-    id: 'ov-checklist', title: 'Checklist', href: '#' + pageHash('checklist', dealId), go: filter('all'), total: counts.all,
-    off: counts.off ? [offLabel, filter('off')] : undefined,
-    segs: [
-      { k: 'open', n: counts.toResolve, word: 'to resolve', go: filter('all'), sub: [
-        ['flagged', counts.finding, filter('finding')],
-        [counts.gap === 1 ? 'gap' : 'gaps', counts.gap, filter('gap')],
-        [counts.gone === 1 ? 'finding deleted' : 'findings deleted', counts.gone, filter('gone')],
-      ] },
-      { k: 'prog', n: counts.open, word: 'not settled', go: filter('open') },
-      counts.person ? { k: 'done', n: counts.settled, word: 'settled', sub: [
-        ['satisfied', counts.satisfied, filter('satisfied')], ['by a person', counts.person, filter('person')],
-      ] } : { k: 'done', n: counts.satisfied, word: 'satisfied', go: filter('satisfied') },
-    ],
+    id: 'ov-checklist', title: 'Checklist', href: '#' + pageHash('checklist', dealId),
+    go: filter('all'), total: counts.all,
+    off: off ? [`${num(off.n)} turned off` + (off.open ? `, ${num(off.open)} with an open finding` : ''),
+      filter(off.filter)] : undefined,
+    segs: parts.map(({ k, n, word, filter: target, sub }) => ({
+      k, n, word, go: target && filter(target),
+      sub: sub?.map((row) => [subLabel(row.word, row.n), row.n, filter(row.filter)]),
+    })),
   };
 }
 type Placed = { lx: number; up: boolean; mode: 'r' | 'l' | 'c'; x: number; w: number; bare?: boolean };

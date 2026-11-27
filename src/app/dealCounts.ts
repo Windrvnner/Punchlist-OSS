@@ -98,3 +98,25 @@ export function checkLine(state: State, dealId: string) {
   if (unchecked) return { ...common, kind: 'unchecked' as const, unchecked };
   return null;
 }
+
+type ChecklistFilter = State['ui']['checklistFilter'];
+type StandingSub = { word: string; n: number; filter: ChecklistFilter };
+type StandingPart = {
+  k: 'open' | 'prog' | 'done'; word: string; n: number; filter?: ChecklistFilter; sub?: StandingSub[];
+};
+
+/** Each part of the Overview standing points at the rows counted in it. */
+export function checklistStandingParts(counts: NonNullable<ReturnType<typeof checklistStandingCounts>>) {
+  const parts: StandingPart[] = [
+    { k: 'open', word: 'to resolve', n: counts.toResolve, filter: 'all', sub: [
+      { word: 'flagged', n: counts.finding, filter: 'finding' }, { word: 'gap', n: counts.gap, filter: 'gap' },
+      { word: 'finding deleted', n: counts.gone, filter: 'gone' },
+    ] },
+    { k: 'prog', word: 'not settled', n: counts.open, filter: 'open' },
+    counts.person ? { k: 'done', word: 'settled', n: counts.settled, sub: [
+      { word: 'satisfied', n: counts.satisfied, filter: 'satisfied' }, { word: 'by a person', n: counts.person, filter: 'person' },
+    ] } : { k: 'done', word: 'satisfied', n: counts.satisfied, filter: 'satisfied' },
+  ];
+  const off = counts.off ? { n: counts.off, open: counts.offOpen, filter: 'off' as const } : null;
+  return { parts, off };
+}

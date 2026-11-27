@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { checklistView } from '../../src/app/checklistView';
 import { memoItems } from '../../src/app/memo';
 import {
-  checkLine, checklistListCounts, checklistStandingCounts, checkLeftCount, findingCounts, indexingTotals, questionCounts,
+  checklistStandingParts, checkLine, checklistListCounts, checklistStandingCounts, checkLeftCount, findingCounts, indexingTotals, questionCounts,
   uncheckedChecklistCount,
 } from '../../src/app/dealCounts';
 import { removableIssuesLists, visibleDeletedNotes } from '../../src/app/deletedView';
@@ -462,4 +462,23 @@ it('selects the Overview check independently of the run mode and warning tone', 
   state.deals[dealId] = { ...state.deals[dealId], stage: 'indexing' };
   expect(line({ offerDeep: null })).toBeNull();
   expect(line({ checking, offerDeep: null })).toMatchObject({ kind: 'running', warn: false, run: normal });
+});
+
+it('describes the standing segments and exactly which checklist filters they open', () => {
+  const counts = checklistStandingCounts(checklistDeal(), dealId)!;
+  const { parts, off } = checklistStandingParts(counts);
+  expect(off).toEqual({ n: 3, open: 1, filter: 'off' });
+  expect(parts).toEqual([
+    { k: 'open', word: 'to resolve', n: 119, filter: 'all', sub: [
+      { word: 'flagged', n: 117, filter: 'finding' }, { word: 'gap', n: 1, filter: 'gap' },
+      { word: 'finding deleted', n: 1, filter: 'gone' },
+    ] },
+    { k: 'prog', word: 'not settled', n: 21, filter: 'open' },
+    { k: 'done', word: 'settled', n: 2017, sub: [
+      { word: 'satisfied', n: 2016, filter: 'satisfied' }, { word: 'by a person', n: 1, filter: 'person' },
+    ] },
+  ]);
+  const plain = checklistStandingParts({ ...counts, person: 0, settled: 2016, off: 0, offOpen: 0 });
+  expect(plain.off).toBeNull();
+  expect(plain.parts.at(-1)).toEqual({ k: 'done', word: 'satisfied', n: 2016, filter: 'satisfied' });
 });
