@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
-import { HeadingRowDraft, clearChecklistHeading, headingRow, keptHeadingDraft } from '../../src/app/listRead';
+import { HeadingRowDraft, headingRow, keptHeadingDraft } from '../../src/app/listRead';
 import { dropImport, keptImport } from '../../src/app/keptImports';
 
 it.each([
@@ -13,7 +13,7 @@ it.each([
 it('keeps the latest heading text with the accepted sheet through superseding reads and a reopen', async () => {
   const key = 'checklist:headings';
   dropImport(key);
-  const main = { sheet: 'Main', headerRow: 1, lastRow: 5, bytes: new Uint8Array([1]) };
+  const main = { sheet: 'Main', headerRow: 1, lastRow: 5 };
   const extra = { ...main, sheet: 'Supplement', headerRow: 4, lastRow: 14 };
   const draft = new HeadingRowDraft(key, main, () => {});
   type Accept = (table: typeof main) => void;
@@ -43,8 +43,4 @@ it('keeps the latest heading text with the accepted sheet through superseding re
   draft.dispose();
   const reopened = new HeadingRowDraft(key, main, () => {});
   expect(reopened.view.text).toBe('11');
-  clearChecklistHeading(key);
-  reopened.update({ ...main, bytes: new Uint8Array([2]) }, main.sheet, read);
-  expect(reopened.view.text).toBe('1');
-  expect(keptImport(key)?.headingDraft).toBeNull();
 });

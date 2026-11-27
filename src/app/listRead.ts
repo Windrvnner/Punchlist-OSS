@@ -279,7 +279,7 @@ export function checklistReadCounts(table: ImportTable | null, lines: string[] |
   return { rows: table?.rows.length ?? 0, lines: lines?.length ?? 0, pasted: paste?.lines.length ?? 0 };
 }
 
-export type Heading = Pick<ImportTable, 'sheet' | 'headerRow' | 'lastRow' | 'bytes'>;
+export type Heading = Pick<ImportTable, 'sheet' | 'headerRow' | 'lastRow'>;
 export type ReadRow = (row: number, accept: (heading: Heading) => void) => Promise<void>;
 // The numeric forms a native number input accepts, including integral decimals and exponents.
 const NUMBER_TEXT = /^-?(?:(\d+)(?:\.(\d+))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
@@ -373,10 +373,7 @@ export class HeadingRowDraft {
     this.table = table;
     if (this.pending?.sheet !== sheet) this.pending = undefined;
     if (this.queuedSheet !== sheet) this.queuedSheet = undefined;
-    if (before.bytes !== table.bytes) {
-      this.dispose();
-      this.text = keptHeadingDraft(this.key, table);
-    } else if (before.sheet !== table.sheet || before.headerRow !== table.headerRow) {
+    if (before.sheet !== table.sheet || before.headerRow !== table.headerRow) {
       if (this.queuedSheet === table.sheet) {
         this.queuedSheet = undefined;
         void this.pick(this.text, read);
