@@ -36,6 +36,17 @@ describe.skipIf(!has)('the deal memo through LibreOffice', () => {
     expect(all).not.toMatch(/\b[A-Z]{2,}(?: [A-Z]{2,})+\b/);   // no line of capitals
   }, 120_000);
 
+  it('keeps a very long key risk write-up whole, an unbroken 6,000-character token included (#806)', async () => {
+    const memo = sampleMemo();
+    const token = 'x'.repeat(6_000);
+    memo.risks[0].paras = [[{ text: `${token} ends here`, refs: [1] }], [{ text: 'word '.repeat(600), refs: [] }]];
+    const r = await libreOfficeSheets(lo).document!(memoDocument(memo, 'AI'));
+    expect(r.ok).toBe(true); if (!r.ok) return;
+    const all = (await pdfText(r.value.pdf)).join('').replace(/\s+/g, '');
+    expect(all).toContain(`${token}endshere`);
+    expect(all).toContain('Disclaimer');
+  }, 120_000);
+
   it('says so when LibreOffice cannot make it', async () => {
     const broken = libreOfficeConverter({ soffice: '/nonexistent/soffice', timeoutMs: 5000 });
     const r = await libreOfficeSheets(broken).document!('<x/>');

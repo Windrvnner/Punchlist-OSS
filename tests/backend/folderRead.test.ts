@@ -70,6 +70,59 @@ describe('which folder a name means', () => {
   });
 });
 
+describe('folder names in any alphabet (#1154)', () => {
+  it('keeps the letters of any alphabet in a name', () => {
+    expect(folderKey('Verträge')).toBe('verträge');
+    expect(folderKey('合同')).not.toBe('');
+    expect(folderKey('Договоры')).not.toBe('');
+    expect(folderKey('合同')).not.toBe(folderKey('Договоры'));
+  });
+  it('finds a folder named with letters outside a-z', () => {
+    const dirs = foldersOf(['VDR/04. Verträge/A.pdf', 'VDR/05. Договоры/B.pdf', 'VDR/Finance/C.pdf']);
+    expect(matchFolders(dirs, 'the Verträge folder')).toEqual(['VDR/04. Verträge']);
+    expect(matchFolders(dirs, 'договоры')).toEqual(['VDR/05. Договоры']);
+  });
+});
+
+describe('marks and ampersands in folder names (#1154)', () => {
+  it('keeps combining marks inside a word', () => {
+    expect(folderKey('दिन')).not.toBe(folderKey('दीन'));
+  });
+  it('keeps "O&M" and "OM" apart when one name is the one typed (#1154)', () => {
+    const dirs = foldersOf(['VDR/O&M/A.pdf', 'VDR/OM/B.pdf']);
+    expect(matchFolders(dirs, 'the O&M folder')).toEqual(['VDR/O&M']);
+    expect(matchFolders(dirs, 'OM')).toEqual(['VDR/OM']);
+  });
+  it('finds "O&M" among numbered folders by its name without the number (#1154)', () => {
+    const dirs = foldersOf(['VDR/04. O&M/A.pdf', 'VDR/05. OM/B.pdf']);
+    expect(matchFolders(dirs, 'the O&M folder')).toEqual(['VDR/04. O&M']);
+    expect(matchFolders(dirs, 'OM')).toEqual(['VDR/05. OM']);
+  });
+  it('drops the number before "the": "04. The O&M" is named "O&M" (#1154)', () => {
+    const dirs = foldersOf(['VDR/04. The O&M/A.pdf', 'VDR/OM/B.pdf']);
+    expect(matchFolders(dirs, 'O&M')).toEqual(['VDR/04. The O&M']);
+  });
+  it('when several folders share the typed name after their numbers, the word match decides', () => {
+    const dirs = foldersOf(['VDR/04. O&M/A.pdf', 'VDR/O&M/B.pdf', 'VDR/OM/C.pdf']);
+    expect(matchFolders(dirs, 'O&M')).toEqual(['VDR/04. O&M', 'VDR/O&M', 'VDR/OM']);
+    expect(matchFolders(dirs, '04. O&M')).toEqual(['VDR/04. O&M']);   // a number said picks that folder alone
+  });
+});
+
+describe('a number set aside from a folder name', () => {
+  it('is set aside as folderKey does: "2024-25 Budget" is "Budget", so "25 budget" names both', () => {
+    const dirs = foldersOf(['VDR/2024-25 Budget/A.pdf', 'VDR/Budget/B.pdf']);
+    expect(matchFolders(dirs, '25 budget')).toEqual(['VDR/2024-25 Budget', 'VDR/Budget']);
+  });
+});
+
+describe('a name that is only a number', () => {
+  it('is not equal to another such name once its number is set aside', () => {
+    expect(matchFolders(foldersOf(['VDR/2025./A.pdf', 'VDR/Other/B.pdf']), '2024.')).toEqual([]);
+    expect(matchFolders(foldersOf(['VDR/1-/A.pdf', 'VDR/Other/B.pdf']), '7-')).toEqual([]);
+  });
+});
+
 describe('reading a whole folder from the chat', () => {
   /** the grid permit's tag, as the batch that read it gave it, and a stand-in that finds the expiry in it alone */
   const gridReads = (seen: { tag?: string }) => (c: Call) => { const g = listed(c).find((x) => x.path.endsWith('Interconnection permit.pdf')); if (g) seen.tag = g.tag; return g ? { text: 'It expires on March 1, 2031. [1]', sources: [{ doc: g.tag, page: 1, quote: 'expires on March 1, 2031' }] } : { text: '', sources: [] }; };

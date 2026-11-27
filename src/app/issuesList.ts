@@ -34,6 +34,13 @@ export async function readIssuesList(
   return read.ok ? ok({ doc, points: read.value.points }) : read;
 }
 
+/** A list pasted as text, read as a text file of its own (the way a file chosen is): the file's words are the paste. */
+export function readPastedIssuesList(store: Store, dealId: string, text: string, stillCurrent = () => true) {
+  const bytes = new TextEncoder().encode(text);
+  const file = { name: 'Pasted issues list.txt', arrayBuffer: async () => bytes.buffer as ArrayBuffer };
+  return readIssuesList(store, dealId, file, stillCurrent);
+}
+
 /** The preview uses ImportIssuesList's join rules, with the model's matches treated as proposals. */
 export function reviewIssuesList(state: State, dealId: string, list: ReadIssuesList, kept: ReadonlySet<number>) {
   const { doc, points } = list;
@@ -69,6 +76,21 @@ export function keptIssuesList(key: string): IssuesListKept | null {
   return readable ? kept : null;
 }
 
+/** The paste typed into the box and not yet read, as it was kept; nothing if what was kept is not text (#1229). */
+export function keptIssuesPaste(key: string): string {
+  const paste = keptImport(key)?.paste;
+  return typeof paste === 'string' ? paste : '';
+}
+
+/**
+ * Keeps the paste box as typed, so closing or a reload loses none of it (#1229). Nothing is written for an empty box
+ * unless one was kept; opened past a kept import it could not show (`fresh`), that one is left until something is
+ * typed.
+ */
+export function keepIssuesPaste(key: string, paste: string, fresh: boolean) {
+  if (paste.trim() || (!fresh && keptIssuesPaste(key))) keepImport(key, { paste });
+}
+
 /** What Import sends for the list: the points as reviewed (reviewIssuesList's input). */
 export interface IssuesListSubmission {
   dealId: string;
@@ -78,17 +100,18 @@ export interface IssuesListSubmission {
 
 /**
  * Imports the list. The kept list is let go first, so a reload while it runs never offers it again; a failure keeps
- * it again as it is then (`now`), not as Import found it.
+ * it again as it is then (`now`), not as Import found it. A paste typed and not read is kept again with it (#1229).
  */
 export async function submitIssuesList(
   store: Store, key: string, { dealId, list, points }: IssuesListSubmission, now: () => IssuesListKept | null,
 ) {
+  const paste = keptIssuesPaste(key);
   dropImport(key);
   const input = { dealId, doc: list.doc.docId, list: list.doc.doc, points };
   const idempotencyKey = `issues-${dealId}-${list.doc.docId}`;
   const result = await store.dispatch(ImportIssuesList, input, { idempotencyKey });
   const keptNow = result.ok ? null : now();
-  if (keptNow) keepImport(key, keptNow);
+  if (keptNow) keepImport(key, paste ? { ...keptNow, paste } : keptNow);
   return result;
 }
 
