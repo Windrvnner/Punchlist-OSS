@@ -143,21 +143,83 @@ describe('allowance history', () => {
     });
 
     it('rejects two entries that take more than the old count', () => {
-      const repo = edited();
-      repo.write(screen, before.replace('store.services.ai', 'state.services.ai\nstate.services.ai2'));
-      repo.write(baselineFile, [renamed, entry(1, { line: 'state.services.ai2' })]);
+      const repo = repository({ [baselineFile]: [entry(2)], [screen]: 'store.services.ai\nstore.services.ai' });
+      repo.write(screen, 'state.services.ai\nstate.services.ai2');
+      repo.write(baselineFile, [entry(2, { line: 'state.services.ai' }), entry(1, { line: 'state.services.ai2' })]);
       const result = repo.run();
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(`${screen} services "state.services.ai2": count 1 is above main's 0`);
     });
 
-    it('rejects a moved entry while the old line is still in the file', () => {
+    it('moves one of two identical listed lines', () => {
+      const repo = repository({ [baselineFile]: [entry(2)], [screen]: `${before}\nstore.services.ai` });
+      repo.write(screen, `${before.replace('store.services.ai', 'state.services.ai')}\nstore.services.ai`);
+      repo.write(baselineFile, [entry(1), renamed]);
+      const result = repo.run();
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+    });
+
+    it('accepts a swap of the same position in a hunk that changes several lines', () => {
       const repo = edited();
-      repo.write(screen, before.replace('store.services.ai', 'store.services.ai\nstate.services.ai'));
+      const swapped = 'import z from "y";\nstate.services.ai';
+      repo.write(screen, before.replace('import x from "y";\nstore.services.ai', swapped));
+      repo.write(baselineFile, [renamed]);
+      expect(repo.run().stderr).toBe('');
+    });
+
+    it('rejects a move whose new line sits at another position of the hunk', () => {
+      const repo = edited();
+      const shifted = 'state.services.ai\nimport z from "y";';
+      repo.write(screen, before.replace('import x from "y";\nstore.services.ai', shifted));
+      repo.write(baselineFile, [renamed]);
+      expect(repo.run().stderr).toContain("state.services.ai\": count 1 is above main's 0");
+    });
+
+    it('rejects a move in a hunk that adds more lines than it removes', () => {
+      const repo = edited();
+      repo.write(screen, before.replace('store.services.ai', 'state.services.ai\nconst extra = 6;'));
+      repo.write(baselineFile, [renamed]);
+      const result = repo.run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("state.services.ai\": count 1 is above main's 0");
+    });
+
+    it('rejects a moved entry while the old text is still in the file', () => {
+      const repo = edited();
+      repo.write(screen, `${before.replace('store.services.ai', 'state.services.ai')}\nstore.services.ai`);
       repo.write(baselineFile, [entry(1), renamed]);
       const result = repo.run();
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("state.services.ai\": count 1 is above main's 0");
+    });
+
+    it('rejects a moved entry of another kind', () => {
+      const repo = edited();
+      repo.write(screen, before.replace('store.services.ai', 'state.services.ai'));
+      repo.write(baselineFile, [entry(1, { line: 'state.services.ai', kind: 'list' })]);
+      expect(repo.run().stderr).toContain("count 1 is above main's 0");
+    });
+
+    it('rejects a move from an entry of another file whose text is removed there', () => {
+      const other = 'src/ui/Other.tsx';
+      const onMain = [entry(1, { issue: 9 }), entry(1, { file: other })];
+      const repo = repository({ [baselineFile]: onMain, [screen]: before, [other]: 'store.services.ai\nkeep' });
+      repo.write(screen, before.replace('store.services.ai', 'state.services.ai'));
+      repo.write(other, 'keep');
+      repo.write(baselineFile, [renamed]);
+      expect(repo.run().stderr).toContain("state.services.ai\": count 1 is above main's 0");
+    });
+
+    const decided = { issue: undefined, decision: 'A decision.' };
+    const decisionBaselines: [string, unknown][] = [['a list', [entry(1, decided)]], ['no list', {}]];
+    it.each(decisionBaselines)('rejects moving an entry under a decision (main has %s)', (_, onMain) => {
+      const repo = repository({ [baselineFile]: onMain, [verifiedFile]: ['A decision.'], [screen]: before });
+      repo.write(screen, before.replace('store.services.ai', 'deals.services.open'));
+      repo.write(baselineFile, [entry(1, { ...decided, line: 'deals.services.open' })]);
+      const result = repo.run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("deals.services.open\": count 1 is above main's 0");
     });
 
     it('rejects a moved entry that cites another issue', () => {
