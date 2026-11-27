@@ -1,6 +1,7 @@
 // Fails when an allowance names an issue that is not open, so a closed issue cannot keep an exception alive.
 // It reads GitHub, so only CI runs it (the static job, with GITHUB_TOKEN).
 import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ALLOWANCE_FILES } from './allowance.mjs';
 
@@ -27,9 +28,9 @@ function readEntries(file) {
   }
 }
 
-function issuesNamed() {
+function issuesNamed(root) {
   const numbers = [];
-  for (const file of ALLOWANCE_FILES.filter(existsSync)) {
+  for (const file of ALLOWANCE_FILES.map((name) => path.join(root, name)).filter(existsSync)) {
     const entries = readEntries(file);
     for (const { issue } of Array.isArray(entries) ? entries : []) {
       if (issue !== undefined) numbers.push(issue);
@@ -38,25 +39,14 @@ function issuesNamed() {
   return [...new Set(numbers)];
 }
 
-const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '[::1]', '::1'];
-
-// The issues endpoint for the environment's repository; the token only ever goes to https or a loopback stub.
-function issuesEndpoint({ GITHUB_REPOSITORY: repository, GITHUB_API_URL: apiUrl = 'https://api.github.com' }) {
+// The issues endpoint for the environment's repository. The host is fixed, so the token only ever goes to GitHub.
+function issuesEndpoint(repository) {
   const ownerAndName = /^(?!\.+\/)[\w.-]+\/(?!\.+$)[\w.-]+$/;
   if (!ownerAndName.test(repository ?? '')) throw new Error('GITHUB_REPOSITORY must be owner/name');
-  const refusal = new Error('GITHUB_API_URL must be https, or http on a loopback host');
-  let api;
-  try {
-    api = new URL(apiUrl);
-  } catch {
-    throw refusal;
-  }
-  if (api.protocol !== 'https:' && !(api.protocol === 'http:' && LOOPBACK_HOSTS.includes(api.hostname))) throw refusal;
-  return new URL(`${api.pathname.replace(/\/$/, '')}/repos/${repository}/issues`, api);
+  return new URL(`https://api.github.com/repos/${repository}/issues`);
 }
 
-async function openIssuesPage(endpoint, page) {
-  const token = process.env.GITHUB_TOKEN;
+async function openIssuesPage({ endpoint, token, fetch }, page) {
   if (!token) throw new Error('GITHUB_TOKEN is required');
   const url = new URL(endpoint);
   url.search = new URLSearchParams({ state: 'open', per_page: '100', page: String(page) }).toString();
@@ -67,31 +57,34 @@ async function openIssuesPage(endpoint, page) {
   return response.json();
 }
 
-async function main() {
+// Runs the check; `fetch` is a parameter so tests need no network. Returns the exit status and what it printed.
+export async function checkOpenIssues({ env, fetch, root = '.' }) {
+  const lines = [];
+  const result = (status) => ({ status, stderr: lines.join('\n') });
   let named;
-  try {
-    named = issuesNamed();
-  } catch (error) {
-    console.error(error.message);
-    process.exitCode = 1;
-    return;
-  }
   let endpoint;
   try {
-    endpoint = issuesEndpoint(process.env);
+    named = issuesNamed(root);
+    endpoint = issuesEndpoint(env.GITHUB_REPOSITORY);
   } catch (error) {
-    console.error(error.message);
-    process.exitCode = 1;
-    return;
+    lines.push(error.message);
+    return result(1);
   }
   try {
-    const closed = await closedIssues(named, (page) => openIssuesPage(endpoint, page));
-    for (const number of closed) console.error(`#${number} is not an open issue`);
-    if (closed.length) process.exitCode = 1;
+    const source = { endpoint, token: env.GITHUB_TOKEN, fetch };
+    const closed = await closedIssues(named, (page) => openIssuesPage(source, page));
+    for (const number of closed) lines.push(`#${number} is not an open issue`);
+    return result(closed.length ? 1 : 0);
   } catch (error) {
-    console.error(`Cannot reach GitHub to check the issues the allowances name (${error.message})`);
-    process.exitCode = 1;
+    lines.push(`Cannot reach GitHub to check the issues the allowances name (${error.message})`);
+    return result(1);
   }
+}
+
+async function main() {
+  const { status, stderr } = await checkOpenIssues({ env: process.env, fetch });
+  if (stderr) console.error(stderr);
+  process.exitCode = status;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
