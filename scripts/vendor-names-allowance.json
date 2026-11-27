@@ -35,6 +35,13 @@
     "issue": 1241
   },
   {
+    "file": "src/backend/claude.ts",
+    "kind": "vendor",
+    "line": "export const CLAUDE_MODELS = { fast: 'claude-haiku-5-5', standard: 'claude-sonnet-5-5', thorough: 'claude-opus-5-5' };",
+    "count": 6,
+    "issue": 1241
+  },
+  {
     "file": "src/backend/north.ts",
     "kind": "model name",
     "line": "GPT Model",
@@ -59,6 +66,83 @@
     "file": "src/backend/openai.ts",
     "kind": "model name",
     "line": "gpt-model",
+    "count": 1,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": "(c) => c.models.service !== 'north' || !c.signIn.sso || c.north.ssoSite ? null : \"signIn.sso on North needs north.ssoSite set (or turn signIn.sso off)\",",
+    "count": 3,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": "(c) => c.models.service !== 'north' || c.north.address ? null : \"models.service 'north' needs north.address set\",",
+    "count": 3,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": "(c) => c.models.service !== 'openai' || (c.openai.address && c.models.openaiFast && c.models.openaiStandard && c.models.openaiThorough) ? null : \"models.service 'openai' needs openai.address, models.openaiFast, models.openaiStandard and models.openaiThorough set\",",
+    "count": 3,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": ": \"models.service 'north' needs models.northFast, models.northStandard and models.northThorough set\",",
+    "count": 1,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": "catch { return 'must be a web address like https://north.example.com, or empty while not set'; }",
+    "count": 1,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": "claudeFast: text('claude-haiku-5-5', 'The fast model on the Claude API.', 1, 100),",
+    "count": 3,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": "claudeStandard: text('claude-sonnet-5-5', 'The standard model on the Claude API.', 1, 100),",
+    "count": 3,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": "claudeThorough: text('claude-opus-5-5', 'The thorough model on the Claude API.', 1, 100),",
+    "count": 3,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": "if (provider === 'azure' && path !== '/openai/v1') return 'azure.address must end in /openai/v1';",
+    "count": 4,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": "return 'vertex.address must include /v1/projects/PROJECT/locations/LOCATION/publishers/anthropic/models';",
+    "count": 2,
+    "issue": 1241
+  },
+  {
+    "file": "src/control.ts",
+    "kind": "vendor",
+    "line": "try { const u = new URL(v); return u.protocol === 'https:' && u.origin === v ? null : 'must be https:// and a host name only, with no path or slash at the end, like https://north.example.com'; }",
     "count": 1,
     "issue": 1241
   }
