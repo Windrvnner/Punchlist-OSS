@@ -88,6 +88,7 @@ It does not read comments, html, css, or json files, names held only in identifi
 or names with a digit attached (`gpt4o`, `claude3`).
 Exactly one of `issue` (an open issue number) or `decision` (a line of `docs/decisions.md` that is on
 `scripts/verified-decisions.json`) is set.
+A decision never covers a `timer` entry: a timer decides when something happens (#1407).
 Skipped-test entries also carry `platform` and `reason`.
 `node scripts/check-pane-of-glass.mjs --list` prints the matches not yet listed, and `--lower` lowers each count to
 its matches and removes entries that no longer match; neither adds an issue or decision.

@@ -110,6 +110,14 @@ describe('allowanceProblems', () => {
       .toContain('decision is not word for word in docs/decisions.md');
   });
 
+  it('refuses a decision on a timer, which decides when something happens (#1407)', () => {
+    const timer = { file, kind: 'timer', line: 'setTimeout(close, 200)', count: 1 };
+    const decided = { ...timer, decision: 'A rule.' };
+    const options = { decisions: ['A rule.'], verified: ['A rule.'] };
+    expect(problems([timer], [decided], options).join('\n')).toContain('a decision cannot cover a timer');
+    expect(problems([timer], [{ ...timer, issue: 7 }], options)).toEqual([]);
+  });
+
   it('refuses a decision that is only a fragment of a decisions.md entry', () => {
     const decided = entry({ issue: undefined, decision: 'A rule' });
     expect(problems(found(), [decided], { decisions: ['A rule that wraps.'], verified: ['A rule'] }).join('\n'))

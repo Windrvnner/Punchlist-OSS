@@ -63,8 +63,12 @@ function shapeProblem(entry) {
   return null;
 }
 
+// Kinds no decision may cover: a timer decides when something happens, which is a rule, not display (#1407).
+const undecidableKinds = ['timer'];
+
 function decisionProblem(entry, decisions, verified) {
   if (entry.decision === undefined) return null;
+  if (undecidableKinds.includes(entry.kind)) return `a decision cannot cover a ${entry.kind}`;
   if (!verified.includes(entry.decision)) return 'decision is not on scripts/verified-decisions.json';
   if (decisions.includes(entry.decision)) return null;
   return 'decision is not word for word in docs/decisions.md';
