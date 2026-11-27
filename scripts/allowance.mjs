@@ -55,8 +55,8 @@ function countProblem(entry, seen) {
   return null;
 }
 
-// `scope(entry)` says whether this run could have seen the entry; only then is an unmatched entry a problem.
-export function allowanceProblems(found, allowance, { decisions, verified, scope = () => true }) {
+// Problems with each entry as written: its shape, a repeat, or a decision that is not on both lists.
+function entryProblems(allowance, decisions, verified) {
   const problems = [];
   const listed = new Set();
   for (const entry of allowance) {
@@ -65,17 +65,36 @@ export function allowanceProblems(found, allowance, { decisions, verified, scope
     const problem = shapeProblem(entry) ?? duplicate ?? decisionProblem(entry, decisions, verified);
     if (problem) problems.push(`${describe(entry)}: ${problem}`);
   }
-  const counts = new Map(found.map((match) => [keyOf(match), match.count]));
+  return problems;
+}
+
+function unlistedProblems(found, allowance) {
+  const problems = [];
   for (const match of found) {
     const allowed = allowance.find((entry) => keyOf(entry) === keyOf(match))?.count ?? 0;
     if (match.count > allowed) problems.push(`${describe(match)}: ${match.count - allowed} not listed`);
   }
-  for (const entry of allowance.filter(scope)) {
+  return problems;
+}
+
+function staleProblems(found, allowance) {
+  const problems = [];
+  const counts = new Map(found.map((match) => [keyOf(match), match.count]));
+  for (const entry of allowance) {
     const seen = counts.get(keyOf(entry)) ?? 0;
     const problem = seen > entry.count ? null : countProblem(entry, seen);
     if (problem) problems.push(`${describe(entry)}: ${problem}`);
   }
   return problems;
+}
+
+// `scope(entry)` says whether this run could have seen the entry; only then is an unmatched entry a problem.
+export function allowanceProblems(found, allowance, { decisions, verified, scope = () => true }) {
+  return [
+    ...entryProblems(allowance, decisions, verified),
+    ...unlistedProblems(found, allowance),
+    ...staleProblems(found, allowance.filter(scope)),
+  ];
 }
 
 // The file at the merge base of HEAD with main, or null when it is absent there or there is no Git checkout.
