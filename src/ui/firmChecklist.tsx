@@ -5,7 +5,6 @@ import { useAppState, useStore, fmtDateTime } from './hooks';
 import { Modal } from './dialogs';
 import { ConflictView } from './conflict';
 import { LAYER_NAMES, type Layer } from '../domain/checklist';
-import { importKey } from '../app/keptImports';
 import { checklistShelf } from '../app/checklistImport';
 import { plural } from './counts';
 import { ChecklistImportSession } from '../app/checklistImportSession';
@@ -25,8 +24,7 @@ export function FirmChecklistDialog() {
   // a file dropped on the empty dialog, handed to the import it opens
   const [dropped, setDropped] = useState<File | null>(null);
   if (at?.step === 'import') {
-    return <KeptChecklistImport key={importKey.checklist(at.layer, at.name)}
-      layer={at.layer} name={at.name} dropped={dropped} taken={() => setDropped(null)} />;
+    return <KeptChecklistImport layer={at.layer} name={at.name} dropped={dropped} taken={() => setDropped(null)} />;
   }
   const { sections, totals } = checklistShelf(state);
   const clash = choosing ? state.conflicts[choosing] : undefined;
