@@ -3,7 +3,7 @@
 // name and the AI label come from the control file (names.service, names.aiContent), never written in
 // (docs/review-prompt.md, Privacy).
 import { describe, expect, it } from 'vitest';
-import { vendorMatchesIn } from './vendorNamesKit';
+import { screenVendorMatches, vendorMatchesIn } from './vendorNamesKit';
 // @ts-expect-error the script is plain JavaScript
 import { allowanceProblems, groupMatches } from '../../scripts/allowance.mjs';
 
@@ -22,10 +22,11 @@ describe('the vendor name scan', () => {
     expect(vendorMatchesIn('src/ui/x.tsx', source).map((match) => match.number)).toEqual([2, 3, 4, 6]);
   });
 
-  it('refuses a vendor name written in src/backend', () => {
+  it('refuses a vendor name written in src/ui and does not scan src/backend', () => {
     const source = `export const label = '${'Cla' + 'ude'} Haiku';`;
-    const found = groupMatches(vendorMatchesIn('src/backend/x.ts', source));
-    expect(found).toEqual([{ file: 'src/backend/x.ts', kind: 'vendor', line: source, count: 2, lines: [1, 1] }]);
+    const files = ['src/ui/x.tsx', 'src/backend/x.ts'];
+    const found = groupMatches(screenVendorMatches(files, () => source));
+    expect(found).toEqual([{ file: 'src/ui/x.tsx', kind: 'vendor', line: source, count: 2, lines: [1, 1] }]);
     const problems: string[] = allowanceProblems(found, [], { decisions: [], verified: [] });
     expect(problems).toEqual([expect.stringContaining('2 not listed')]);
   });

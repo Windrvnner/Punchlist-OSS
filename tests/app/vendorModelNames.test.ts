@@ -1,6 +1,7 @@
 // @vitest-environment node
-// The shown model list names no vendor unless the allowance lists it, and neither does any string in src. Each
-// connector is built on its stand-in, and every name its models() returns is matched like a string in src.
+// The shown model list names no vendor unless the allowance lists it, and neither does any string in src/ui or
+// src/app. Each connector is built on its stand-in, and every name its models() returns is matched like such a
+// string.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { claudeService } from '../../src/backend/claude';
@@ -10,7 +11,7 @@ import { tokenHolder } from '../../src/backend/signInToken';
 import { fakeApi } from '../backend/claudeStandIn';
 import { northStandIn } from '../backend/northStandIn';
 import { fakeServer } from '../backend/openaiStandIn';
-import { srcSources, vendorMatchesIn, VENDOR, type VendorMatch } from './vendorNamesKit';
+import { screenVendorMatches, srcSources, VENDOR, type VendorMatch } from './vendorNamesKit';
 // @ts-expect-error the script is plain JavaScript
 import { allowanceProblems, decisionEntries, groupMatches, keyOf, unlistedMatches } from '../../scripts/allowance.mjs';
 
@@ -70,9 +71,9 @@ function shownModelNames(): Promise<VendorMatch[]> {
   return modelNames;
 }
 
-describe('vendor names in src and in the shown model list', () => {
+describe('vendor names in screen code and in the shown model list', () => {
   it('is listed in scripts/vendor-names-allowance.json, every match and every entry', async () => {
-    const strings = srcSources().flatMap((file) => vendorMatchesIn(file, readFileSync(file, 'utf8')));
+    const strings = screenVendorMatches(srcSources(), (file) => readFileSync(file, 'utf8'));
     const names = await shownModelNames();
     const found = groupMatches([...strings, ...names]);
     const allowance = JSON.parse(readFileSync('scripts/vendor-names-allowance.json', 'utf8'));

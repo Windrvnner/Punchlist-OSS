@@ -1,8 +1,11 @@
-// Finds the vendor and service names written in src, for tests/app/vendorNames.test.ts and
+// Finds the vendor and service names written in screen code, for tests/app/vendorNames.test.ts and
 // tests/app/vendorModelNames.test.ts (which also covers the model lists of the claude, openai and north connectors).
-// It reads the string literals, template parts and JSX text of src/**/*.ts(x) as written. It does not read comments,
-// files that are not TypeScript (html, css, json), names reached through variables or identifiers, or a name split
-// across a concatenation.
+// It reads the string literals, template parts and JSX text of src/ui/**/*.ts(x) and src/app/**/*.ts(x) as written.
+// Code that names a provider elsewhere is not flagged. Not scanned: text written outside src/ui and src/app that can
+// still reach a screen, such as the control-file startup errors in src/control.ts and backend error messages (the
+// known lines are tracked in #1241). Not read: comments, files that are not TypeScript (html, css, json), names
+// reached through variables or identifiers, a name split across a concatenation, or a name with a digit attached
+// (`gpt4o`, `claude3`).
 import { readdirSync } from 'node:fs';
 import { parseSync, Visitor } from 'vite';
 
@@ -46,6 +49,13 @@ export function vendorMatchesIn(file: string, source: string): VendorMatch[] {
     JSXText: (node) => check(node.start, node.end, node.value),
   }).visit(parsed.program);
   return found;
+}
+
+const SCREEN_SOURCE = /^src\/(ui|app)\//;
+
+/** The vendor matches of each file among `files` that is under src/ui or src/app; other files are not read. */
+export function screenVendorMatches(files: string[], readSource: (file: string) => string): VendorMatch[] {
+  return files.filter((file) => SCREEN_SOURCE.test(file)).flatMap((file) => vendorMatchesIn(file, readSource(file)));
 }
 
 /** Every TypeScript source under src, with `/` separators. */

@@ -79,9 +79,13 @@ in `scripts/vendor-names-allowance.json` and `scripts/skipped-tests-allowance.js
 An allowance is `{ file, kind, line, count, issue }` or `{ file, kind, line, count, decision }`.
 `line` is the trimmed text of the matching line, and `count` is how many times it matches in that file.
 For a model name `line` is the model name, and for a skipped test it is the test's full name.
-The vendor-name test reads the string literals, template parts, and JSX text of `src/**/*.ts(x)`, plus the model names
-each connector returns.
-It does not read comments, html, css, or json files, names held only in identifiers, or names split by concatenation.
+The vendor-name test reads the string literals, template parts, and JSX text of `src/ui/**/*.ts(x)` and
+`src/app/**/*.ts(x)`, plus the model names each connector returns.
+Code that names a provider elsewhere is not flagged.
+Text written outside `src/ui` and `src/app` that can still reach a screen is not scanned, such as the control-file
+startup errors in `src/control.ts` and backend error messages; the known lines are tracked in #1241.
+It does not read comments, html, css, or json files, names held only in identifiers, names split by concatenation,
+or names with a digit attached (`gpt4o`, `claude3`).
 Exactly one of `issue` (an open issue number) or `decision` (a line of `docs/decisions.md` that is on
 `scripts/verified-decisions.json`) is set.
 Skipped-test entries also carry `platform` and `reason`.
