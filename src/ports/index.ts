@@ -240,9 +240,10 @@ export interface AiService {
   /**
    * Optional. What each line of a list is, as a firm's list is brought in, read whole in one call: a section or
    * subsection heading, an item, the rest of the item above it, a table's heading row, or not an item; and for a table,
-   * the columns that hold the item, section and subsection. Lines are numbered from 1. `thorough` asks the thorough
-   * model, when the standard model's reading left lines unplaced. Proposals only: the app words every item as its line
-   * and accounts for every line (domain/listRead).
+   * the columns that hold the item, section and subsection. Each line is given to the model by a handle (such as
+   * `L12`), numbered from 1, and answered by handle. The read is made in halves when the service refuses the list as
+   * too long or cuts the reply off. `thorough` asks the thorough model, when the standard model's reading left lines
+   * unplaced. Proposals only: the app words every item as its line and accounts for every line (domain/listRead).
    */
   readList?(input: { lines: string[]; thorough?: boolean }): Promise<Result<import('../domain/listRead').ListReply>>;
   /**

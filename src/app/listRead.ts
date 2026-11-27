@@ -2,8 +2,9 @@
  * Reading a list in with the model, every line accounted for, with accuracy over cost. The standard model reads the
  * whole list in one call; when its reading leaves lines unplaced (not named, or a table row whose named cell is blank),
  * the thorough model reads the whole list once more and fills those lines. What is still unplaced is left out,
- * where a person sees it and can bring it in (domain/listRead). The calls are retried as every AI call is
- * (backend/retry.ts).
+ * where a person sees it and can bring it in (domain/listRead). A list the service refuses as too long, or answers
+ * with a reply cut off, is read in halves by the backend (backend/listReadAi.ts). The calls are retried as every AI
+ * call is (backend/retry.ts).
  */
 import { decodeText } from '../domain/textEncoding';
 import type { AiService } from '../ports';
