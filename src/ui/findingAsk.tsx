@@ -1,3 +1,4 @@
+import { pageHash } from '../app/state';
 /**
  * A finding's links (linking design, sections 6 and 13; decisions, Checklist): the checklist item that raised it, the
  * questions asked about it or its item, and Ask the counterparty, with the Checklist pane's card.
@@ -100,7 +101,7 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
       {item && <>
         <div class="lbl">Checklist Item</div>
         <p class="dtxt" id="f-item">
-          <a href={`#checklist-${dealId}`} onClick={(e) => openItem(e, item.id)}>{item.text}</a>
+          <a href={'#' + pageHash('checklist', dealId)} onClick={(e) => openItem(e, item.id)}>{item.text}</a>
         </p>
       </>}
       {asked.length > 0 && <><div class="lbl">Asked</div><AskedList dealId={dealId} qs={asked} id="f-asked" /></>}

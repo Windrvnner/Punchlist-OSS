@@ -1,3 +1,4 @@
+import { pageHash } from '../app/state';
 /**
  * Ask the counterparty (linking design, sections 6 and 13): the card a linked question is typed in, and the list of the
  * questions already asked. Shared by the Checklist's open item and a finding's page.
@@ -20,7 +21,7 @@ export const STATUS: Record<Question['status'], string> = { open: 'open', answer
 export function AskedList({ dealId, qs, id }: { dealId: string; qs: Question[]; id: string }) {
   const store = useStore();
   const everyQuestion = { status: 'all', workstream: '', text: '' } as const;
-  const open = (q: Question) => navigate(store, `qa-${dealId}`, { selectedQuestion: q.id, qaFilter: everyQuestion });
+  const open = (q: Question) => navigate(store, pageHash('qa', dealId), { selectedQuestion: q.id, qaFilter: everyQuestion });
   return (
     <ul class="ckasked" id={id}>
       {qs.map((q) => (

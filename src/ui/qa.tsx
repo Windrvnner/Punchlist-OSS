@@ -1,3 +1,4 @@
+import { scopeHash } from '../app/conversations';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { RefObject } from 'preact';
 import { useAppState, useStore, fmtDate, useDismiss } from './hooks';
@@ -666,7 +667,7 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
           <span class="needs" title={ro ?? undefined}><button type="button" class="btn sm ico del"
             aria-label="Delete question" disabled={!!ro} title={ro ?? 'Delete'}
             onClick={() => setAsking(true)}><Icon name="trash" size={15} /></button></span>
-          <a class="btn sm" id="q-discuss" href={`#q-${q.dealId}-${q.id}`}>Discuss</a>
+          <a class="btn sm" id="q-discuss" href={'#' + scopeHash({ kind: 'question', dealId: q.dealId, questionId: q.id })}>Discuss</a>
           <CloseDetail onClose={onClose} />
         </div>
       </div>

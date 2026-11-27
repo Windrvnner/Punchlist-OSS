@@ -34,22 +34,9 @@ import { AccountRow } from './connection';
 import { ReadOnlyContext, SignedOutContext } from './editField';
 import { SERVICE } from '../control';
 import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
-import { isReading, dealHash, dealTwinLabels } from '../app/state';
+import { isReading, routeFromHash, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
 import { openNewDeal } from '../app/dealFolders';
-
-function routeFromHash(): State['ui']['route'] {
-  const h = (location.hash || '#deals').slice(1);
-  const fm = /^finding-(d_[0-9A-Z]{26})-(f_[0-9A-Z]{26})$/.exec(h);
-  if (fm) return { name: 'finding', dealId: fm[1], findingId: fm[2] };
-  const qm = /^q-(d_[0-9A-Z]{26})-(q_[0-9A-Z]{26})$/.exec(h);
-  if (qm) return { name: 'question', dealId: qm[1], questionId: qm[2] };
-  const cm = /^chat(?:-(d_[0-9A-Z]{26}))?(?:-(c[0-9a-z]{4,24}))?$/.exec(h);
-  if (cm) return { name: 'chat', ...(cm[1] ? { dealId: cm[1] } : {}), ...(cm[2] ? { conv: cm[2] } : {}) };
-  const m = /^(overview|deal|checklist|qa)-(d_[0-9A-Z]{26})$/.exec(h);
-  if (m) return { name: m[1] as 'overview' | 'deal' | 'checklist' | 'qa', dealId: m[2] };
-  return { name: 'home' };
-}
 
 export function App({ store }: { store: Store }) {
   return <StoreContext.Provider value={store}><Shell /></StoreContext.Provider>;
@@ -59,7 +46,7 @@ function Shell() {
   const store = useStore(); const s = useAppState();
   useEffect(() => {
     const apply = () => {
-      const route = routeFromHash(); const was = store.get().ui.route;
+      const route = routeFromHash(location.hash); const was = store.get().ui.route;
       const deal = (r: State['ui']['route']) => ('dealId' in r && r.dealId ? r.dealId : null);
       // list filters and the selected question belong to one deal: moving to another deal starts clean
       const fresh = deal(route) !== deal(was) ? {

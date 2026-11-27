@@ -43,6 +43,19 @@ export const DEAL_PAGES: readonly [Landing, string, string][] = [['overview', 'O
 export const pageHash = (page: Landing, dealId: string) => `${DEAL_PAGES.find((p) => p[0] === page)![2]}-${dealId}`;
 /** The address a deal opens on: the page the person chose in Settings. */
 export const dealHash = (prefs: Pick<Prefs, 'landing'>, dealId: string) => pageHash(prefs.landing, dealId);
+export function routeFromHash(hash: string): State['ui']['route'] {
+  const h = (hash || '#deals').slice(1);
+  const fm = /^finding-(d_[0-9A-Z]{26})-(f_[0-9A-Z]{26})$/.exec(h);
+  if (fm) return { name: 'finding', dealId: fm[1], findingId: fm[2] };
+  const qm = /^q-(d_[0-9A-Z]{26})-(q_[0-9A-Z]{26})$/.exec(h);
+  if (qm) return { name: 'question', dealId: qm[1], questionId: qm[2] };
+  const cm = /^chat(?:-(d_[0-9A-Z]{26}))?(?:-(c[0-9a-z]{4,24}))?$/.exec(h);
+  if (cm) return { name: 'chat', ...(cm[1] ? { dealId: cm[1] } : {}), ...(cm[2] ? { conv: cm[2] } : {}) };
+  const m = /^(overview|deal|checklist|qa)-(d_[0-9A-Z]{26})$/.exec(h);
+  if (m) return { name: m[1] as 'overview' | 'deal' | 'checklist' | 'qa', dealId: m[2] };
+  return { name: 'home' };
+}
+
 /** A file waiting to go with the next message of one conversation (`conv` is that conversation's key). */
 export interface Attachment {
   id: string; name: string; dealId: string; findingId?: string; conv: string;

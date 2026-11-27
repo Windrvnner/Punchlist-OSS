@@ -1,3 +1,4 @@
+import { pageHash } from '../app/state';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
 import type { Layer } from '../domain/checklist';
@@ -40,7 +41,7 @@ export function OverviewPage({ dealId }: { dealId: string }) {
         <section class={`twocol ov ${gaps.length ? '' : 'solo'} ${waiting ? 'first' : 'under'}`}>
           {gaps.length > 0 && <div><div class="lbl flagsl"><span role="heading"
             aria-level={2}>Gaps in the Documents</span></div><ul class="gaps linked">{gaps.map((g) => <li key={g.key}><a
-            href={`#checklist-${d.id}`} onClick={() => store.ui({ checklistFilter: 'gap' })}>{g.title}</a>{g.need &&
+            href={'#' + pageHash('checklist', d.id)} onClick={() => store.ui({ checklistFilter: 'gap' })}>{g.title}</a>{g.need &&
             <span>{g.need}</span>}</li>)}</ul></div>}
           <div><Documents deal={d} /></div>
         </section>
@@ -103,7 +104,7 @@ function Standing({ deal: d }: { deal: Deal }) {
   const qf = (status: 'open' | 'answered' | 'closed') => () => store.ui({ qaFilter: { ...store.get().ui.qaFilter, status } });
   const lines: Line[] = [
     {
-      id: 'ov-findings', title: 'Findings', href: `#deal-${d.id}`, go: ff('open'), total: findings.total,
+      id: 'ov-findings', title: 'Findings', href: '#' + pageHash('findings', d.id), go: ff('open'), total: findings.total,
       segs: [
         { k: 'open', n: findings.open, word: 'open', go: ff('open'),
           sub: [['may be out of date', findings.reassess, ff('reassess')]] },
@@ -112,7 +113,7 @@ function Standing({ deal: d }: { deal: Deal }) {
     },
     ...(c ? [checklistLine(d.id, c, cf)] : []),
     {
-      id: 'ov-qa', title: 'Q&A', href: `#qa-${d.id}`, go: qf('open'), total: questions.total,
+      id: 'ov-qa', title: 'Q&A', href: '#' + pageHash('qa', d.id), go: qf('open'), total: questions.total,
       segs: [
         { k: 'open', n: questions.open, word: 'open', go: qf('open') },
         { k: 'prog', n: questions.answered, word: 'answered', go: qf('answered') },
@@ -135,7 +136,7 @@ function checklistLine(
   const offLabel = `${num(counts.off)} turned off`
     + (counts.offOpen ? `, ${num(counts.offOpen)} with an open finding` : '');
   return {
-    id: 'ov-checklist', title: 'Checklist', href: `#checklist-${dealId}`, go: filter('all'), total: counts.all,
+    id: 'ov-checklist', title: 'Checklist', href: '#' + pageHash('checklist', dealId), go: filter('all'), total: counts.all,
     off: counts.off ? [offLabel, filter('off')] : undefined,
     segs: [
       { k: 'open', n: counts.toResolve, word: 'to resolve', go: filter('all'), sub: [

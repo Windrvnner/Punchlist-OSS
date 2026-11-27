@@ -68,3 +68,11 @@ export function splitCited(text: string, sourceCount: number): CitedPart[] {
   settle(); push(run);
   return out;
 }
+
+/** Page labels keep their original digits when used as a reading-list key. */
+export const pageDigits = (loc: string) => /p\.\s*(\d+)/.exec(loc)?.[1];
+
+export function pageOf(loc: string): number | null {
+  const digits = pageDigits(loc);
+  return digits === undefined ? null : Number(digits);
+}

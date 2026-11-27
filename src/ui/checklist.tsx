@@ -1,3 +1,5 @@
+import { scopeHash } from '../app/conversations';
+import { pageHash } from '../app/state';
 import { findingsRaisedOnItem, checklistView, gapSearches, type ChecklistHeading } from '../app/checklistView';
 import { titleStyle } from './titleStyle';
 import { Fragment, type ComponentChildren, type RefObject } from 'preact';
@@ -379,7 +381,7 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
   const logWhy = ro ?? target.why;
   // a document opens in the deal's conversation, which is where a page can be read and asked about; closing it comes back here,
   // with the focus on the link it was opened from (the i-th in the list), or on the item if that link is not shown any more
-  const read = (src: { doc: string; docId: string; loc: string }, i: number) => navigate(store, `chat-${dealId}`, { docAside: { doc: src.doc, docId: src.docId, dealId, loc: src.loc, from: 'From the checklist', item: r.text, back: `checklist-${dealId}`, backFocus: [`#ck-sources li:nth-child(${i + 1}) .ckopen`, `#ck-rows [data-item="${r.id}"]`] } });
+  const read = (src: { doc: string; docId: string; loc: string }, i: number) => navigate(store, scopeHash({ kind: 'deal', dealId }), { docAside: { doc: src.doc, docId: src.docId, dealId, loc: src.loc, from: 'From the checklist', item: r.text, back: pageHash('checklist', dealId), backFocus: [`#ck-sources li:nth-child(${i + 1}) .ckopen`, `#ck-rows [data-item="${r.id}"]`] } });
   // The pane's body scrolls under its fixed header. While a question is being typed, the box's buttons stay in sight:
   // opening the box, or a line more in it, scrolls the body just enough to show them clear of its bottom fade (22px).
   const body = useRef<HTMLDivElement>(null);

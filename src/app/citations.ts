@@ -1,3 +1,8 @@
+import { pageOf } from '../domain/cite';
+export { pageOf };
+
+/** Reading mode opens only the first place of a grouped citation. */
+export const firstCitationPage = (loc: string) => pageOf(loc.split(' · ')[0]);
 /**
  * How citations are grouped, ordered and counted wherever they are shown (#950): the reading-mode document list,
  * a cited phrase's pop and a finding's list of sources, the source chips under an answer, a finding or a question,
@@ -70,10 +75,7 @@ export interface MenuGroup { key: string; ref: DocRef; items: MenuItem[]; pages:
 export interface MenuSection { key: string; title: string; groups: MenuGroup[] }
 
 /** A place's page number, for ordering; a place with none ("cl. 7.2", "Ops!F12") goes last. */
-const pageNo = (loc: string) => {
-  const match = /p\.\s*(\d+)/.exec(loc);
-  return match ? +match[1] : Number.MAX_SAFE_INTEGER;
-};
+const pageNo = (loc: string) => pageOf(loc) ?? Number.MAX_SAFE_INTEGER;
 /** What cited it, as a heading: the question that was asked, or the finding / draft / response. */
 const heading = (x: DocRef) => x.ask ?? x.from.replace(/^From /, '').replace(/^./, (c) => c.toUpperCase());
 

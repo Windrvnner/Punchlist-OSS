@@ -1,3 +1,4 @@
+import { pageHash } from '../app/state';
 /**
  * Navigation with intent: go to a route and, once it is the current route, apply a
  * UI patch (which question is selected, which document is open). The Shell collects
@@ -24,7 +25,7 @@ export function focusSearchResult(store: Store, id: string, focus: () => void) {
 
 /** opens a deal's Checklist with one item open beside the list */
 export const openChecklistItem = (store: Store, dealId: string, itemId: string) =>
-  navigate(store, `checklist-${dealId}`, { selectedChecklist: itemId });
+  navigate(store, pageHash('checklist', dealId), { selectedChecklist: itemId });
 
 export function takeNavPatch(): Partial<UiState> {
   const p = pending && location.hash === '#' + pending.hash ? pending.patch : {};
@@ -57,4 +58,4 @@ export function takeFocusAfter(): string[] {
  */
 let beforeFinding = '';
 if (typeof window !== 'undefined') window.addEventListener('hashchange', (e) => { const old = new URL(e.oldURL).hash.slice(1); if (!old.startsWith('finding-')) beforeFinding = old; });
-export const afterDeletingFinding = (dealId: string) => (beforeFinding === `checklist-${dealId}` ? beforeFinding : `deal-${dealId}`);
+export const afterDeletingFinding = (dealId: string) => (beforeFinding === pageHash('checklist', dealId) ? beforeFinding : pageHash('findings', dealId));

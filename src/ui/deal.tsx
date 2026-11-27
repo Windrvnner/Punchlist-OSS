@@ -88,7 +88,7 @@ export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: 
   const locked = useDealLock(d);
   return (
     <>
-      <div class="trail"><a class="th" href="#deals">Home</a><span class="sep">›</span>{route === 'overview' ? <span class="tn" title={d.name}>{d.name}</span> : <><a class="tn" href={`#overview-${d.id}`} title={d.name}>{d.name}</a><span class="sep">›</span><span class="tp">{DEAL_PAGES.find((p) => p[0] === route)![1]}</span></>}{facts && <><span class="sep">·</span><span class="facts">{facts}</span></>}
+      <div class="trail"><a class="th" href="#deals">Home</a><span class="sep">›</span>{route === 'overview' ? <span class="tn" title={d.name}>{d.name}</span> : <><a class="tn" href={'#' + pageHash('overview', d.id)} title={d.name}>{d.name}</a><span class="sep">›</span><span class="tp">{DEAL_PAGES.find((p) => p[0] === route)![1]}</span></>}{facts && <><span class="sep">·</span><span class="facts">{facts}</span></>}
         {/* the counterparty sits at the right end of the line, on every tab; the deal's structure, sector and technology are on Overview */}
         <span class="tfacts"><ReadOnlyContext.Provider value={locked}><EditField keep={`${d.id}:counterparty`} read={readDeal(d.id, 'counterparty')} label="Counterparty" placeholder="Counterparty" className="edit inl" cap={{ cls: 'lift', icon: <Icon name="building" size={14} /> }} value={d.counterparty} rev={d.rev} maxLength={80} commit={(v, over) => store.dispatch(EditDeal, { dealId: d.id, counterparty: v }, { quiet: true, over })} /></ReadOnlyContext.Provider></span></div>
       <div class="headrow">

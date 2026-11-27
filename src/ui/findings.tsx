@@ -1,3 +1,4 @@
+import { briefParts, scopeHash } from '../app/conversations';
 import { Fragment } from 'preact';
 import { onListText, OnListMark } from './issuesList';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
@@ -46,7 +47,8 @@ export function markText(f: Finding, questions?: Record<string, { n: number } | 
 
 /** the dot after a finding's workstream: none when it has no workstream (an imported point the model could not place), so no line starts with a dot */
 const dot = (f: { workstream: string }) => (f.workstream ? ' · ' : '');
-export const findingHref = (f: { dealId: string; id: string }) => `#finding-${f.dealId}-${f.id}`;
+export const findingHref = (f: { dealId: string; id: string }) =>
+  '#' + scopeHash({ kind: 'finding', dealId: f.dealId, findingId: f.id });
 
 /** Text whose sentences end in [n] become cited phrases pointing at sources[n-1]. */
 export function Cited({ text, sources, onOpen, whole, onMore }: { text: string; sources: Source[]; onOpen?: (s: Source) => void; whole?: boolean; onMore?: () => void }) {
@@ -66,16 +68,14 @@ export function Cited({ text, sources, onOpen, whole, onMore }: { text: string; 
  */
 export function Brief({ paragraphs, deal, onFinding, marked }: { paragraphs: string[]; deal: Deal; onFinding?: (f: Finding) => void; marked?: string }) {
   const s = useAppState();
-  return <>{paragraphs.map((p, i) => <p key={i}>{p.split(/(\{[^|}]+\|f_[0-9A-Z]{26}\})/).map((seg, j) => {
-    const m = /^\{([^|}]+)\|(f_[0-9A-Z]{26})\}$/.exec(seg);
-    if (!m) return <span key={j}>{seg}</span>;
-    const f = s.findings[m[2]];
-    if (!f) return <span key={j}>{m[1]}</span>;
+  return <>{paragraphs.map((p, i) => <p key={i}>{briefParts(p).map(({ text, findingId }, j) => {
+    const f = findingId && s.findings[findingId];
+    if (!f) return <span key={j}>{text}</span>;
     const open = () => { if (onFinding) onFinding(f); else location.hash = findingHref(f).slice(1); };
     // a finding raised by hand with nothing cited still opens from here; it has no sources to show on hover
-    if (!f.sources.length) return <span key={j} class="ref"><span class={`rb ${f.id === marked ? 'on' : ''}`} role="button" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}>{m[1]}</span></span>;
+    if (!f.sources.length) return <span key={j} class="ref"><span class={`rb ${f.id === marked ? 'on' : ''}`} role="button" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}>{text}</span></span>;
     // every source is within reach: a long list shows a few and "N more", which opens the finding at its full list
-    return <Ref key={j} text={m[1]} sources={f.sources} className={f.id === marked ? 'on' : ''} onOpen={open} openText="Open finding" onMore={() => { const shown = sourceLists.get(f.id); wantSources = f.id; open(); requestAnimationFrame(() => { if (shown && wantSources === f.id && sourceLists.get(f.id) === shown) { wantSources = null; shown(); } }); }} />;
+    return <Ref key={j} text={text} sources={f.sources} className={f.id === marked ? 'on' : ''} onOpen={open} openText="Open finding" onMore={() => { const shown = sourceLists.get(f.id); wantSources = f.id; open(); requestAnimationFrame(() => { if (shown && wantSources === f.id && sourceLists.get(f.id) === shown) { wantSources = null; shown(); } }); }} />;
   })}</p>)}</>;
 }
 

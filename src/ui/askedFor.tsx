@@ -1,3 +1,4 @@
+import { pageHash } from '../app/state';
 /**
  * What a question was asked for (decisions, Checklist: "a question says what it was asked for"; linking design,
  * section 6).
@@ -26,6 +27,6 @@ export function AskedFor({ q }: { q: Question }) {
   };
   const link = f
     ? <a href={findingHref(f)} title={`The finding “${name}”`}>“{name}”</a>
-    : <a href={`#checklist-${q.dealId}`} title={`The checklist item “${name}”`} onClick={openItem}>“{name}”</a>;
+    : <a href={'#' + pageHash('checklist', q.dealId)} title={`The checklist item “${name}”`} onClick={openItem}>“{name}”</a>;
   return <span class="sub qfor" id="q-for">Asked for {link}</span>;
 }

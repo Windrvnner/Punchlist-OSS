@@ -13,7 +13,7 @@ import { docKey, ownFilesId, type Question, type Source } from '../domain/model'
 import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { findQuestions } from '../domain/suggest';
 import { proposeQuestion, suggestedFor } from './suggestedQuestion';
-import { withoutMarkers } from '../domain/cite';
+import { pageDigits, withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
 import { TITLE_MAX } from './commands/findings';
 import { chipsSendable, dealCopied, filesSendable } from './attachments';
@@ -344,7 +344,21 @@ function answered(store: Store, scope: Scope, pending: Message, replied: Replied
 }
 
 /** An answer's text as it leaves the conversation, as a response or a question: finding links as words, no [n] markers. */
-export const withoutFindingLinks = (text: string) => text.replace(/\{([^|}]+)\|f_[0-9A-Z]{26}\}/g, '$1');
+type BriefPart = { text: string; findingId?: string };
+
+export function briefParts(paragraph: string): BriefPart[] {
+  const parts: BriefPart[] = [];
+  let start = 0;
+  for (const match of paragraph.matchAll(/\{([^|}]+)\|(f_[0-9A-Z]{26})\}/g)) {
+    if (match.index > start) parts.push({ text: paragraph.slice(start, match.index) });
+    parts.push({ text: match[1], findingId: match[2] });
+    start = match.index + match[0].length;
+  }
+  if (start < paragraph.length) parts.push({ text: paragraph.slice(start) });
+  return parts;
+}
+
+export const withoutFindingLinks = (text: string) => briefParts(text).map((part) => part.text).join('');
 export const answerText = (m: Message) => withoutMarkers(withoutFindingLinks(m.text), m.sources?.length ?? 0);
 
 /** A new question from a finding starts with the answer. On a deal, it starts with what was asked. */
@@ -403,7 +417,11 @@ export async function askVerdict(store: Store, dealId: string, questionId: strin
 
 /** `from` says what cited it; `ask` is the question that led to the answer, when an answer cited it; `dealId` only on answers across deals. */
 export interface DocRef { doc: string; docId: string; loc: string; from: string; ask?: string; dealId?: string }
-const pageKey = (loc: string) => { const m = /p\.\s*(\d+)/.exec(loc); if (m) return 'p. ' + m[1]; const sh = /^([^!]+)!/.exec(loc); return sh ? sh[1] : loc; };
+function pageKey(loc: string) {
+  const page = pageDigits(loc);
+  if (page) return 'p. ' + page;
+  return /^([^!]+)!/.exec(loc)?.[1] ?? loc;
+}
 
 /**
  * The documents under review in a conversation, one entry per document page, in order. This is the

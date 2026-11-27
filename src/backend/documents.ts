@@ -1,3 +1,4 @@
+import { pageOf } from '../domain/cite';
 /**
  * The document service on real folders.
  *
@@ -1108,7 +1109,7 @@ export function nodeDocuments(o: DocumentsOptions) {
         const i = open.indexOf(d.docId); if (i >= 0) open.splice(i, 1); open.push(d.docId);
         while (open.length > KEPT_OPEN) { const old = open.shift() as string; discard(old); }
       }
-      const m = /p\.\s*(\d+)/.exec(loc); return ok({ kind: 'pdf', url: urlFor(tokenFor(file)), page: m ? +m[1] : 1, ...(d.pages !== undefined ? { pages: d.pages } : {}) });
+      return ok({ kind: 'pdf', url: urlFor(tokenFor(file)), page: pageOf(loc) ?? 1, ...(d.pages !== undefined ? { pages: d.pages } : {}) });
     }),
     attach: safe(async (dealId, file) => {
       const hash = hashBytes(file.bytes); const docId = docIdFor(hash);
