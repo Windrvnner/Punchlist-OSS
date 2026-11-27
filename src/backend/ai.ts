@@ -440,8 +440,6 @@ function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
 const withoutMemoMarks = (text: string, space = '') => text.replace(/\s*\[\d+\]/g, space)
   .replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1');
 const MEMO_RISK_WORDS = 200;
-const MEMO_RISK_TEXT_CHARS = 4_000;
-const MEMO_RISK_TOKEN_CHARS = 256;
 const MEMO_RISK_SHAPE = '{"paragraphs": ["one paragraph per string, with [n] markers"], "sources": [...]}';
 
 /** Count paragraph breaks inside strings, including the separator used to fit citations across paragraphs (#659). */
@@ -450,20 +448,15 @@ function memoRiskParagraphs(value: unknown): string[] {
     .filter((paragraph) => paragraph.trim());
 }
 
-/** Bound the write-up even when malformed text fits the word count (#659). */
+/** Characters the memo file cannot carry; the document builder would drop or choke on them (#659, #806). */
+const UNWRITABLE_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/;
+const hasUnwritableText = (paragraphs: string[]) => UNWRITABLE_TEXT.test(paragraphs.join(' '));
+
+/** Whether a write-up is within two paragraphs and the word target. Only a retry hangs on this (#806). */
 function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
   if (!paragraphs.length || paragraphs.length > 2) return false;
-  const text = paragraphs.join(' ');
-  // Control characters discarded by the document builder can hide unbroken text (#659).
-  const invalidText = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/;
-  if (text.length > MEMO_RISK_TEXT_CHARS || invalidText.test(text)) return false;
-  const scrubbed = paragraphs.map((paragraph) => unid(paragraph, ids));
-  // Citation fitting can join adjacent text when it removes an invalid marker (#659).
-  const withoutCitations = scrubbed.map((paragraph) => withoutMemoMarks(paragraph)).join(' ');
-  // Only ordinary document whitespace can separate printed words (#659).
-  const oversized = (value: string) => value.split(/[ \t\r\n]+/).some((token) => token.length > MEMO_RISK_TOKEN_CHARS);
-  if (oversized(text) || oversized(withoutCitations)) return false;
-  const prose = scrubbed.map((paragraph) => withoutMemoMarks(paragraph, ' ')).join(' ');
+  if (hasUnwritableText(paragraphs)) return false;
+  const prose = paragraphs.map((paragraph) => withoutMemoMarks(unid(paragraph, ids), ' ')).join(' ');
   const words = prose.match(/\S+/g) ?? [];
   return words.length > 0 && words.length <= MEMO_RISK_WORDS;
 }
@@ -481,12 +474,21 @@ function mergedText(reply: { text?: unknown } | null): string {
 }
 
 function readCorrection(
-  prompt: string, reply: Record<string, unknown> | null, again: { wrong: string; maxEcho?: number },
+  prompt: string, reply: Record<string, unknown> | null, again: { wrong: string },
 ): string {
   if (!reply) return prompt;
   const previous = JSON.stringify(reply);
-  const echo = previous.length <= (again.maxEcho ?? Infinity) ? `\n\nYou replied:\n${previous}` : '';
-  return `${prompt}${echo}\n\nThat cannot be used: ${again.wrong}. Send the whole reply again, put right.`;
+  const wrong = `That cannot be used: ${again.wrong}. Send the whole reply again, put right.`;
+  return `${prompt}\n\nYou replied:\n${previous}\n\n${wrong}`;
+}
+
+/**
+ * A write-up is kept as the model gave it, however long, unless it is empty, gives advice, or has characters the
+ * memo file cannot carry (never altered: the findings' own words stand instead) (#806).
+ */
+function memoRiskKept(reply: Record<string, unknown>, advises: (text: string) => boolean): boolean {
+  const paragraphs = memoRiskParagraphs(reply.paragraphs);
+  return paragraphs.length > 0 && !hasUnwritableText(paragraphs) && !paragraphs.some(advises);
 }
 
 /** Send unusable write-ups through the document reader's retry policy (#659). */
@@ -495,10 +497,9 @@ function memoRiskReadOptions(escalate: string, advises: (text: string) => boolea
     const paragraphs = memoRiskParagraphs(reply.paragraphs);
     return memoRiskFits(paragraphs, ids) && !paragraphs.some(advises);
   };
-  const wrong = 'it is empty, contains oversized text, gives advice or a judgment, or exceeds '
-    + `the limit of two paragraphs and ${MEMO_RISK_WORDS} words`;
-  // Keep an oversized reply from making the correction request too long (#659).
-  return { escalate, usable, wrong, maxEcho: MEMO_RISK_TEXT_CHARS, retrySharedModel: true };
+  const wrong = 'it is empty, has characters a document cannot hold, gives advice or a judgment, or is longer than '
+    + `two paragraphs and ${MEMO_RISK_WORDS} words: shorten it to fit`;
+  return { escalate, usable, wrong, retrySharedModel: true };
 }
 
 /**
@@ -2239,7 +2240,7 @@ export function nodeAi(o: AiOptions) {
         const r = await read('memoRisk', [dealId], m.standard, ask, fs.map(plain).join(' '), { [dealId]: sourceIds },
           MEMO_RISK_SHAPE, options);
         if (!r.ok) { if (r.error.kind === 'unreachable') throw Object.assign(new Error(r.error.message), { code: 'unreachable' }); return g; }
-        if (!options.usable(r.value.reply) || !r.value.sent.length) return g;
+        if (!memoRiskKept(r.value.reply, advises) || !r.value.sent.length) return g;
         const paras = memoRiskParagraphs(r.value.reply.paragraphs).map((p) => unid(p, ids)).filter((p) => p.trim());
         const out = fit(paras.join(PARAGRAPH_SEAM), r.value.reply.sources as Cited[], r.value.sent, false, true);
         return { ...g, body: out.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()), sources: out.sources };
