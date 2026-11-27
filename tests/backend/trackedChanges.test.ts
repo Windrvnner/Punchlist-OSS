@@ -116,4 +116,19 @@ describe("a draft's tracked changes in a request refused as too long", () => {
     expect(batches.every((c) => wasLines(c.prompt).length === LISTED)).toBe(true);
     expect(s.calls.some((c) => c.prompt.includes('too long to send together'))).toBe(false);
   });
+
+  it('a request refused for its documents, not its changes, lists every change again once it sends fewer', async () => {
+    const s = setup(() => ({ text: 'The ratio is 1.20x.', sources: [] }), { d1: [DRAFT, FA, TS] },
+      { changes: clauseChanges(PASSAGES), library: [] });
+    await deal(s.repo);
+    const orig = s.svc.complete.bind(s.svc);
+    s.svc.complete = async (input) => {
+      if ((input.files?.length ?? 0) > 2) throw tooLong('too long', 400);
+      return orig(input);
+    };
+    val(await s.ai.answer(ask('What ratio does the facility agreement markup set?')));
+    const last = s.calls.filter((c) => c.prompt.startsWith('Documents:')).at(-1)!;
+    expect(sentNames(last)).toContain(DRAFT.name);
+    expect(wasLines(last.prompt).length).toBe(PASSAGES);
+  });
 });

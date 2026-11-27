@@ -60,7 +60,7 @@ import {
 } from './lenient';
 import { listReadPrompt, listReply, readListInParts } from './listReadAi';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK, allChanges, fewerChanges,
-  withFewerChanges, type ChangeShare } from './limits';
+  changesFor, withFewerChanges, type ChangeShare } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
 import { inParts, partSize, type PartReply, type PartsDone } from './parts';
 import { tokens, fold, indexWords } from './words';
@@ -1524,7 +1524,12 @@ export function nodeAi(o: AiOptions) {
    */
   async function changesOf(dealId: string, id: string, docId: string, share: ChangeShare): Promise<string[]> {
     if (!o.docs.changes) return [];
-    let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return []; }
+    let r: Result<ChangeList>;
+    try {
+      r = await o.docs.changes(dealId, docId);
+    } catch {
+      return [];
+    }
     if (!r.ok || !r.value.passages.length) return [];
     const passages = r.value.passages;
     const listed = Math.floor(passages.length / 2 ** share.halvings);
@@ -1532,7 +1537,8 @@ export function nodeAi(o: AiOptions) {
     const out = [`  The changes in ${id}, read from the file itself (these are fact, not a reading):`];
     for (const p of passages.slice(0, listed)) {
       const who = p.changes.map((c) => `${c.kind}${c.text ? ` "${c.text.replace(/\s+/g, ' ').trim()}"` : ''}${c.by ? ` by ${c.by}` : ''}${c.at ? ` on ${c.at.slice(0, 10)}` : ''}`).join('; ');
-      const was = p.before.replace(/\s+/g, ' ').trim(); const now = p.after.replace(/\s+/g, ' ').trim();
+      const was = p.before.replace(/\s+/g, ' ').trim();
+      const now = p.after.replace(/\s+/g, ' ').trim();
       out.push(`  - was: "${was}" / now: "${now}" (${who})`);
     }
     const left = passages.length - listed;
@@ -1581,11 +1587,11 @@ export function nodeAi(o: AiOptions) {
    * draft's tracked changes are listed as `share` leaves them (#1381). `spansDeals`: the prompt spans several deals,
    * so each document is named with its deal (#1162).
    */
-  async function send(sent: Sent[], spansDeals = false, share = allChanges()):
+  async function send(sent: Sent[], spansDeals: boolean, share: ChangeShare):
     Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
     const idOf = (s: Sent) => docHandle(s, spansDeals);
-    share.listed = 0;
+    changesFor(share, sent.map((s) => `${s.dealId}|${s.rec.docId}`).join(' '));
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
@@ -1831,7 +1837,10 @@ export function nodeAi(o: AiOptions) {
       } catch (e) {
         // a request refused as too long lists fewer tracked changes, while it lists any, before a document is left
         // out (#1381)
-        if (fewerChanges(share, e)) { round--; continue; }
+        if (fewerChanges(share, e)) {
+          round--;
+          continue;
+        }
         // a request the service refuses as too long is asked again with the likeliest half of the documents, down to one (limits.ts)
         // one too long even alone is left out, and the others are tried without it
         if (isTooLong(e) && sent.length > 1) { pool ??= [...sent]; sent.splice(Math.ceil(sent.length / 2)); round--; continue; }
@@ -2075,9 +2084,9 @@ export function nodeAi(o: AiOptions) {
    * when the service fails. With `redo`, the items are ones whose first replies could not be used: each is sent back with
    * what was wrong with it, to be put right.
    */
-  async function check(items: ChecklistItem[], sent: Sent[], model: string,
+  async function check(items: ChecklistItem[], sent: Sent[], model: string, share: ChangeShare,
     redo?: Map<string, { why: string; said?: unknown }>, fix = true,
-    share = allChanges()): Promise<(Map<string, Seen> & { cut?: ChecklistItem[] }) | null> {
+  ): Promise<(Map<string, Seen> & { cut?: ChecklistItem[] }) | null> {
     const { files, listing, got } = await send(sent, false, share);
     // the folder of one of them stopped answering since they were chosen: the items are not settled on the rest
     if (lostSome(sent, got)) { const why = awayWhy(sent[0].dealId, sent.filter((x) => !got.includes(x)).map((x) => x.rec.docId)); return new Map(items.map((it) => [it.id, { kind: 'weak' as const, why, reason: why }])); }
@@ -3223,7 +3232,7 @@ export function nodeAi(o: AiOptions) {
         const done = await inParts(todo, size, async (part) => {
           for (;;) {
             try {
-              const seen = await check(part, sentOf(dealId, using), model, redo, fix, share);
+              const seen = await check(part, sentOf(dealId, using), model, share, redo, fix);
               return { got: new Map(part.flatMap((it, k) => (seen?.has(it.id) ? [[k, seen.get(it.id)!] as const] : []))), ...(seen?.cut ? { cut: seen.cut.map((it) => part.indexOf(it)) } : {}) };
             } catch (e) {
               if (!isTooLong(e)) throw e;

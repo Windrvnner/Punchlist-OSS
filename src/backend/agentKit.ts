@@ -72,7 +72,7 @@ export interface AgentKit {
    * put documents in the store and list them for a prompt, each by its id (`spansDeals`: with its deal), a draft's
    * tracked changes as `share` leaves them (#1381); `got` are those really there
    */
-  send(sent: Sent[], spansDeals?: boolean, share?: ChangeShare):
+  send(sent: Sent[], spansDeals: boolean, share: ChangeShare):
     Promise<{ files: string[]; listing: string; got: Sent[] }>;
   /** keep the citations that can be stood behind, renumbering the markers in the text */
   fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean): { text: string; sources: Source[] };

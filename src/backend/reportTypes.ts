@@ -108,7 +108,7 @@ export interface ReportKit {
    * put a document in the service's store, listed for a prompt with its tracked changes as `share` leaves them
    * (#1381); null when it cannot be sent from this PC
    */
-  send: (rec: DocRecord, share?: ChangeShare) => Promise<SentDoc | null>;
+  send: (rec: DocRecord, share: ChangeShare) => Promise<SentDoc | null>;
   /** keep the citations that name the document sent and a page it has, and renumber the markers to match */
   fit: (text: string, cited: Cited[] | undefined, sent: Sent[]) => { text: string; sources: Source[] };
   workstreams: readonly string[];
