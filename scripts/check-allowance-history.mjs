@@ -1,6 +1,6 @@
 // Fails when an allowance file grows relative to main: every entry, whether it cites an issue or a decision, may only
 // be kept, lowered or removed, and a decision must already be on main's scripts/verified-decisions.json.
-// A pane-of-glass entry may move to the new text of an edited line (scripts/allowance-moves.mjs).
+// A pane-of-glass issue entry may move to the new text of an edited line (scripts/allowance-moves.mjs).
 // Needs full history (CI's static job has it).
 import { existsSync, readFileSync } from 'node:fs';
 import { ALLOWANCE_FILES, committedJson, describe, git, keyOf, mergeBase } from './allowance.mjs';

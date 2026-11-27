@@ -97,11 +97,15 @@ Every entry, whether it cites an issue or a decision, can only be kept, lowered,
 So a new flagged line in `src/ui` cannot be added: it belongs in `src/app`, formatting helpers included, unless it
 is an edit of a listed line that the move rule below accepts.
 Editing a listed line (renaming a variable, reformatting) changes its text, and so its key.
-Its entry may move to the new text when the diff with `main` shows the edit plainly: the same file, kind, and issue or
-decision; the old text no longer in the file; and the old line removed and the new line added in one hunk.
-The moved entries together take at most the old entry's count.
+An `issue` entry may move to the new text when the diff with `main` shows a one-for-one swap: the same file, kind,
+and issue; the old line and the new line at the same position of one hunk that removes as many lines as it adds;
+and the old line's matches on the branch fallen by the moved count, so one of two identical lines can move.
+The moved entries together take at most what the old entry lost.
 To move one, run `node scripts/check-pane-of-glass.mjs --list`, which prints the new text, and change the entry's
-`line` to it, keeping its issue or decision.
+`line` to it, keeping its issue.
+A `decision` entry never moves: to edit a line listed under a decision, first move the formatting into a helper the
+check does not flag, or relabel the entry under an open issue in an earlier pull request.
+Renaming a screen file is not a move; its entries count as new.
 An entry whose issue `main` already names cannot switch to another issue or to a decision; a decision entry can
 switch to an issue.
 A `decision` entry needs a decision already on `main`'s `scripts/verified-decisions.json`, so a decision verified in a
@@ -130,9 +134,10 @@ assignment to `.length`, and a numeric `maxLength`, `minLength`, `min`, or `max`
 and a regex literal or a `RegExp` call.
 Any other method, property, or construct is review's job, for example `.map`, `.flatMap`, `.includes`, `.join`,
 `.concat`, `.at`, `.replace` without a regex, `.split`, `.trim`, `.startsWith`, `.pop`, `.shift`, `Array.from`,
-`new Set`, a bare `.length` read, `Math.min`, `Math.max`, a method name held in a variable, `Function.prototype.call`, destructured `length` or `Date.parse`,
-`performance.now`, `queueMicrotask`, plain `if` logic on state, references that are not called
-(`const f = Date.now`, `rows.sort` passed as a value), and named constants.
+`new Set`, a bare `.length` read, `Math.min`, `Math.max`, a method name held in a variable,
+`Function.prototype.call`, destructured `length` or `Date.parse`, `performance.now`, `queueMicrotask`, plain `if`
+logic on state, references that are not called (`const f = Date.now`, `rows.sort` passed as a value), and named
+constants.
 
 The GitHub Actions workflow also builds the Windows installer when it is started by hand.
 
