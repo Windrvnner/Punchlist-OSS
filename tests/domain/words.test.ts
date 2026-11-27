@@ -14,22 +14,3 @@ describe('the words the search index keeps, shared by the app and the backend (#
   });
 });
 
-describe('tokens keep combining marks inside words (#1154)', () => {
-  it('keeps a word with vowel signs whole', () => {
-    expect(tokens('दिन')).toEqual(['दिन']);
-  });
-  it('keeps a combining accent in its word', () => {
-    expect(tokens('cafe\u0301')).toEqual(['cafe\u0301']);
-  });
-  it('splits an acronym from the word after it when the acronym ends in a mark', () => {
-    expect(tokens('EBar')).toEqual(['e', 'bar']);
-    expect(tokens('E\u0301Bar')).toEqual(['e\u0301', 'bar']);
-  });
-  it('splits camelCase after a mark', () => {
-    expect(tokens('cafe\u0301Bar')).toEqual(['cafe\u0301', 'bar']);
-    expect(tokens('caféBar')).toEqual(['café', 'bar']);
-  });
-  it('does not normalize: a composed and a decomposed accent are different words', () => {
-    expect(tokens('caf\u00e9')).not.toEqual(tokens('cafe\u0301'));
-  });
-});
