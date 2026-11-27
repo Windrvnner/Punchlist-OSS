@@ -79,7 +79,7 @@ export class FolderReader {
    * found, for the prompt. A folder read for the same thing before in this conversation reads only what was not read
    * then (documents added since included); for something else, or in another conversation, it is read again. More
    * than `folderDocs` documents still to read are read only when the person has `agreed`. What goes back is bounded
-   * (the run's `pages.chars`, #480): batches that found nothing are counted, not listed, and past the bound a batch
+   * (the run's `room`, #480): batches that found nothing are counted, not listed, and past the bound a batch
    * that found something gives its places only. Throws only when the service cannot be reached.
    */
   async read(said: string, lookFor: string, agreed: boolean): Promise<string> {
@@ -342,11 +342,12 @@ class FolderPass {
   }
 
   /**
-   * What was found, bounded: in full for the first half of the room, then by its places alone; a batch past the room
-   * is counted, and its documents are not listed to the model, so the prompt stays bounded however large the folder.
+   * What was found, bounded by the run's room: in full for the first half of it, then by its places alone; a batch
+   * past it is counted, and its documents are not listed to the model, so the prompt stays bounded however large the
+   * folder. The first batch always gives its places, however little room is left, so a read never says nothing.
    */
   private boundedFindings(): string[] {
-    const room = this.run.pages.chars;
+    const room = this.run.room();
     let used = 0;
     let over = 0;
     const lines: string[] = [];
@@ -357,7 +358,7 @@ class FolderPass {
       const newDocs = finding.got.filter((x) => !this.before.has(x));
       const listing = newDocs.reduce((sum, x) => sum + listingChars(this.run.idOf(x)), 0);
       const line = used + full.length + listing <= room / 2 ? full
-        : used + short.length + listing <= room ? short
+        : !lines.length || used + short.length + listing <= room ? short
         : '';
       if (line) {
         lines.push(line);

@@ -357,7 +357,7 @@ describe('a folder read is bounded by the model\'s room (#480)', () => {
   });
 
   it('the findings and their listing fit the room; each batch is full, places, or counted (#480)', async () => {
-    const compactAt = 2000;
+    const compactAt = 12_000;
     const s = everyBatchFinds(200, 'y'.repeat(600), { compactAt });
     expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
     const { block, full, places, over } = handed(s.turns[1].prompt);
@@ -369,6 +369,26 @@ describe('a folder read is bounded by the model\'s room (#480)', () => {
     const listing = (full + places) * listingChars(`doc_${'0'.repeat(24)}`);
     const findings = block.slice(0, block.search(/\d+ more batches? found passages/));
     expect(findings.length + listing).toBeLessThanOrEqual(roomAt(compactAt));
+  });
+
+  it('six folder reads in one answer keep every turn\'s prompt within the room before compaction (#480)', async () => {
+    const compactAt = 20_000;
+    const recs = Array.from({ length: 400 }, (_v, i) => doc(`Permits/Permit ${String(i + 1).padStart(4, '0')}.pdf`));
+    const turn = (_c: Call, k: number) =>
+      k <= 6 ? { tool: 'folder', folder: 'permits', lookFor: `topic ${k}` } : { text: 'ok', sources: [] };
+    const s = setup(recs, turn, {
+      compactAt,
+      folderDocs: 5000,
+      reads: (c) => ({ text: `${'v'.repeat(1500)} [1]`, sources: [{ doc: listed(c)[0].tag, page: 1, quote: 'v' }] }),
+    });
+    expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+    expect(s.turns.length).toBe(7);
+    const limit = compactAt * control.limits.charsPerToken;
+    for (const t of s.turns) expect(t.prompt.length).toBeLessThanOrEqual(limit);
+    // the later reads fall back to places, then to counts: nothing is dropped without being counted
+    const last = handed(s.turns[6].prompt);
+    expect(last.places + last.over).toBeGreaterThan(0);
+    expect(s.turns[6].prompt).toMatch(/more batches? found passages/);
   });
 
   it('a smaller room lists fewer batches in full (#480)', async () => {

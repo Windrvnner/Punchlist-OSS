@@ -90,10 +90,10 @@ type Limits = {
 };
 
 /**
- * the most characters a page of findings or questions, or one folder read's result, may hold: half of what the kept
- * conversation holds before it is compacted, so that a search of everything, which gives a page of each in one
- * result, never outgrows what one call may send; the same whichever is searched, so that a page asked for by kind
- * starts where a search of everything's page of that kind stopped (recordSearch.ts `pageOf`, #1091)
+ * the most characters a page of findings or questions may hold: half of what the kept conversation holds before it
+ * is compacted, so that a search of everything, which gives a page of each in one result, never outgrows what one
+ * call may send; the same whichever is searched, so that a page asked for by kind starts where a search of
+ * everything's page of that kind stopped (recordSearch.ts `pageOf`, #1091)
  */
 const pageChars = (limits: Limits, model: string) => (limits.compactAt(model) * control.limits.charsPerToken) / 2;
 
@@ -153,6 +153,8 @@ class Answering {
   private readonly run: AgentRun;
   private readonly folders: FolderReader;
   private readonly conversation: KeptConversation;
+  /** the turn being worked on, once the first has begun */
+  private turnNow: Turn | undefined;
 
   constructor(
     private readonly kit: AgentKit,
@@ -162,7 +164,11 @@ class Answering {
     folderMemory: FolderMemory,
   ) {
     const { width, searchPage } = limits;
-    this.run = new AgentRun(kit, question, progress, { width, searchPage, chars: pageChars(limits, question.model) });
+    const limit = limits.compactAt(question.model) * control.limits.charsPerToken;
+    const chars = pageChars(limits, question.model);
+    this.run = new AgentRun(kit, question, progress, { width, searchPage, chars, limit });
+    // what a tool result may add depends on the prompt as it stands: the text the next turn would send (#480)
+    this.run.held = () => (this.turnNow ?? this.turnOf(1, false, [], '')).full(true).length;
     this.folders = new FolderReader(this.run, folderMemory, limits);
     this.conversation = new KeptConversation(this.run, limits.compactAt, limits.width);
   }
@@ -211,6 +217,7 @@ class Answering {
     // a document that cannot be opened on this PC was not read
     if (got.length < run.whole.length) run.whole = got;
     const turn = this.turnOf(turnNumber, last, files, listing);
+    this.turnNow = turn;
     const reply = kit.talk
       ? await this.conversation.ask(turn)
       : await kit.askJson(
