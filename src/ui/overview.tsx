@@ -4,8 +4,10 @@ import type { Layer } from '../domain/checklist';
 import { Icon } from './icons';
 import { AI_LABEL } from '../control';
 import type { Deal } from '../domain/model';
-import { askAbout, dealHash, dealTwin, type UiState } from '../app/state';
-import { checklistListCounts, checklistStandingCounts, findingCounts, questionCounts } from '../app/dealCounts';
+import { askAbout, dealHash, dealTwin, type UiState, pageHash } from '../app/state';
+import {
+  checklistListCounts, checklistStandingCounts, checklistStandingParts, findingCounts, questionCounts,
+} from '../app/dealCounts';
 import { folderProgress, overviewStatus, type FolderProgressNotice } from '../app/indexing';
 import { openLocate } from '../app/relink';
 import { PageTop, Stalled, NoRoom, INDEXING_LINE, INDEXING_TIP, useDealLock } from './deal';
@@ -40,7 +42,8 @@ export function OverviewPage({ dealId }: { dealId: string }) {
         <section class={`twocol ov ${gaps.length ? '' : 'solo'} ${waiting ? 'first' : 'under'}`}>
           {gaps.length > 0 && <div><div class="lbl flagsl"><span role="heading"
             aria-level={2}>Gaps in the Documents</span></div><ul class="gaps linked">{gaps.map((g) => <li key={g.key}><a
-            href={`#checklist-${d.id}`} onClick={() => store.ui({ checklistFilter: 'gap' })}>{g.title}</a>{g.need &&
+            href={`#${pageHash('checklist', d.id)}`}
+            onClick={() => store.ui({ checklistFilter: 'gap' })}>{g.title}</a>{g.need &&
             <span>{g.need}</span>}</li>)}</ul></div>}
           <div><Documents deal={d} /></div>
         </section>
@@ -103,7 +106,8 @@ function Standing({ deal: d }: { deal: Deal }) {
   const qf = (status: 'open' | 'answered' | 'closed') => () => store.ui({ qaFilter: { ...store.get().ui.qaFilter, status } });
   const lines: Line[] = [
     {
-      id: 'ov-findings', title: 'Findings', href: `#deal-${d.id}`, go: ff('open'), total: findings.total,
+      id: 'ov-findings', title: 'Findings', href: `#${pageHash('findings', d.id)}`,
+      go: ff('open'), total: findings.total,
       segs: [
         { k: 'open', n: findings.open, word: 'open', go: ff('open'),
           sub: [['may be out of date', findings.reassess, ff('reassess')]] },
@@ -112,7 +116,7 @@ function Standing({ deal: d }: { deal: Deal }) {
     },
     ...(c ? [checklistLine(d.id, c, cf)] : []),
     {
-      id: 'ov-qa', title: 'Q&A', href: `#qa-${d.id}`, go: qf('open'), total: questions.total,
+      id: 'ov-qa', title: 'Q&A', href: `#${pageHash('qa', d.id)}`, go: qf('open'), total: questions.total,
       segs: [
         { k: 'open', n: questions.open, word: 'open', go: qf('open') },
         { k: 'prog', n: questions.answered, word: 'answered', go: qf('answered') },
@@ -135,20 +139,20 @@ function checklistLine(
   const offLabel = `${num(counts.off)} turned off`
     + (counts.offOpen ? `, ${num(counts.offOpen)} with an open finding` : '');
   return {
-    id: 'ov-checklist', title: 'Checklist', href: `#checklist-${dealId}`, go: filter('all'), total: counts.all,
-    off: counts.off ? [offLabel, filter('off')] : undefined,
-    segs: [
-      { k: 'open', n: counts.toResolve, word: 'to resolve', go: filter('all'), sub: [
-        ['flagged', counts.finding, filter('finding')],
-        [counts.gap === 1 ? 'gap' : 'gaps', counts.gap, filter('gap')],
-        [counts.gone === 1 ? 'finding deleted' : 'findings deleted', counts.gone, filter('gone')],
-      ] },
-      { k: 'prog', n: counts.open, word: 'not settled', go: filter('open') },
-      counts.person ? { k: 'done', n: counts.settled, word: 'settled', sub: [
-        ['satisfied', counts.satisfied, filter('satisfied')], ['by a person', counts.person, filter('person')],
-      ] } : { k: 'done', n: counts.satisfied, word: 'satisfied', go: filter('satisfied') },
-    ],
+    id: 'ov-checklist', title: 'Checklist', href: `#${pageHash('checklist', dealId)}`, go: filter('all'),
+    total: counts.all, off: counts.off ? [offLabel, filter('off')] : undefined,
+    segs: checklistStandingParts(counts).map(({ k, n, filter: key, sub }) => ({
+      k, n, word: standingWord(key, n), go: key && filter(key),
+      sub: sub?.map((row) => [standingWord(row.filter, row.n), row.n, filter(row.filter)]),
+    })),
   };
+}
+/** A standing part's words, by the checklist filter it opens; the settled total opens none. */
+function standingWord(key: UiState['checklistFilter'] | undefined, n: number) {
+  const words: Record<string, string> = { all: 'to resolve', finding: 'flagged', gap: n === 1 ? 'gap' : 'gaps',
+    gone: n === 1 ? 'finding deleted' : 'findings deleted', open: 'not settled', satisfied: 'satisfied',
+    person: 'by a person' };
+  return key ? words[key] : 'settled';
 }
 type Placed = { lx: number; up: boolean; mode: 'r' | 'l' | 'c'; x: number; w: number; bare?: boolean };
 const LEAD: Record<Seg['k'], string> = { open: 'var(--high)', prog: 'var(--accent)', done: 'var(--bar-ix)' };

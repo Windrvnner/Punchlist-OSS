@@ -3,6 +3,8 @@
  * was interrupted, or undone, is named the way the person met it. A command not listed shows its name split into
  * words.
  */
+import type { State } from './state';
+
 const LABELS: Record<string, string> = {
   AddDealItems: 'Add checklist items',
   RegroupDealItems: 'Group checklist items',
@@ -69,4 +71,14 @@ export function commandLabel(name: string, input?: unknown): string {
   if (name === 'EditDeal' && i.name !== undefined) return 'Rename deal';
   if (name === 'EditDeal' && i.group !== undefined) return 'Deal status';
   return LABELS[name] ?? name.replace(/([A-Z])/g, ' $1').trim();
+}
+
+/** Where an interrupted action was: the question or finding and its deal, so Retry says what it would write. */
+export function commandPlace(s: Pick<State, 'deals' | 'questions' | 'findings'>, input: unknown): string {
+  const i = (input ?? {}) as { dealId?: unknown; questionId?: unknown; findingId?: unknown };
+  const d = typeof i.dealId === 'string' ? s.deals[i.dealId] : undefined;
+  const q = typeof i.questionId === 'string' ? s.questions[i.questionId] : undefined;
+  const f = typeof i.findingId === 'string' ? s.findings[i.findingId] : undefined;
+  const what = q ? `Q${q.n}` : f ? `“${f.title}”` : '';
+  return [what, d?.name].filter(Boolean).join(' on ');
 }

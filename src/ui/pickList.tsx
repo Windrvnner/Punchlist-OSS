@@ -4,7 +4,7 @@ import { useDismiss } from './hooks';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
 import { key } from '../domain/checklist';
-import { byName } from '../domain/order';
+import { pickNames } from '../app/dealUi';
 
 /** One of the firm's lists for a layer, and how many items it has. */
 export type PickName = { name: string; n: number };
@@ -33,19 +33,20 @@ export const SEARCH_FROM = 9;
  * `float` puts the open menu on the page rather than inside the button's parent, for use in a pop-up, whose scrolling
  * would otherwise cut it off; a float menu closes when what is under it scrolls.
  */
-export function PickList({ id, label, names: given, cur, onPick, className, float, end, disabled, title, empty = 'Not set', chev }: {
+export function PickList({
+  id, label, names, cur, onPick, className, float, end, disabled, title, empty = 'Not set', chev,
+}: {
   id: string; label: string; names: PickName[]; cur: string; onPick: (v: string) => void;
   className: string; float?: boolean; end?: boolean; disabled?: boolean; title?: string; empty?: string;
   /** a drawn chevron after the value, as an editable value that is picked from a list ends in (design.md, Editable values) */
   chev?: boolean;
 }) {
   const [open, setOpen] = useState(false); const [q, setQ] = useState('');
-  const names = [...given].sort((a, b) => byName(a.name, b.name));
   const menu = useRef<HTMLDivElement>(null); const search = useRef<HTMLInputElement>(null);
   const close = () => setOpen(false);
   const searching = names.length >= SEARCH_FROM;
   const known = names.some((x) => key(x.name) === key(cur));
-  const shown = q.trim() ? names.filter((x) => x.name.toLowerCase().includes(q.trim().toLowerCase())) : names;
+  const shown = pickNames(names, q);
   const pick = (v: string) => { close(); (document.querySelector(`#${id} > button`) as HTMLElement | null)?.focus(); if (key(v) !== key(cur)) onPick(v); };
 
   // placed under its button and kept inside the window: a long list scrolls inside the menu, the search box and None stay

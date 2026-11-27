@@ -1,3 +1,4 @@
+import type { Store } from './store';
 import type { Question, QuestionStatus } from '../domain/model';
 import { workstreamChoices } from '../domain/order';
 import type { Scope } from './conversations';
@@ -115,4 +116,19 @@ export function queueView(state: State, scope: QueueScope) {
   const at = shown.length ? searchPosition : position;
   const step = (by: number) => candidates[at < 0 ? 0 : (at + by + candidates.length) % candidates.length]?.id;
   return { shown, total: items.length, position, searchPosition, previousId: step(-1), nextId: step(1) };
+}
+
+export function openQuestionFor(state: State, dealId: string) {
+  if (state.ui.selectedQuestion) return null;
+  const saved = state.prefs.qaOpen[dealId];
+  return saved && state.questions[saved]?.dealId === dealId ? saved : null;
+}
+
+export function keepOpenQuestion(store: Store, dealId: string, questionId: string | null) {
+  const all = store.get().prefs.qaOpen;
+  if ((all[dealId] ?? null) === questionId) return;
+  const next = { ...all };
+  if (questionId) next[dealId] = questionId;
+  else delete next[dealId];
+  store.setPrefs({ qaOpen: next });
 }

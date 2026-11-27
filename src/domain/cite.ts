@@ -68,3 +68,15 @@ export function splitCited(text: string, sourceCount: number): CitedPart[] {
   settle(); push(run);
   return out;
 }
+
+/** The page a citation's place names ("p. 12 · cl. 4" is page 12), or null when it names none ("Ops!F12"). */
+export function pageOf(loc: string): number | null {
+  const match = /p\.\s*(\d+)/.exec(loc);
+  return match ? +match[1] : null;
+}
+
+/** A whole answer or finding can cite its sources when none of its sentences cites a particular source. */
+export function restsOnAllSources(texts: string[], sourceCount: number, ownWords = false) {
+  return sourceCount > 0 && !ownWords
+    && !texts.some((text) => splitCited(text, sourceCount).some((part) => part.refs.length));
+}

@@ -1,8 +1,9 @@
+import { scopeHash } from '../app/conversations';
 import { findingsRaisedOnItem, checklistView, gapSearches, type ChecklistHeading } from '../app/checklistView';
 import { titleStyle } from './titleStyle';
 import { Fragment, type ComponentChildren, type RefObject } from 'preact';
 import { createPortal } from 'preact/compat';
-import { askAbout, itemStanding, versionsWord } from '../app/state';
+import { askAbout, itemStanding, versionsWord, pageHash } from '../app/state';
 import type { ItemKind, ItemStanding, State } from '../app/state';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore, fmtDate, useToSidebarBottom, useDismiss } from './hooks';
@@ -158,19 +159,15 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
     dealId, s.checklists[dealId], s.items, s.findings, s.conflicts, s.tombstones, s.dealLoad[dealId],
     s.ui.checklistFilter, s.ui.selectedChecklist,
   ]);
-  const anyOff = view.counts.off > 0;
-  useEffect(() => { if (!anyOff && s.ui.checklistFilter === 'off') store.ui({ checklistFilter: 'all' }); }, [anyOff, s.ui.checklistFilter]);
   // items no longer in the firm's list, marked with an icon (linking design, section 5): worked out again only when the
   // items, the lists or the deal's layers change, not on every move through the list (it reads every wording)
   const unlisted = useMemo(() => (d ? unlistedItems(s, d) : new Set<string>()), [s.items, s.firmList, s.conflicts, dealId, d?.product, d?.sector, d?.technology]);
   if (!d) return null;
   const rows = s.checklists[d.id];
-  const { counts, on, shown, selected: sel, byList, offIds, offOpen } = view;
+  const { counts, on, shown, selected: sel, grouped, flaggedAbove, offIds, offOpen } = view;
   const filters: [Filter, string][] = view.filters.map((key) => [key, `${FILTER_LABEL[key]} ${counts[key]}`]);
   const wide = !sel;
-  const grouped = byList || on === 'all';
   const rises = grouped && counts.all > 0;
-  const flaggedAbove = !byList && (on === 'all' || on === 'finding');
   // items are records of their own, so a deal in two versions does not hold them: only a read-only page does
   const locked = inherited;
   // one stop for Tab in the list: the open item, else the first; the arrow keys, Home and End move through the items
@@ -379,7 +376,10 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
   const logWhy = ro ?? target.why;
   // a document opens in the deal's conversation, which is where a page can be read and asked about; closing it comes back here,
   // with the focus on the link it was opened from (the i-th in the list), or on the item if that link is not shown any more
-  const read = (src: { doc: string; docId: string; loc: string }, i: number) => navigate(store, `chat-${dealId}`, { docAside: { doc: src.doc, docId: src.docId, dealId, loc: src.loc, from: 'From the checklist', item: r.text, back: `checklist-${dealId}`, backFocus: [`#ck-sources li:nth-child(${i + 1}) .ckopen`, `#ck-rows [data-item="${r.id}"]`] } });
+  const read = (src: { doc: string; docId: string; loc: string }, i: number) =>
+    navigate(store, scopeHash({ kind: 'deal', dealId }), { docAside: { doc: src.doc, docId: src.docId, dealId,
+      loc: src.loc, from: 'From the checklist', item: r.text, back: pageHash('checklist', dealId),
+      backFocus: [`#ck-sources li:nth-child(${i + 1}) .ckopen`, `#ck-rows [data-item="${r.id}"]`] } });
   // The pane's body scrolls under its fixed header. While a question is being typed, the box's buttons stay in sight:
   // opening the box, or a line more in it, scrolls the body just enough to show them clear of its bottom fade (22px).
   const body = useRef<HTMLDivElement>(null);

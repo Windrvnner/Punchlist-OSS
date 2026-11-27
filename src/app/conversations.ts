@@ -4,11 +4,10 @@
  * message it was requested for, so navigating, retrying or deleting mid-flight
  * cannot misplace it.
  */
-import { isMine } from './commands/members';
 import { carriedThread } from './threads';
 import { checkedOffer } from './answerOffer';
 import type { Store } from './store';
-import { dealQuestions, type State, type Message } from './state';
+import { dealQuestions, type State, type Message, myDeals } from './state';
 import { docKey, ownFilesId, type Question, type Source } from '../domain/model';
 import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { findQuestions } from '../domain/suggest';
@@ -291,7 +290,7 @@ async function answer(store: Store, scope: Scope, messageId: string, text: strin
   const r = await ai.answer({
     dealId: scope.kind === 'all' ? undefined : scope.dealId,
     // asked across deals, only the person's own deals are searched
-    ...(scope.kind === 'all' ? { dealIds: Object.keys(store.get().deals).filter((id) => isMine(store.get(), id)) } : {}),
+    ...(scope.kind === 'all' ? { dealIds: myDeals(store.get()).map((deal) => deal.id) } : {}),
     // and the files the person attached on Home, kept with their own conversations
     ...(scope.kind === 'all' && store.get().user ? { files: ownFilesId(store.get().user!.name) } : {}),
     findingId: scope.kind === 'finding' ? scope.findingId : undefined,
@@ -343,8 +342,22 @@ function answered(store: Store, scope: Scope, pending: Message, replied: Replied
   };
 }
 
+/** A finding link in a brief, "{phrase|f_…}": the phrase is group 1 and the finding's id group 2. */
+const FINDING_LINKS = /\{([^|}]+)\|(f_[0-9A-Z]{26})\}/g;
+
+/** A brief paragraph in order: its plain text as strings, and each finding link as its match. */
+export function briefParts(paragraph: string): (string | RegExpMatchArray)[] {
+  const parts: (string | RegExpMatchArray)[] = [];
+  let start = 0;
+  for (const link of paragraph.matchAll(FINDING_LINKS)) {
+    parts.push(paragraph.slice(start, link.index), link);
+    start = link.index + link[0].length;
+  }
+  return [...parts, paragraph.slice(start)].filter((part) => part !== '');
+}
+
 /** An answer's text as it leaves the conversation, as a response or a question: finding links as words, no [n] markers. */
-export const withoutFindingLinks = (text: string) => text.replace(/\{([^|}]+)\|f_[0-9A-Z]{26}\}/g, '$1');
+export const withoutFindingLinks = (text: string) => text.replace(FINDING_LINKS, '$1');
 export const answerText = (m: Message) => withoutMarkers(withoutFindingLinks(m.text), m.sources?.length ?? 0);
 
 /** A new question from a finding starts with the answer. On a deal, it starts with what was asked. */

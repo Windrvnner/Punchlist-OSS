@@ -1,5 +1,6 @@
 import { firmOf, type Layer } from '../domain/checklist';
 import type { Deal } from '../domain/model';
+import { checkingSays } from './checking';
 import { checklistRows } from './checklistView';
 import { folderIndexCounts, liveFolders } from './indexing';
 import { offFindingCount, type State } from './state';
@@ -77,4 +78,42 @@ export function uncheckedChecklistCount(
 export function checkLeftCount(check: State['checks'][string] | undefined, deep: boolean) {
   if (deep || check?.failedAt || !check?.left || check.left.changed) return 0;
   return check.left.items + check.left.findings;
+}
+
+/** Which check is due on Overview's Check again line, whether it warns, and which check its button runs. */
+export function checkLine(state: State, dealId: string) {
+  const check = state.checks[dealId];
+  const deal = state.deals[dealId];
+  if (!deal) return null;
+  const deep = !!check?.offerDeep && !check.left && !check.failedAt;
+  // what the latest check left out can be checked on its own while the documents are the ones it checked
+  const rest = checkLeftCount(check, deep);
+  const shared = checkingSays(check?.checking, check?.busy === 'deep');
+  // checklist items no check has reached yet, such as items brought in since the last one; not while the first pass
+  // is still reading
+  const unchecked = uncheckedChecklistCount(state, deal);
+  const warn = !check?.busy && (!!check?.failedAt || !!check?.left || deep || unchecked > 0);
+  const kind = lineKind(check, !!shared || !!check?.busy, deep, unchecked);
+  return kind && { kind, warn, deep, rest, shared, unchecked };
+}
+
+/**
+ * What takes the line, in order: a running check, a failed one, a left-out part, a spot check that disagreed,
+ * unchecked items.
+ */
+const lineKind = (check: State['checks'][string] | undefined, running: boolean, deep: boolean, unchecked: number) =>
+  running ? 'running' as const : check?.failedAt ? 'failed' as const : check?.left ? 'left' as const
+    : deep ? 'deep' as const : unchecked ? 'unchecked' as const : null;
+
+type StandingSub = 'finding' | 'gap' | 'gone' | 'satisfied' | 'person';
+
+/** Each part of the Overview standing, with the checklist filters that open the rows counted in it. */
+export function checklistStandingParts(counts: NonNullable<ReturnType<typeof checklistStandingCounts>>) {
+  const sub = (...filters: StandingSub[]) => filters.map((filter) => ({ filter, n: counts[filter] }));
+  return [
+    { k: 'open' as const, n: counts.toResolve, filter: 'all' as const, sub: sub('finding', 'gap', 'gone') },
+    { k: 'prog' as const, n: counts.open, filter: 'open' as const },
+    counts.person ? { k: 'done' as const, n: counts.settled, sub: sub('satisfied', 'person') }
+      : { k: 'done' as const, n: counts.satisfied, filter: 'satisfied' as const },
+  ];
 }
