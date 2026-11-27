@@ -190,7 +190,14 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   const paste = ['Proseware Solar checklist', '', '1. Site', '   1.1  Title report for the whole site', '   1.2  Leases cover the array and the', '        gen-tie route', 'Page 2 of 6', '2. Permits', '   2.1  Conditional use permit issued', '   2.2  Wetlands delineation complete; any Section 404 permit in hand'].join('\n');
   await page.fill('#cl-paste', paste); await page.click('#cl-paste-next'); await page.waitForSelector('#cl-line'); await read(page);
   const first = await page.evaluate(() => ({ line: document.querySelector('#cl-line').textContent, source: document.querySelector('.imfile').textContent, left: [...document.querySelectorAll('#cl-leftout .rv-new')].map((x) => x.textContent), tip: document.querySelector('#cl-line').closest('[title]')?.title ?? '', rows: [...document.querySelectorAll('.imprev tbody tr')].map((r) => [...r.cells].map((c) => c.textContent).join('/')) }));
-  say('a paste is read into items under their headings, a wrapped item joined, and the lines left out listed', first.line === '4 items · 2 lines left out' && /^Pasted · 10 lines/.test(first.source) && JSON.stringify(first.left) === '["Proseware Solar checklist","Page 2 of 6"]' && first.rows[1] === '1. Site/   1.2  Leases cover the array and the         gen-tie route', JSON.stringify(first));
+  const wrapped = '1. Site/   1.2  Leases cover the array and the         gen-tie route';
+  const firstOk = first.line === '4 items · 2 lines left out' && /^Pasted · 10 lines/.test(first.source);
+  const leftOk = JSON.stringify(first.left) === '["Proseware Solar checklist","Page 2 of 6"]';
+  say(
+    'a paste is read into items under their headings, a wrapped item joined, and the lines left out listed',
+    firstOk && leftOk && first.rows[1] === wrapped,
+    JSON.stringify(first),
+  );
   say('the count’s tooltip ties out every line', /^10 lines: 4 items \(1 more line of wrapped items\), 2 headings, 1 blank line, 2 lines left out$/.test(first.tip), first.tip);
   await page.click('[data-bringin="7"]');
   const checked = await page.evaluate(() => document.querySelector('#cl-line').textContent);
@@ -200,7 +207,12 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   say('an item joining two conditions is offered as two items in the review', review.rows.some((r) => r.endsWith('Wetlands delineation complete.')) && review.rows.some((r) => r.endsWith('Section 404 permit in hand (if applicable).')), JSON.stringify(review));
   await page.click('#cl-go'); await page.waitForSelector('#fl-count');
   const saved = await page.evaluate((d) => Object.values(store.get().items).filter((i) => i.dealId === d).map((i) => i.text), id);
-  say('the items brought in include the checked line, where it sits', saved.includes('Page 2 of 6') && saved.includes('   1.2  Leases cover the array and the         gen-tie route'), JSON.stringify(saved));
+  const wrappedItem = '   1.2  Leases cover the array and the         gen-tie route';
+  say(
+    'the items brought in include the checked line, where it sits',
+    saved.includes('Page 2 of 6') && saved.includes(wrappedItem),
+    JSON.stringify(saved),
+  );
   await page.keyboard.press('Escape');
   // the model cannot be reached: the preview says Not read, with Retry, and Retry reads it once it can
   await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import');
