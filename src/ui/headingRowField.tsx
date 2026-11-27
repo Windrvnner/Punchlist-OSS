@@ -14,7 +14,7 @@ export function HeadingRowField({ id, importKey, table, sheet = table.sheet, rea
 }) {
   const [, redraw] = useReducer((value: number) => value + 1, 0);
   const [draft] = useState(() => new HeadingRowDraft(importKey, table, () => redraw(null)));
-  useLayoutEffect(() => draft.update(table, sheet, read));
+  useLayoutEffect(() => draft.update(table, sheet, read, onEdit));
   useLayoutEffect(() => () => draft.dispose(), [draft]);
   const { text, max, headerRow, reason: unused } = draft.view;
   const range = max === undefined ? 'Enter a whole row from 1' : `Enter a whole row from 1 to ${num(max)}`;

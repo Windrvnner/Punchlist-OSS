@@ -364,7 +364,7 @@ export class HeadingRowDraft {
     }
   }
 
-  update(table: Heading, sheet: string, read: ReadRow) {
+  update(table: Heading, sheet: string, read: ReadRow, onEdit?: () => void) {
     const before = this.table;
     const previousSheet = this.sheet;
     this.sheet = sheet;
@@ -374,6 +374,8 @@ export class HeadingRowDraft {
     if (before.sheet !== table.sheet || before.headerRow !== table.headerRow) {
       if (this.queuedSheet === table.sheet) {
         this.queuedSheet = undefined;
+        // The queued row is read now, which is an edit like its typing (in Q&A it drops a proposed layout).
+        onEdit?.();
         void this.pick(this.text, read);
         return;
       }
