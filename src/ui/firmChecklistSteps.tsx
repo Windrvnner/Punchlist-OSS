@@ -122,10 +122,6 @@ function wordingRow(view: ImportView, review: Review, count: number) {
   );
 }
 
-function rewordingLocked({ listReview, work }: ImportView, at: number) {
-  return listReview.remove.has(at) || work.busy === 'importing';
-}
-
 function wordingSelection(view: ImportView, suggestions: number) {
   const count = plural(suggestions, 'suggestion');
   const { eligible, allChecked } = view.listReview.wording!;
@@ -145,7 +141,7 @@ function rewordingRow(view: ImportView, review: Review, rewording: Rewording) {
   return (
     <label class="rv-row" key={at} title={rewording.earlier ? 'Taken when this list was last imported' : undefined}>
       <input type="checkbox" data-reword={at} checked={listReview.useReword.has(at)}
-        disabled={rewordingLocked(view, at)} onChange={() => listReview.flipReword(at)} />
+        disabled={listReview.wording!.locked(at)} onChange={() => listReview.flipReword(at)} />
       <div>
         <div class="rv-was"><i>Was</i>{review.items[at].text}</div>
         {[rewording.text, ...(rewording.also ?? [])].map((text, k) => (

@@ -114,8 +114,10 @@ it('ties out, reviews, and brings in a pasted portfolio checklist without a comp
     expect(sameMeaning).toHaveBeenLastCalledWith({ items: plan.texts, against: [], only: [3] });
     const remove = new Set([2_376]);
     const useReword = new Set([1, 2]);
-    expect(checklistWordingChoices(retried.review, remove, useReword, false))
-      .toEqual({ eligible: [1, 2], allChecked: true });
+    const choices = checklistWordingChoices(retried.review, remove, useReword, false);
+    expect(choices).toMatchObject({ eligible: [1, 2], allChecked: true });
+    expect([choices.locked(2_376), choices.locked(1)]).toEqual([true, false]);
+    expect(checklistWordingChoices(retried.review, remove, useReword, true).locked(1)).toBe(true);
     const selected = checklistSelection(retried.review, remove, useReword);
     expect(selected.counts).toEqual({ items: 2_377, reworded: 1, split: 1, removed: 1 });
     expect(selected.items.slice(1, 4).map(({ was }) => was)).toEqual([questions[1], questions[2], questions[2]]);
