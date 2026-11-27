@@ -138,6 +138,14 @@ describe('issues named by the allowances', () => {
     expect((await waitsFor(502, spare)).waits).toEqual([2000, 2000]);
   });
 
+  it('fails without waiting when GitHub asks for a wait longer than five minutes', async () => {
+    const { result, waits, requested } = await waitsFor(429, { 'retry-after': '3600' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('GitHub asked to wait 3600 seconds, longer than 300');
+    expect(waits).toEqual([]);
+    expect(requested).toHaveLength(1);
+  });
+
   it('reads a retry-after header given as an HTTP date', async () => {
     const at = new Date(Date.now() + 20_000).toUTCString();
     const { waits } = await waitsFor(429, { 'retry-after': at });

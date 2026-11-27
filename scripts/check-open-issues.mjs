@@ -75,6 +75,16 @@ function retryDelayMs({ headers }) {
   return Math.max(0, Number(headers.get('x-ratelimit-reset')) * 1000 - Date.now());
 }
 
+// A CI job is not held longer than this: a longer wait fails the check, and the job is re-run later (#1384).
+const longestWaitMs = 5 * 60_000;
+
+function boundedDelayMs(response) {
+  const ms = retryDelayMs(response);
+  if (ms <= longestWaitMs) return ms;
+  const asked = Math.ceil(ms / 1000);
+  throw new Error(`GitHub asked to wait ${asked} seconds, longer than ${longestWaitMs / 1000}`);
+}
+
 async function openIssuesPage({ endpoint, token, fetch, wait }, page) {
   if (!token) throw new Error('GITHUB_TOKEN is required');
   const url = new URL(endpoint);
@@ -85,7 +95,7 @@ async function openIssuesPage({ endpoint, token, fetch, wait }, page) {
     });
     if (response.ok) return response.json();
     if (attempt === attempts || !isTransient(response)) throw new Error(`GitHub answered ${response.status}`);
-    await wait(retryDelayMs(response));
+    await wait(boundedDelayMs(response));
   }
 }
 
