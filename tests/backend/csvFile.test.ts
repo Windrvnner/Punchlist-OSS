@@ -61,6 +61,29 @@ describe('a CSV read a piece at a time', () => {
     expect(await cellsOf(utf16)).toEqual(['Société', 'Crédit']);
   });
 
+  it('refuses a marked file that is not valid in its encoding, as decodeText does (#382)', async () => {
+    const message = 'The file starts with a UTF-8 byte-order mark but is not valid UTF-8';
+    const bom8 = Buffer.from([0xef, 0xbb, 0xbf]);
+    const badUtf8 = write('bom-bad.csv', Buffer.concat([bom8, Buffer.from('Société,Crédit\n', 'latin1')]));
+    await expect(cellsOf(badUtf8)).rejects.toThrow(message);
+    const goodUtf8 = write('bom-ok.csv', Buffer.concat([bom8, Buffer.from('Société,Crédit\n')]));
+    expect(await cellsOf(goodUtf8)).toEqual(['Société', 'Crédit']);
+    const loneSurrogate = Buffer.from([0xff, 0xfe, 0x00, 0xd8, 0x41, 0x00]);
+    await expect(cellsOf(write('wide-bad.csv', loneSurrogate))).rejects.toThrow(
+      'The file starts with a UTF-16LE byte-order mark but is not valid UTF-16LE',
+    );
+  });
+
+  it('lets an error thrown by the cell callback through unchanged (#382)', async () => {
+    const at = write('plain.csv', 'a,b\n');
+    const failure = new TypeError('the caller failed');
+    await expect(
+      eachCsvCell(at, () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+  });
+
   it('holds only a piece of the file in memory, however large the file is', async () => {
     const at = write('huge.csv', 'ledger,entry\n'.repeat(8_000_000));      // about 104 MB
     global.gc?.();

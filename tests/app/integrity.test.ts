@@ -113,10 +113,16 @@ describe('exports and imports', () => {
     const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...utf8]);
     const cp1252 = new Uint8Array([...'Question\nCaf'].map((c) => c.charCodeAt(0)).concat([0xe9, 0x20, 0x66, 0x61, 0xe7, 0x61, 0x64, 0x65, 0x20, 0x96, 0x20, 0x6e, 0x61, 0xef, 0x76, 0x65, 0x20, 0xa3, 0x35, 0x30, 0x20, 0x80, 0x31, 0x30, 0x30, 0x0a]));
     const u16 = (le: boolean, mark: boolean) => { const out: number[] = mark ? (le ? [0xff, 0xfe] : [0xfe, 0xff]) : []; for (const ch of text) { const c = ch.charCodeAt(0); out.push(...(le ? [c & 255, c >> 8] : [c >> 8, c & 255])); } return new Uint8Array(out); };
-    for (const bytes of [utf8, bom, cp1252, u16(true, true), u16(false, true), u16(true, false), u16(false, false)]) {
+    for (const bytes of [utf8, bom, cp1252, u16(true, true), u16(false, true)]) {
       expect(decodeText(bytes)).toBe(text);
       const r = readCsv(bytes); expect(r.ok && r.value.rows[0][0]).toBe('Café façade – naïve £50 €100');
     }
+    // UTF-16 with no mark is not guessed: its bytes are valid UTF-8, so they are read as that (#382)
+    expect(decodeText(u16(true, false))).not.toBe(text);
+    // a UTF-8 mark decides: bytes that are not UTF-8 after it are refused, not read as Windows-1252
+    const marked1252 = new Uint8Array([0xef, 0xbb, 0xbf, 0x43, 0x61, 0x66, 0xe9]);
+    expect(() => decodeText(marked1252)).toThrow('not valid UTF-8');
+    const refused = readCsv(marked1252); expect(refused.ok).toBe(false);
   });
 });
 
