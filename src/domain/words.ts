@@ -11,15 +11,12 @@ const INDEX_FILLER = new Set(control.lists.indexFiller.map((w) => w.toLowerCase(
 /**
  * A text as the words a search compares: split wherever a name is split, so that a file is found however it was
  * named. "Power-Purchase-Agreement_executed", "PowerPurchaseAgreement" and "power purchase agreement" give the same
- * words; "O&M" is one word, "om"; letters of any alphabet, their marks (vowel signs, accents) and digits are kept.
- * Nothing is left out here for being short or common: that is for whoever compares.
+ * words; "O&M" is one word, "om"; letters of any alphabet and digits are kept. Nothing is left out here for being
+ * short or common: that is for whoever compares.
  */
 export function tokens(text: string): string[] {
-  const camelCase = /([\p{Ll}\p{N}]\p{M}*)(\p{Lu})/gu;
-  const acronymThenWord = /(\p{Lu}\p{M}*)(\p{Lu}\p{Ll})/gu;
-  const letterAmpersandLetter = /(^|[^\p{L}\p{M}\p{N}])(\p{L})\s*&\s*(\p{L})(?![\p{L}\p{M}\p{N}])/gu;
-  return text.replace(camelCase, '$1 $2').replace(acronymThenWord, '$1 $2').toLowerCase()
-    .replace(letterAmpersandLetter, '$1$2$3').match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+  return text.replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, '$1 $2').replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1 $2').toLowerCase()
+    .replace(/(^|[^\p{L}\p{N}])(\p{L})\s*&\s*(\p{L})(?![\p{L}\p{N}])/gu, '$1$2$3').match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
 /** a word as a search compares it: a plural and its singular are one word */
