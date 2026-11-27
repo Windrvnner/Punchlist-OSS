@@ -101,6 +101,8 @@ An `issue` entry may move to the new text when the diff with `main` shows a one-
 and issue; the old line and the new line at the same position of one hunk that removes as many lines as it adds;
 and the old line's matches on the branch fallen by the moved count, so one of two identical lines can move.
 The moved entries together take at most what the old entry lost.
+The check cannot tell an edit from a replacement: a swap may put a different match of the same kind, under the same
+issue, in the old line's place, so review still reads every moved line.
 To move one, run `node scripts/check-pane-of-glass.mjs --list`, which prints the new text, and change the entry's
 `line` to it, keeping its issue.
 A `decision` entry never moves: to edit a line listed under a decision, first move the formatting into a helper the
