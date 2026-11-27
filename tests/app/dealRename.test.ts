@@ -3,15 +3,20 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { MemoryLocal } from '../../src/adapters/local';
 import { EditDeal } from '../../src/app/commands/deals';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
-import { KEPT_TEXT_KEY } from '../../src/ports';
+import { KEPT_TEXT_KEY, type Transaction } from '../../src/ports';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { ELSEWHERE } from '../adapters/memRepo';
-import { recoveryApp, recoveryDeal, type RecoveryApp } from './recoveryKit';
+import {
+  failRecoveryWrite, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal, type RecoveryApp,
+} from './recoveryKit';
 
 const original = 'Project Recovery fixture';
 const raw = '  Café  Cafe\u0301 Solar  ';
 const stored = 'Project Café  Cafe\u0301 Solar';
 let app: RecoveryApp;
+
+const writesDeal = (tx: Transaction) => tx.writes.some((write) => write.kind === 'deal');
+const settlesRename = (tx: Transaction) => tx.writes.length === 1 && operationWrite(tx, 'EditDeal', 'succeeded');
 
 afterEach(async () => {
   app.store.closing();
@@ -173,6 +178,75 @@ it('asks before overwriting a peer rename and uses the current name only on Keep
   expect(field.kept).toBeUndefined();
 });
 
+it('preserves new typing across pages when an earlier rename lands', async () => {
+  const { field, deal, header } = await fixture();
+  const gate = holdRecoveryWrite(app, writesDeal);
+  field.typed(raw);
+  const saving = field.submit('enter');
+  await gate.entered;
+  await field.submit('blur');
+  field.dispose();
+  const reopened = header();
+  reopened.open();
+  reopened.typed('North  Ridge');
+  gate.release();
+  await saving;
+  expect(deal().name).toBe(stored);
+  expect(reopened.kept).toMatchObject({ text: 'North  Ridge', base: stored });
+  expect(reopened.editing).toBe(true);
+  await reopened.submit('blur');
+  expect(deal().name).toBe('Project North  Ridge');
+});
+
+it.each(['saved', 'refused'] as const)('keeps identical new typing over a different base when %s', async (result) => {
+  const { field, header, deal, id } = await fixture();
+  if (result === 'refused') failRecoveryWrite(app, writesDeal, 'The shared folder is unavailable');
+  const gate = holdRecoveryWrite(app, result === 'refused' ? writesDeal : settlesRename);
+  field.typed(raw);
+  const saving = field.submit('enter');
+  await gate.entered;
+  field.escape();
+  field.dispose();
+  if (result === 'refused') {
+    app.repo.peer.change('deal', id, { ...deal(), name: 'Project Western Wind' }, ELSEWHERE);
+    await app.repo.sync();
+    await vi.waitFor(() => expect(deal().name).toBe('Project Western Wind'));
+  }
+  const reopened = header();
+  reopened.open();
+  expect(deal().name).toBe(result === 'saved' ? stored : 'Project Western Wind');
+  reopened.typed(raw);
+  gate.release();
+  await saving;
+  expect(reopened.editing).toBe(true);
+  expect(reopened.kept).toMatchObject({ text: raw, base: result === 'saved' ? stored : 'Project Western Wind' });
+});
+
+it.each(['saved', 'refused'] as const)('a new page observes a matching pending rename when %s', async (result) => {
+  const { field, header } = await fixture();
+  const restore = result === 'refused' ? failRecoveryWrite(app, writesDeal, 'Disk is full') : undefined;
+  const gate = holdRecoveryWrite(app, writesDeal);
+  field.typed(raw);
+  const saving = field.submit('enter');
+  await gate.entered;
+  field.dispose();
+  const reopened = header();
+  reopened.open();
+  gate.release();
+  await saving;
+  if (result === 'saved') {
+    expect(reopened.editing).toBe(false);
+    expect(reopened.kept).toBeUndefined();
+  } else {
+    expect(reopened.editing).toBe(true);
+    expect(app.store.get().ui.toasts.at(-1)?.text).toBe('Disk is full');
+    reopened.typed('Temporary');
+    reopened.escape();
+    expect(reopened.kept?.text).toBe(raw);
+  }
+  restore?.();
+});
+
 it('submits the untouched name from the box if a peer renamed the deal while it was open', async () => {
   const { field, deal, id } = await fixture();
   app.repo.peer.change('deal', id, { ...deal(), name: 'Project Western Wind' }, ELSEWHERE);
@@ -212,4 +286,40 @@ it('holds a two-version deal rename for a choice among 104 unrelated question co
   expect(field.kept).toBeUndefined();
   expect(deal().name).toBe(original);
   expect(Object.keys(app.store.get().conflicts)).toHaveLength(105);
+});
+
+it('keeps newer typing when the original deal disappears before a saved rename settles', async () => {
+  const { field, id, deal } = await fixture();
+  const gate = holdRecoveryWrite(app, settlesRename);
+  field.typed(raw);
+  const saving = field.submit('enter');
+  await gate.entered;
+  field.typed('Newer name while waiting');
+  field.dispose();
+  app.repo.peer.deleteDeal(id, ELSEWHERE);
+  await app.repo.sync();
+  await vi.waitFor(() => expect(deal()).toBeUndefined());
+  gate.release();
+  await saving;
+  expect(field.kept?.text).toBe('Newer name while waiting');
+});
+
+it('restores the entry draft over the landed name after typing on a reopened page', async () => {
+  const { field, header, deal } = await fixture();
+  const gate = holdRecoveryWrite(app, writesDeal);
+  field.typed(raw);
+  const saving = field.submit('enter');
+  await gate.entered;
+  field.typed('Southridge Reserve');
+  field.dispose();
+  const reopened = header();
+  reopened.open();
+  reopened.typed('Southridge Reserve Facility');
+  gate.release();
+  await saving;
+  reopened.escape();
+  expect(reopened.kept).toMatchObject({ text: 'Southridge Reserve', base: stored });
+  reopened.open();
+  await reopened.submit('blur');
+  expect(deal().name).toBe('Project Southridge Reserve');
 });
