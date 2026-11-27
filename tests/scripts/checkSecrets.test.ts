@@ -112,7 +112,7 @@ describe('the secrets check over a branch', () => {
     expect(out.status).toBe(1);
     expect(out.stderr).toContain('.env');
   });
-  it('says only that history could not be read when git fails, never what it printed', () => {
+  it('names the failed git command and its error when history cannot be read, never what git printed', () => {
     const r = repo();
     r.git('checkout', '-q', '-b', 'feature');
     r.write('a.ts', `const k = '${fake.anthropic}';\n`);
@@ -121,9 +121,16 @@ describe('the secrets check over a branch', () => {
     fs.rmSync(path.join(r.dir, '.git/objects', blob.slice(0, 2), blob.slice(2)), { force: true });
     const out = r.check('--all');
     expect(out.status).toBe(1);
-    expect(out.stderr).toContain('the branch history could not be read to check');
     expect(out.stderr).not.toContain(fake.anthropic);
     expect(out.stderr).not.toContain('Command failed');
+    expect(out.stderr).toMatch(/git log failed \(exit \d+\): fatal: /);
+  });
+  it('names the git command and its error when run outside a repository', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'secrets-nogit-'));
+    const out = spawnSync('node', [script, '--all'], { cwd: dir, encoding: 'utf8' });
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('git ls-files failed (exit 128): fatal: not a git repository');
+    expect(out.stderr).not.toContain('node:internal');
   });
   it('allows a .env.example file added on a branch', () => {
     const r = repo();

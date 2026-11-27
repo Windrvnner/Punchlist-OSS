@@ -215,12 +215,12 @@ describe('unlistedMatches and lowerAllowance', () => {
 });
 
 describe('git failures', () => {
-  it('keep git stderr out of the process stderr and on the error', () => {
+  it('keep git stderr out of the process stderr and name the command, status and cause in the error', () => {
     const module = pathToFileURL(path.resolve('scripts/allowance.mjs')).href;
     const code = `import { git } from ${JSON.stringify(module)};
-      try { git('.', 'rev-parse', '--verify', 'no-such-revision'); } catch (e) { console.log(String(e.stderr)); }`;
+      try { git('.', 'rev-parse', '--verify', 'no-such-revision'); } catch (e) { console.log(e.message); }`;
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8' });
     expect(child.stderr).toBe('');
-    expect(child.stdout).toContain('fatal');
+    expect(child.stdout).toBe('git rev-parse failed (exit 128): fatal: Needed a single revision\n');
   });
 });

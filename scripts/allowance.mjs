@@ -8,11 +8,17 @@ export const ALLOWANCE_FILES = [
   'scripts/skipped-tests-allowance.json',
 ];
 // History output is large, so the buffer is far above the default.
-// git's own stderr is piped, not shown: a failure carries it on `error.stderr` and each caller words its own message.
+// git's own stderr is piped, not shown. A failure throws an error that names the subcommand, the exit status and git's
+// stderr (git's error, never file contents), and has no `stderr` property, so a caller can print its message as is.
 // A last argument that is an object holds options for the call: `input` is written to git's standard input.
 export function gitBytes(cwd, ...args) {
   const options = typeof args.at(-1) === 'object' ? args.pop() : {};
-  return execFileSync('git', args, { cwd, maxBuffer: 512 * 1024 * 1024, stdio: 'pipe', ...options });
+  try {
+    return execFileSync('git', args, { cwd, maxBuffer: 512 * 1024 * 1024, stdio: 'pipe', ...options });
+  } catch (error) {
+    const cause = String(error.stderr ?? error.code ?? '').trim();
+    throw new Error(`git ${args[0]} failed (exit ${error.status ?? 'none'}): ${cause}`);
+  }
 }
 export const git = (cwd, ...args) => gitBytes(cwd, ...args).toString('utf8');
 // A skipped test is listed once for each platform it is skipped on.

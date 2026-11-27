@@ -167,4 +167,11 @@ describe('the attribution check on the history and the committed files', () => {
     expect(out.stderr).toContain('a.md could not be read to check');
     expect(out.stderr).not.toContain('SECRET-BODY');
   });
+
+  it('names the git command and its error when run outside a repository', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attribution-nogit-'));
+    const out = spawnSync('node', [script], { cwd: dir, encoding: 'utf8' });
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('git ls-tree failed (exit 128): fatal: not a git repository');
+  });
 });

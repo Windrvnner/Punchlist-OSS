@@ -74,9 +74,8 @@ let problems;
 try {
   problems = allProblems();
 } catch (error) {
-  // A failed git command carries its own output, which may hold the text found, so only our own messages are printed.
-  const ours = error instanceof Error && error.stderr === undefined;
-  problems = [ours ? error.message : 'the files or history could not be read to check'];
+  // A failed git command is reported as git's subcommand, exit status and error, never what git printed on stdout.
+  problems = [error instanceof Error ? error.message : 'the files or history could not be read to check'];
 }
 if (problems.length) {
   const refused = 'Refused: no AI-tool trailers, headers, chat-session links, credit to a person, or email addresses.';

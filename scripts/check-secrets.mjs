@@ -11,9 +11,18 @@ const cwd = process.cwd();
 const listFiles = all
   ? ['ls-files', '-z']
   : ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'];
-const files = git(cwd, ...listFiles)
-  .split('\0')
-  .filter(Boolean);
+const refuse = (lines) => {
+  console.error(`Refused: secrets must stay in .env, which git ignores.\n  ${lines.join('\n  ')}`);
+  process.exit(1);
+};
+function listedFiles() {
+  try {
+    return git(cwd, ...listFiles).split('\0').filter(Boolean);
+  } catch (error) {
+    return refuse([error.message]);
+  }
+}
+const files = listedFiles();
 
 // Key shapes: Anthropic, OpenAI (including project keys), AWS, GitHub, Slack, Google, and a JWT (North's sign-in token)
 const KEY_SHAPES = [
@@ -68,8 +77,7 @@ function historyProblems() {
 try {
   bad.push(...historyProblems());
 } catch (error) {
-  // A failed git command carries its own output, which may hold the secret, so only our own messages are printed.
-  const ours = error instanceof Error && error.stderr === undefined;
-  bad.push(ours ? error.message : 'the branch history could not be read to check');
+  // A failed git command is reported as git's subcommand, exit status and error, never what git printed on stdout.
+  bad.push(error instanceof Error ? error.message : 'the branch history could not be read to check');
 }
-if (bad.length) { console.error(`Refused: secrets must stay in .env, which git ignores.\n  ${bad.join('\n  ')}`); process.exit(1); }
+if (bad.length) refuse(bad);
