@@ -98,6 +98,15 @@ it('signed out, Bring In is refused quietly and the dialog says why', async () =
   expect(app.store.get().firmList[listId('broad', '')]).toBeUndefined();
 });
 
+it('a Bring In that throws clears busy, says why and keeps the draft', async () => {
+  const session = await reviewPortfolio();
+  const before = keptImport(key);
+  vi.spyOn(app.store, 'dispatch').mockRejectedValue(new Error('The disk is full'));
+  await session.bringIn();
+  expect(session.view.work).toEqual({ busy: '', error: 'Couldn’t import: The disk is full' });
+  expect(keptImport(key)).toEqual(before);
+});
+
 it('keeps new typing from a reopened import while its previous instance finishes writing', async () => {
   const first = await reviewPortfolio();
   const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
