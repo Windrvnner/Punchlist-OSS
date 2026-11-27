@@ -334,7 +334,8 @@ class FolderPass {
 
   /**
    * The read's result: its heading, what the batches found, what found nothing and what could not be read. The whole
-   * of it, with the documents it lists, is within the room this read began with (#480).
+   * of it, with the documents it lists, is within the room this read began with (#480), unless the heading and the
+   * counts alone are past it: then every batch that found something is counted, and nothing more is given.
    */
   result(heading: string): string {
     const failed = this.failed.some(Boolean) ? `\nNot read: ${this.failed.filter(Boolean).join('; ')}.` : '';
@@ -356,8 +357,9 @@ class FolderPass {
   private boundedFindings(room: number): string[] {
     let reserve = 0;
     let fit = this.fitFindings(room);
-    while (fit.over.length && reserve < 1 + moreLine(fit.over.length).length) {
-      reserve = 1 + moreLine(fit.over.length).length;
+    // fewer findings fit beside a longer line, which counts more of them: it settles once the line no longer grows
+    while (fit.over.length && reserve !== moreCost(fit.over.length)) {
+      reserve = moreCost(fit.over.length);
       fit = this.fitFindings(room - reserve);
     }
     for (const x of fit.over.flat()) this.run.quiet.add(x);
@@ -388,6 +390,11 @@ class FolderPass {
     }
     return { lines, over };
   }
+}
+
+/** what the line counting the batches past the room adds to the result, with the line break before it */
+function moreCost(over: number): number {
+  return 1 + moreLine(over).length;
 }
 
 /** the line counting the batches that found something past the room */

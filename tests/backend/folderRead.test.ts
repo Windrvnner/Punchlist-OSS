@@ -355,7 +355,7 @@ function resultCost(before: string, after: string): number {
 /** what the folder read handed the next turn: the batches' findings, as lines, and the count past the room */
 function handed(prompt: string) {
   const block = prompt.slice(prompt.indexOf('What they say:\n'));
-  const lines = block.split('\n').filter((l) => /^Documents \d+–\d+:/.test(l));
+  const lines = block.split('\n').filter((l) => /^Documents? \d+(–\d+)?:/.test(l));
   const places = lines.filter((l) => l.includes('passages at')).length;
   const over = Number(/(\d+) more batches? found passages/.exec(block)?.[1] ?? 0);
   return { block, full: lines.length - places, places, over };
@@ -486,6 +486,44 @@ describe('a folder read is bounded by the model\'s room (#480)', () => {
     expect(kept.full).toBeLessThan(25);
     expect(kept.full + kept.places + kept.over).toBe(25);
   });
+
+  it('at every room size, the whole result and what it lists fit the room, to the character (#480)', async () => {
+    // one document a batch, a third of them quiet; rooms a token apart cross each line's limit within a character
+    const recs = Array.from({ length: 9 }, (_v, i) => doc(`Permits/Permit ${String(i + 1).padStart(4, '0')}.pdf`));
+    const turn = (_c: Call, k: number) =>
+      k === 1 ? { tool: 'folder', folder: 'permits', lookFor: 'expiry' } : { text: 'ok', sources: [] };
+    const reads = (c: Call, k: number) => (k % 3
+      ? { text: `Batch ${k} expires in 2030. [1]`, sources: [{ doc: listed(c)[0].tag, page: 1, quote: 'expires' }] }
+      : { text: '', sources: [] });
+    const run = async (compactAt: number) => {
+      const s = setup(recs, turn, { width: 1, folderDocs: 5000, compactAt, reads });
+      expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+      const room = (compactAt * control.limits.charsPerToken - s.turns[0].prompt.length) / 2;
+      return { room, cost: resultCost(s.turns[0].prompt, s.turns[1].prompt), ...handed(s.turns[1].prompt) };
+    };
+    const held = (await run(100_000)).room;
+    const zero = Math.ceil((100_000 * control.limits.charsPerToken - 2 * held) / control.limits.charsPerToken);
+    // each room size where what is handed changes, found by halving: the room there is within a token of the line's
+    // limit, so a character not counted shows as a result past the room
+    const seen = new Map<number, Awaited<ReturnType<typeof run>>>();
+    const at = async (compactAt: number) => {
+      if (!seen.has(compactAt)) seen.set(compactAt, await run(compactAt));
+      return seen.get(compactAt)!;
+    };
+    const key = (r: Awaited<ReturnType<typeof run>>) => `${r.full}/${r.places}/${r.over}`;
+    const changes: number[] = [];
+    const halve = async (lo: number, hi: number): Promise<void> => {
+      if (key(await at(lo)) === key(await at(hi))) return;
+      if (hi - lo === 1) return void changes.push(hi);
+      const mid = Math.floor((lo + hi) / 2);
+      await halve(lo, mid);
+      await halve(mid, hi);
+    };
+    // from a room that holds the heading and the counts alone to one that holds every batch in full
+    await halve(zero + 250, zero + 1700);
+    expect(changes.length).toBeGreaterThan(6);
+    for (const [compactAt, r] of seen) expect(r.cost, `compactAt ${compactAt}`).toBeLessThanOrEqual(r.room);
+  }, 120_000);
 
   it('a smaller room lists fewer batches in full (#480)', async () => {
     const fullAt = async (compactAt: number) => {
