@@ -106,9 +106,26 @@ describe('the stand-in reading the mock-up list', () => {
 describe('a person\'s file content is never altered on its way in', () => {
   const placed = (ks: LineRead['k'][]): LineRead[] => ks.map((k, i) => ({ n: i + 1, k }));
   it('keeps a pasted line with one cell and a trailing tab as written, not escaped', () => {
-    expect(pastedLines('a\\b\t')).toEqual(['a\\b\t']);
     expect(pastedLines('a\\b|c\td\te')).toEqual(['a\\\\b\\|c | d | e']);
-    expect(checklistPaste('a\\b\t')!.cellRows).toEqual([]);
+    expect(checklistPaste('a\\b')!.cellRows).toEqual([]);
+    expect(checklistPaste('a\\b\t')!.written).toEqual(['a\\b\t']);
+  });
+  it('keeps the empty cells at a pasted row\'s edges and the spaces around its tabs, so columns stay as pasted', () => {
+    expect(pastedLines('\tBylaws\tnotes2')).toEqual([' | Bylaws | notes2']);
+    expect(pastedLines('Bylaws\tnotes2\t')).toEqual(['Bylaws | notes2 | ']);
+    expect(pastedLines('a \t b')).toEqual(['a  |  b']);
+    expect(pastedLines('\t\t')).toEqual(['\t\t']);   // a line of only tabs is blank, as it was pasted
+    expect(checklistPaste('Ref\tItem\n\tBylaws\n \t\n')!.cellRows).toEqual([1, 2]);
+  });
+  it('imports the item column of a pasted table whose section is blank on continuation rows', async () => {
+    const paste = ['Corporate\tArticles\tnotes', '\tBylaws\tnotes2', '\tAccounts | audited\tx'].join('\n');
+    const source = checklistPaste(paste)!;
+    const lines = checklistSourceLines(source, null)!;
+    const model = fake([{ lines: placed(['item', 'item', 'item']), cells: { item: 2, section: 1 } }]);
+    const read = unwrap(await readList(model.ai, lines, checklistCellRows(source, null)));
+    const tied = tieChecklistLines(lines, read, undefined, checklistWrittenLines(source, null))!;
+    expect(tied.items.map((i) => [i.section, i.text])).toEqual([
+      ['Corporate', 'Articles'], ['Corporate', 'Bylaws'], ['Corporate', 'Accounts | audited']]);
   });
   it('reads a one-column table\'s lines as text, so its cells import as written', async () => {
     const table = { columns: ['Item'], rows: [['Review A | B agreement'], ['Path C:\\docs']] } as never;

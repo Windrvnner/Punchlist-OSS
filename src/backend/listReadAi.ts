@@ -40,9 +40,9 @@ export function listReadPrompt(lines: string[], span: ListSpan = { from: 0, to: 
     'For a table, "columns" gives the column numbers, counted from 1: "item", the column that holds each row\'s item;',
     '"section" and "subsection", columns of their own that hold a row\'s section and subsection, when the table has',
     'them; "heading" and "subheading", the columns that hold the heading of a section row and of a subsection row.',
-    'Reply as JSON: {"lines": {"section": ["L3"], "subsection": [], "item": ["L4-L39", "L41"], "more": ["L12"],',
-    '"columns": ["L1"], "left": ["L2", "L40"]}, "columns": {"item": 3, "section": 1, "subsection": 2, "heading": 1,',
-    '"subheading": 2}}',
+    'Reply as JSON: {"lines": {"section": ["L3"], "subsection": [], "item": ["L4-L11", "L13-L39", "L41"],',
+    '"more": ["L12"], "columns": ["L1"], "left": ["L2", "L40"]},',
+    '"columns": {"item": 3, "section": 1, "subsection": 2, "heading": 1, "subheading": 2}}',
   ].join('\n');
 }
 

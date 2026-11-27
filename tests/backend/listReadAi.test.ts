@@ -123,4 +123,16 @@ describe('reading a list in, whole, in one call', () => {
     expect(asked.every((shownLines) => shownLines.length > 0)).toBe(true);
     expect(out.lines.map((r) => r.n)).toEqual([1, 2]);
   });
+  it('gives an example reply in the prompt that names no line twice, so copying it loses no line', async () => {
+    const s = replying({ lines: {} });
+    await s.ai.readList!({ lines: ['a', 'b'] });
+    const prompt = s.calls.filter(isRead)[0].prompt;
+    const example = JSON.parse(prompt.slice(prompt.indexOf('{', prompt.indexOf('Reply as JSON:'))));
+    const named = Object.values(example.lines as Record<string, string[]>).flat().flatMap((entry) => {
+      const [from, to = from] = entry.split('-').map((handle) => Number(handle.slice(1)));
+      return Array.from({ length: to - from + 1 }, (_, k) => from + k);
+    });
+    expect(named.length).toBeGreaterThan(3);
+    expect(new Set(named).size).toBe(named.length);
+  });
 });

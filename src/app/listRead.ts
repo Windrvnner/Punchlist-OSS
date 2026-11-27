@@ -37,19 +37,19 @@ export const LIST_FILES = /\.(xlsx|xlsm|xls|xlsb|ods|csv|docx|docm|doc|odt|rtf|p
 export const LIST_ACCEPT = '.xlsx,.xlsm,.xls,.xlsb,.ods,.csv,.docx,.docm,.doc,.odt,.rtf,.pdf,.txt,.text,.md';
 const SHEET = /\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i; const PLAIN = /\.(txt|text|md)$/i;
 
-/** a pasted line's cells when it has two or more, split at its tabs; none for a text line (#1227) */
+/**
+ * A pasted line's cells when a tab splits it: one per tab and one more, each with its own spaces, empty cells at its
+ * edges included, so a column keeps the number it has in the spreadsheet. A line with no tab, or with only blank cells,
+ * is text (#1227).
+ */
 function pastedCells(line: string): string[] | null {
-  if (!line.includes('\t')) return null;
-  const cells = line.split(/\s*\t\s*/);
-  if (cells[0] === '') cells.shift();
-  if (cells[cells.length - 1] === '') cells.pop();
-  return cells.length > 1 ? cells : null;
+  const cells = line.split('\t');
+  return cells.length > 1 && cells.some((cell) => cell.trim()) ? cells : null;
 }
 
 /**
  * Pasted text as lines. Text copied from a spreadsheet comes with its cells split by tabs: those are written " | ", as a
- * table's rows are given to the model, so a paste from Excel reads as the table it is. A line with one cell and a tab
- * at its edge is text and stays as written.
+ * table's rows are given to the model, so a paste from Excel reads as the table it is. A line with no tab stays as written.
  */
 export const pastedLines = (text: string): string[] =>
   textLines(text).map((line) => pastedCells(line)?.map(cellText).join(' | ') ?? line);
