@@ -51,6 +51,8 @@ export interface TiedOut {
   items: ReadItem[];
   /** the lines left out, by number, in order: the model's "not an item", and lines it never placed */
   left: number[];
+  /** each line left out as the file holds it, in the order of `left` */
+  leftText: string[];
   /** how every line was accounted for; they add up to the number of lines */
   count: { lines: number; items: number; more: number; headings: number; blank: number; left: number };
 }
@@ -78,6 +80,15 @@ export const textLines = (text: string): string[] => text.replace(/\r\n?/g, '\n'
 /** a table row's cells, as tableLines joins them, each as its own text (an escaped backslash or pipe undone) */
 const rowCells = (line: string) => line.split(' | ').map(uncellText);
 const uncellText = (cell: string) => cell.replace(/\\([\\|])/g, '$1');
+
+/**
+ * A line as the file holds it: a table row of several cells as its cells are written, their escapes undone and joined
+ * with " | "; a text line, or the line of a table of one column, as it is (#1227).
+ */
+function asWritten(line: string, { oneColumn }: ListLayout): string {
+  const cells = rowCells(line);
+  return oneColumn || cells.length === 1 ? line : cells.join(' | ');
+}
 
 /** the cell a column names, as written, or '' when the line is not a table row or the column is past it */
 function cellAt(line: string, column: number | undefined, oneColumn?: boolean): string {
@@ -136,7 +147,7 @@ function usable(line: string, r: LineRead | undefined, layout: ListLayout): bool
  */
 export function tieOut(lines: string[], reading: ListReading, bringIn: ReadonlySet<number> = new Set()): TiedOut {
   const count = { lines: lines.length, items: 0, more: 0, headings: 0, blank: 0, left: 0 };
-  const tied: TiedOut = { items: [], left: [], count };
+  const tied: TiedOut = { items: [], left: [], leftText: [], count };
   const at: TieState = { section: '', subsection: '', last: null };
   lines.forEach((line, i) => {
     const n = i + 1;
@@ -149,11 +160,12 @@ export function tieOut(lines: string[], reading: ListReading, bringIn: ReadonlyS
     if (placed) return;
     if (!bringIn.has(n)) {
       tied.left.push(n);
+      tied.leftText.push(asWritten(line, reading));
       count.left++;
       return;
     }
     // a line brought in comes in exactly as written, its bullet or list number included
-    addItem(tied, at, lines[n - 1], n);
+    addItem(tied, at, asWritten(line, reading), n);
     at.last = null;
   });
   return tied;
@@ -191,7 +203,7 @@ function place(tied: TiedOut, at: TieState, line: string, r: LineRead, layout: L
   if (r.k === 'more') {
     if (!at.last) return false;
     // the rest of the item as written, after a space (#1215)
-    at.last.text = `${at.last.text} ${line}`;
+    at.last.text = `${at.last.text} ${asWritten(line, layout)}`;
     at.last.lines.push(r.n);
     tied.count.more++;
     return true;

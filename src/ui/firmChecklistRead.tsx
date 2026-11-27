@@ -142,7 +142,7 @@ function tieOutTip(count: NonNullable<ListSource['tied']>['count']) {
  * Step 2, as the model read it: the items in a preview, and every line it left out, each with a checkbox to bring it in
  * where it sits. The footer counts what comes in; its tooltip ties every line out.
  */
-export function readStep(view: ImportView, lines: string[]) {
+export function readStep(view: ImportView) {
   const { title, exit, work, source } = view;
   const { table, text, tied, readFailed } = source;
   const count = tied?.count;
@@ -165,7 +165,7 @@ export function readStep(view: ImportView, lines: string[]) {
       <div class="srow top"><div class="k">Preview</div><div>
         {readFailed ? notReadLine(view, readFailed) : readPreview(source, reading)}
       </div></div>
-      {leftOutRow(source, lines)}
+      {leftOutRow(source)}
       {reviewChoices(view)}
       {nextFooter(view, readLine(view, reading), count ? tieOutTip(count) : undefined)}
     </Modal>
@@ -204,15 +204,16 @@ function readPreview({ tied }: ListSource, reading: boolean) {
 }
 
 /** Every line the model left out, each with a checkbox to bring it in as an item where it sits. */
-function leftOutRow(source: ListSource, lines: string[]) {
+function leftOutRow(source: ListSource) {
   const leftOut = source.tiedBase?.left ?? [];
+  const shown = source.tiedBase?.leftText ?? [];
   return leftOut.length > 0 && (
     <div class="srow top" id="cl-leftout"><div class="k" title="Lines not read as items">Left out</div><div>
-      <div class="rv-list">{leftOut.map((line) => (
+      <div class="rv-list">{leftOut.map((line, at) => (
         <label class="rv-row" key={line} title={`Line ${line}. Check to import it as an item, where it sits`}>
           <input type="checkbox" data-bringin={line} checked={source.bringIn.has(line)}
             onChange={() => source.flipBringIn(line)} />
-          <div class="rv-new">{lines[line - 1]}</div>
+          <div class="rv-new">{shown[at]}</div>
         </label>))}
       </div>
     </div></div>

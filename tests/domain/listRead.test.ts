@@ -138,6 +138,32 @@ describe('a list read whole by the model, tied out line by line', () => {
     expect(t.items.map((i) => i.text)).toEqual(rows.map((r) => r[0]));
   });
 
+  describe('a table row brought in, appended or listed as left out is the cells as the file holds them', () => {
+    const rows = [['Left', 'D:\\x | y'], ['Next', 'Path C:\\a|b']];
+    const lines = tableLines(['Item', 'Path'], rows);
+    const asHeld = rows.map((r) => r.join(' | '));
+    it('brings a left-out row in with its backslash and pipe as written', () => {
+      const read = reading(kinds([[1, 'columns'], [2, 'left'], [3, 'left']]), { item: 2 });
+      expect(tieOut(lines, read, new Set([2, 3])).items.map((i) => i.text)).toEqual(asHeld);
+    });
+    it('appends a row read as the rest of the item above it with its backslash and pipe as written', () => {
+      const read = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'more']]), { item: 2 });
+      expect(tieOut(lines, read).items.map((i) => i.text)).toEqual([`D:\\x | y ${asHeld[1]}`]);
+    });
+    it('lists a left-out row as the cells are written in the file', () => {
+      const read = reading(kinds([[1, 'columns'], [2, 'left'], [3, 'left']]), { item: 2 });
+      expect(tieOut(lines, read).leftText).toEqual(asHeld);
+    });
+    it('keeps a one-column table\'s line and a text line as they are on every path', () => {
+      const one = ['A | B\\c', 'plain \\| text'];
+      const read = { ...reading(kinds([[1, 'left'], [2, 'left']])), oneColumn: true };
+      const t = tieOut(one, read, new Set([1]));
+      expect(t.items.map((i) => i.text)).toEqual([one[0]]);
+      expect(t.leftText).toEqual([one[1]]);
+      expect(tieOut(one, reading(kinds([[1, 'left'], [2, 'left']]))).leftText).toEqual(one);
+    });
+  });
+
   it('keeps a cell whole when its own text holds " | " or a backslash, and the columns after it in place', () => {
     const rows = [['1', 'Check Debt | Equity obligations', 'Debt'], ['2', 'Path C:\\\\dir\\| x', 'Equity']];
     const lines = tableLines(['No', 'Requirement', 'Area'], rows);
