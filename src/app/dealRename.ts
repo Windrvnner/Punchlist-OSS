@@ -1,55 +1,57 @@
-import { cleanName, EditDeal, withProject } from './commands/deals';
-import type { FieldDraft } from './fieldDrafts';
-import { FieldSave, type FieldSaveOutcome, fieldSaveOutcome } from './fieldSave';
-import { pendingSave, sendSave } from './saveOut';
+import { cleanName, EditDeal } from './commands/deals';
+import { type FieldDraft, unsavedFields } from './fieldDrafts';
+import { fieldSaveOutcome, type FieldSaveOutcome } from './fieldSave';
 import type { Store } from './store';
 
 type RenameInput = { render(): void; close(): void; focus(): void };
-type Landed = { sent: FieldDraft; outcome: FieldSaveOutcome; matches: boolean; rebased?: FieldDraft };
 
-const sameBase = (a: FieldDraft, b: FieldDraft) => a.base === b.base && a.rev === b.rev;
-
-/** The name saves only on Enter or blur. Escape restores the rename that was waiting when the box opened. */
-export class DealRename extends FieldSave {
+/**
+ * The deal name saves on Enter or blur, keeping its typing as EditField does (`deal-name:<id>` in `unsavedFields`).
+ * Escape restores the draft kept when the box opened, or the one last refused.
+ */
+export class DealRename {
   editing = false;
   changedElsewhere = false;
   private entry?: FieldDraft;
+  private over = { base: '', rev: 0 };
+  private saving = false;
   private gone = false;
-  private key: string;
 
-  constructor(private store: Store, private id: string, private input: RenameInput) {
-    const key = 'deal-name:' + id;
-    const deal = store.get().deals[id];
-    super({ value: deal.name, rev: deal.rev }, key);
-    this.key = key;
-    void (pendingSave(key) as Promise<Landed> | undefined)?.then((landed) => this.show(landed));
+  constructor(private store: Store, private id: string, private input: RenameInput) {}
+
+  get kept() {
+    return unsavedFields.get('deal-name:' + this.id);
   }
 
   get text() {
-    return this.kept?.text ?? this.base;
+    return this.kept?.text ?? this.over.base;
+  }
+
+  private keep(draft: FieldDraft | undefined) {
+    if (draft) unsavedFields.set('deal-name:' + this.id, draft);
+    else unsavedFields.delete('deal-name:' + this.id);
   }
 
   open() {
-    this.entry = this.kept;
     const deal = this.store.get().deals[this.id];
-    this.base = this.entry?.base ?? deal.name;
-    this.baseRev = this.entry?.rev ?? deal.rev;
+    this.entry = this.kept;
+    this.over = this.entry ?? { base: deal.name, rev: deal.rev };
     this.editing = true;
     this.changedElsewhere = false;
     this.input.render();
   }
 
   typed(text: string) {
-    this.keepOverBase(text);
+    this.keep({ text, base: this.over.base, rev: this.over.rev });
   }
 
   escape() {
-    this.restore(this.entry);
+    this.keep(this.entry);
     this.close();
   }
 
   takeTheirs() {
-    this.restore(undefined);
+    this.keep(undefined);
     this.close();
   }
 
@@ -63,79 +65,32 @@ export class DealRename extends FieldSave {
   }
 
   async submit(event: 'enter' | 'blur' | 'mine') {
-    if (this.gone || !this.editing || pendingSave(this.key) || (this.changedElsewhere && event !== 'mine')) return;
+    if (this.gone || !this.editing || this.saving || (this.changedElsewhere && event !== 'mine')) return;
     const deal = this.store.get().deals[this.id];
     const name = cleanName(this.text);
-    if (!name && event !== 'blur') {
-      this.store.toast('A deal needs a name', 'warn');
-      return;
-    }
-    if (!name || name === deal.name) {
-      this.takeTheirs();
-      return;
-    }
-    if (event === 'mine') {
-      this.base = deal.name;
-      this.baseRev = deal.rev;
-      this.changedElsewhere = false;
-    }
-    const sent = { text: this.text, base: this.base, rev: this.baseRev };
-    this.restore(sent);
-    const pending = sendSave(this.key, () => this.write(name, sent));
-    if (pending) this.show(await pending);
+    if (!name && event !== 'blur') return this.store.toast('A deal needs a name', 'warn');
+    if (!name || name === deal.name) return this.takeTheirs();
+    if (event === 'mine') this.over = { base: deal.name, rev: deal.rev };
+    const sent = { text: this.text, base: this.over.base, rev: this.over.rev };
+    this.saving = true;
+    const result = await this.store.dispatch(EditDeal, { dealId: this.id, name }, { quiet: true, over: sent.base });
+    this.saving = false;
+    const outcome = fieldSaveOutcome(result, 'record');
+    // FieldSave's rule: a kept draft is forgotten only if it is the text sent; newer typing stays kept.
+    if (outcome.kind === 'saved' && this.kept?.text === sent.text) this.keep(undefined);
+    if (outcome.kind !== 'saved' && (this.kept?.text ?? sent.text) === sent.text) this.keep(sent);
+    if (!this.gone) this.show(outcome, sent);
   }
 
-  /** Settle the snapshot, even after leaving the page. A new draft over a different base is independent (#771). */
-  private async write(name: string, sent: FieldDraft): Promise<Landed> {
-    const commit = (value: string, over: string) =>
-      this.store.dispatch(EditDeal, { dealId: this.id, name: value }, { quiet: true, over });
-    const outcome = fieldSaveOutcome(await commit(name, sent.base), 'record');
-    const deal = this.store.get().deals[this.id];
-    const current = this.kept;
-    const related = deal && current && sameBase(current, sent);
-    const matches = !!related && current.text === sent.text;
-    if (outcome.kind === 'saved' && related) {
-      const base = withProject(name);
-      const rebased = matches ? undefined : { text: current.text, base, rev: deal.name === base ? deal.rev : -1 };
-      this.restore(rebased);
-      return { sent, outcome, matches, rebased };
-    }
-    return { sent, outcome, matches };
-  }
-
-  /** A reopened editor also observes the result. Only the matching rename can close or show a refusal. */
-  private show(landed: Landed) {
-    if (this.gone) return;
-    if (!this.editing) {
-      this.input.render();
-      return;
-    }
-    const { sent, outcome, matches } = landed;
-    if (outcome.kind === 'saved') {
-      this.saved(landed);
-      return;
-    }
-    if (!matches) return;
+  private show(outcome: FieldSaveOutcome, sent: FieldDraft) {
+    if (!this.editing) return this.input.render();
+    if (outcome.kind === 'saved') return this.kept ? this.input.render() : this.close();
     this.entry = sent;
-    if (outcome.kind === 'changedElsewhere') {
-      this.changedElsewhere = true;
-      this.input.render();
-      return;
-    }
+    this.changedElsewhere = outcome.kind === 'changedElsewhere';
+    if (outcome.kind === 'changedElsewhere') return this.input.render();
     const locked = this.store.readOnly();
     this.store.toast(locked ?? outcome.reason, 'warn');
     if (locked) this.close();
     else this.input.focus();
-  }
-
-  private saved({ sent, matches, rebased }: Landed) {
-    if (this.entry && sameBase(this.entry, sent)) {
-      if (this.entry.text === sent.text) this.entry = undefined;
-      else if (rebased) this.entry = { ...rebased, text: this.entry.text };
-    }
-    if (rebased) {
-      this.base = rebased.base;
-      this.baseRev = rebased.rev;
-    } else if (matches && !this.kept) this.close();
   }
 }
