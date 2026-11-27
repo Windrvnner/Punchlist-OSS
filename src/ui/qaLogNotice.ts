@@ -46,7 +46,7 @@ export function showQaLogUpdate(store: Store, dealId: string) {
           return () => store.dismissToast(toast);
         }
         case 'retryLimit':
-          store.toast('Q&A log not updated · in use elsewhere for 20 minutes', 'warn',
+          store.toast(`Q&A log not updated · in use elsewhere for ${outcome.minutes} minutes`, 'warn',
             { label: 'Retry', run: () => void outcome.retry() }, true);
           break;
         case 'created':

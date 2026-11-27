@@ -114,7 +114,7 @@ it('stops after 40 retries and offers a fresh manual attempt', async () => {
   await vi.advanceTimersByTimeAsync(1);
   expect(save).toHaveBeenCalledTimes(41);
   const stopped = announce.mock.lastCall?.[0];
-  expect(stopped?.kind).toBe('retryLimit');
+  expect(stopped).toMatchObject({ kind: 'retryLimit', minutes: 20 });
   await vi.advanceTimersByTimeAsync(60_000);
   expect(save).toHaveBeenCalledTimes(41);
   save.mockResolvedValueOnce(WRITTEN);
