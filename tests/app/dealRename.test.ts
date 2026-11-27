@@ -244,3 +244,29 @@ it('still says why a rename failed after Escape closed the box during its save',
   expect(field.kept?.text).toBe(raw);
   expect(app.store.get().ui.toasts.at(-1)?.text).toBe('The shared folder is unavailable');
 });
+
+it.each(['same box', 'restarted app'] as const)('saves typing kept through a save over it in the %s', async (when) => {
+  const { field, deal, id, saveKeptDrafts, start } = await fixture();
+  const gate = holdRecoveryWrite(app, writesDeal);
+  field.typed(raw);
+  const saving = field.submit('enter');
+  await gate.entered;
+  field.typed('North  Ridge');
+  gate.release();
+  await saving;
+  let target = field;
+  if (when === 'restarted app') {
+    saveKeptDrafts();
+    app.store.closing();
+    await app.repo.close();
+    app = recoveryApp(app.saved, [EditDeal]);
+    await app.store.boot();
+    await app.store.loadDeal(id, { gaps: false });
+    target = (await start()).header();
+    target.open();
+  }
+  await target.submit('enter');
+  expect(target.changedElsewhere).toBe(false);
+  expect(deal().name).toBe('Project North  Ridge');
+  expect(target.kept).toBeUndefined();
+});
