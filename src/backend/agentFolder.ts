@@ -128,15 +128,15 @@ export class FolderReader {
     await pass.readAll();
     // a batch that failed is not kept as read, so reading on takes it again
     for (const id of pass.readNow) place.read.add(id);
-    const summary = pass.summary();
     if (pass.stoppedEarly()) {
-      return `The person stopped the reading of ${folder.label} for ${quoted(lookFor)} after ${pass.readCount} of `
-        + `${toRead} documents, the most important first.${earlier} The rest were not read: if asked to read on, `
-        + `use the folder tool with the same folder and lookFor, and it reads the ones not read yet.\n${summary}`;
+      return pass.result(`The person stopped the reading of ${folder.label} for ${quoted(lookFor)} after `
+        + `${pass.readCount} of ${toRead} documents, the most important first.${earlier} The rest were not read: if `
+        + 'asked to read on, use the folder tool with the same folder and lookFor, and it reads the ones not read '
+        + 'yet.');
     }
     const which = readBefore ? `the other ${toRead}` : `all ${toRead}`;
-    return `You had ${which} documents in ${folder.label} read for ${quoted(lookFor)}, the most important first; `
-      + `${pass.readCount} were read.${earlier}\n${summary}`;
+    return pass.result(`You had ${which} documents in ${folder.label} read for ${quoted(lookFor)}, the most `
+      + `important first; ${pass.readCount} were read.${earlier}`);
   }
 
   /**
@@ -332,58 +332,76 @@ class FolderPass {
     for (const s of reading.sent) if (!keep.includes(s) && !reading.had.has(s)) this.run.unopen(s);
   }
 
-  /** what the batches found, bounded, with what found nothing and what could not be read */
-  summary(): string {
-    const found = this.boundedFindings();
-    const said = found.length ? `What they say:\n${found.join('\n')}` : 'None of them says anything about it.';
-    const quiet = this.quietBatches && found.length
+  /**
+   * The read's result: its heading, what the batches found, what found nothing and what could not be read. The whole
+   * of it, with the documents it lists, is within the room this read began with (#480).
+   */
+  result(heading: string): string {
+    const failed = this.failed.some(Boolean) ? `\nNot read: ${this.failed.filter(Boolean).join('; ')}.` : '';
+    if (!this.findings.some(Boolean)) return `${heading}\nNone of them says anything about it.${failed}`;
+    const quiet = this.quietBatches
       ? `\n${this.quietBatches} ${noun(this.quietBatches, 'batch', 'batches')} said nothing about it; their documents `
         + 'are not listed, but can be read by path.'
       : '';
-    const failed = this.failed.some(Boolean) ? `\nNot read: ${this.failed.filter(Boolean).join('; ')}.` : '';
-    return `${said}${quiet}${failed}`;
+    const said = `${heading}\nWhat they say:`;
+    const found = this.boundedFindings(this.room - `${said}${quiet}${failed}`.length);
+    return `${said}${found.map((x) => `\n${x}`).join('')}${quiet}${failed}`;
   }
 
   /**
-   * What was found, bounded by the room this read began with: in full for the first half of it, then by its places
-   * alone; a batch past it is counted, and its documents are not listed to the model, so the prompt stays bounded
-   * however large the folder. The first batch always gives its places, however little room is left, so a read never
-   * says nothing.
+   * What was found, within `room` characters: in full for the first half of it, then by its places alone; a batch
+   * past it is counted, and its documents are not listed to the model, so the prompt stays bounded however large the
+   * folder. The line counting them takes room too, so the findings are fitted again until it fits beside them.
    */
-  private boundedFindings(): string[] {
+  private boundedFindings(room: number): string[] {
+    let reserve = 0;
+    let fit = this.fitFindings(room);
+    while (fit.over.length && reserve < 1 + moreLine(fit.over.length).length) {
+      reserve = 1 + moreLine(fit.over.length).length;
+      fit = this.fitFindings(room - reserve);
+    }
+    for (const x of fit.over.flat()) this.run.quiet.add(x);
+    return fit.over.length ? [...fit.lines, moreLine(fit.over.length)] : fit.lines;
+  }
+
+  /**
+   * the batches' findings that fit `room`, each line with the line break before it and the documents it newly lists;
+   * past it, the new documents of each batch left over
+   */
+  private fitFindings(room: number): { lines: string[]; over: Sent[][] } {
     let used = 0;
-    let over = 0;
     const lines: string[] = [];
+    const over: Sent[][] = [];
     for (const finding of this.findings) {
       if (!finding) continue;
       const full = `${finding.at}: ${finding.ids}. ${finding.text}`;
       const short = `${finding.at}: passages at ${finding.places}.`;
       const newDocs = finding.got.filter((x) => !this.before.has(x));
       const listing = newDocs.reduce((sum, x) => sum + listingChars(this.run.idOf(x)), 0);
-      const line = fittingLine(full, short, used + listing, this.room, !lines.length);
+      const line = fittingLine(full, short, used + 1 + listing, room);
       if (line) {
         lines.push(line);
-        used += line.length + listing;
+        used += 1 + line.length + listing;
       } else {
-        over++;
-        for (const x of newDocs) this.run.quiet.add(x);
+        over.push(newDocs);
       }
     }
-    if (over) {
-      const batches = `${over} more ${noun(over, 'batch', 'batches')}`;
-      lines.push(`${batches} found passages, past what fits here: search the folder for what they hold.`);
-    }
-    return lines;
+    return { lines, over };
   }
 }
 
+/** the line counting the batches that found something past the room */
+function moreLine(over: number): string {
+  return `${over} more ${noun(over, 'batch', 'batches')} found passages, past what fits here: search the folder for `
+    + 'what they hold.';
+}
+
 /**
- * the line that fits the room after `used` characters: in full within half of it, else by its places within all of it;
- * the first line given always has its places (#480)
+ * the line that fits the room after `used` characters: in full within half of it, else by its places within all of it
  */
-function fittingLine(full: string, short: string, used: number, room: number, first: boolean): string {
+function fittingLine(full: string, short: string, used: number, room: number): string {
   if (used + full.length <= room / 2) return full;
-  return first || used + short.length <= room ? short : '';
+  return used + short.length <= room ? short : '';
 }
 
 /** a step done, with its result */
