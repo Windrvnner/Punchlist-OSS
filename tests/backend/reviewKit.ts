@@ -28,6 +28,8 @@ export class Tearing extends Mem {
   }
 }
 export const doc = (n: number, name: string, extra: Partial<DocRecord> = {}): DocRecord => ({ docId: `doc_${String(n).padStart(24, '0')}`, hash: 'h', name, folder: 'vdr', rel: name, size: 1, ...(/\.xlsx$/.test(name) ? {} : { pages: 40 }), ...extra });
+/** a text as a regular expression matches it literally: every special character, backslash included */
+export const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** a listed document's id in a prompt: its docId, or `<deal id>/<doc id>` across deals (#1162) */
 export const LISTED_ID = String.raw`(?:\w+/)?doc_[0-9a-f]{24}`;
 /** the ids a prompt's listing gives its documents, in order, a pick's core documents (starred) among them */

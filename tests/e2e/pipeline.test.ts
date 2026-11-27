@@ -15,6 +15,7 @@ import {
   itemsIn,
   listed,
   nth,
+  escapeRegExp,
 } from '../backend/reviewKit';
 import { CreateQuestion, SetResponse, EditQuestionField } from '../../src/app/commands/questions';
 import { ResolveConflict } from '../../src/app/commands/conflicts';
@@ -33,7 +34,7 @@ const LIST = () => ({
 function model() {
   return new StandInService((c) => {
     const ref = (name: string) =>
-      new RegExp(`^(doc_[0-9a-f]{24}): (?:.*/)?${name.replace(/[()]/g, '\\$&')}`, 'm').exec(c.prompt)?.[1];
+      new RegExp(`^(doc_[0-9a-f]{24}): (?:.*/)?${escapeRegExp(name)}`, 'm').exec(c.prompt)?.[1];
     if (isDescribeAsk(c as any)) { const name = /Describe the document (.*)\.\n/.exec(c.prompt)?.[1] ?? 'it'; return JSON.stringify({ summary: `This is ${name}.`, keywords: ['lock-up'] }); }
     if (isPickAsk(c as any) || isPickForAsk(c as any))
       return JSON.stringify({

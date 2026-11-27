@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   citedDocs, citesUnsent, docHandle, docsUnusable, namesOnlyShown, recordIdsIn, sentAs, unknownIds, unknownInPairs,
 } from '../../src/backend/recordIds';
+import { escapeRegExp } from './reviewKit';
 
 const ULID = '01HZX3K9Q4V7M2B5N8C1D6E0FG';
 const HEX = 'a1b2c3d4e5f60718293a4b5c';
@@ -108,5 +109,13 @@ describe('docsUnusable (#1162)', () => {
   it('refuses one naming an id it was not shown in its words, or citing a document it was not given', () => {
     expect(check(JSON.stringify({ text: `Per ${finding}.`, sources: [] }))).toBe(true);
     expect(check(JSON.stringify({ text: 'So. [1]', sources: [{ doc: 'D1', page: 1 }] }))).toBe(true);
+  });
+});
+
+describe('escapeRegExp, for the test stand-ins that find a listed document by its name', () => {
+  it('matches a name literally, backslashes and brackets included', () => {
+    const name = 'Term (final) [v2] C:\\dir\\a+b.pdf';
+    expect(new RegExp(`^${escapeRegExp(name)}$`).test(name)).toBe(true);
+    expect(new RegExp(escapeRegExp('a\\')).test('a\\')).toBe(true);
   });
 });

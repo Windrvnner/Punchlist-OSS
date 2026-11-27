@@ -5,7 +5,9 @@ import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmp, put, pdf, pcApp, newDeal, until, StandInService } from './kit';
-import { isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, itemsIn, listed } from '../backend/reviewKit';
+import {
+  isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, itemsIn, listed, escapeRegExp,
+} from '../backend/reviewKit';
 import { watchFolders, freshen, FOLDER_CHECK } from '../../src/app/folderWatch';
 import { AddFolders } from '../../src/app/commands/deals';
 import type { nodeAi } from '../../src/backend/ai';
@@ -18,7 +20,7 @@ function model() {
   return new StandInService((c) => {
     seen.calls++;
     const ref = (name: string) =>
-      new RegExp(`^(doc_[0-9a-f]{24}): (?:.*/)?${name.replace(/[()]/g, '\\$&')}`, 'm').exec(c.prompt)?.[1];
+      new RegExp(`^(doc_[0-9a-f]{24}): (?:.*/)?${escapeRegExp(name)}`, 'm').exec(c.prompt)?.[1];
     if (isDescribeAsk(c as any)) return JSON.stringify({ summary: 'A document.', keywords: [] });
     if (isPickAsk(c as any) || isPickForAsk(c as any))
       return JSON.stringify({
