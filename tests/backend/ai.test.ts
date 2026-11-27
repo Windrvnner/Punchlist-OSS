@@ -1748,7 +1748,8 @@ describe('the first pass', () => {
     await deal(s.repo);
     const r = val(await s.ai.firstPass('d1'));
     const turn = s.fillCalls.find((c) => isTurn(c))!; expect(turn.model).toBe('standard');                                             // the check's model runs the agent
-    expect(turn.prompt).toContain('- Decommissioning is provided for Still needed: a decommissioning plan');                         // with what the check said it still needs
+    // with what the check said it still needs
+    expect(turn.prompt).toContain('- Decommissioning is provided for Still needed: a decommissioning plan');
     expect(s.calls.map((c) => [itemsIn(c).map((it) => it.text).join(), sentNames(c).join()])).toEqual([['Decommissioning is provided for', 'Credit Agreement.pdf'], ['Decommissioning is provided for', 'DEC-77.pdf']]);   // the cited plan is read against the item, as on its last look
     expect(r.gaps).toEqual([]); expect(r.unsettled).toEqual([]);
     expect(val(await s.ai.checklist('d1')).find((x) => x.id === 'x1')).toMatchObject({ result: 'satisfied', sources: [{ doc: 'DEC-77.pdf', loc: 'p. 1' }] });
@@ -1768,7 +1769,11 @@ describe('the first pass', () => {
     // found nothing: each run hands over at most four items, and every item stays a gap with what was searched for
     const s = setup(gapAll, { d1: [FA, TS] }, opts); await deal(s.repo);
     const r = val(await s.ai.firstPass('d1')); expect(r.gaps.length).toBe(6);
-    const turns = s.fillCalls.filter((c) => isTurn(c)); expect(turns.length).toBe(2); expect(turns[0].prompt).toContain('- Gap item 4'); expect(turns[0].prompt).not.toContain('Gap item 5'); expect(turns[1].prompt).toContain('- Gap item 6');
+    const turns = s.fillCalls.filter((c) => isTurn(c));
+    expect(turns.length).toBe(2);
+    expect(turns[0].prompt).toContain('- Gap item 4');
+    expect(turns[0].prompt).not.toContain('Gap item 5');
+    expect(turns[1].prompt).toContain('- Gap item 6');
     expect(turns[0].prompt).toContain('(searched already, finding nothing: "decommissioning plan"');                                 // the check's searches go with them, so they are not made again
     const g1 = val(await s.ai.checklist('d1')).find((x) => x.id === 'g1')!; expect(g1.result).toBe('gap'); expect(g1.searched?.[0]).toEqual({ q: 'decommissioning plan', n: 0 });
     // a run whose reply cannot be used: no more items are handed over in that check
