@@ -89,14 +89,6 @@ type Limits = {
   turns: number; width: number; folderDocs: number; searchPage: number; compactAt: (model: string) => number;
 };
 
-/**
- * the most characters a page of findings or questions may hold: half of what the kept conversation holds before it is
- * compacted, so that a search of everything, which gives a page of each in one result, never outgrows what one call
- * may send; the same whichever is searched, so that a page asked for by kind starts where a search of everything's
- * page of that kind stopped (recordSearch.ts `pageOf`, #1091)
- */
-const pageChars = (limits: Limits, model: string) => (limits.compactAt(model) * control.limits.charsPerToken) / 2;
-
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […], "offer": {…}}';
 /** the fields a turn's reply is read for */
@@ -153,6 +145,8 @@ class Answering {
   private readonly run: AgentRun;
   private readonly folders: FolderReader;
   private readonly conversation: KeptConversation;
+  /** the turn being worked on, once the first has begun */
+  private turnNow: Turn | undefined;
 
   constructor(
     private readonly kit: AgentKit,
@@ -162,9 +156,20 @@ class Answering {
     folderMemory: FolderMemory,
   ) {
     const { width, searchPage } = limits;
-    this.run = new AgentRun(kit, question, progress, { width, searchPage, chars: pageChars(limits, question.model) });
+    const limit = limits.compactAt(question.model) * control.limits.charsPerToken;
+    // a page of findings or questions is half of it, the same each time it is asked for (recordSearch.ts `pageOf`)
+    this.run = new AgentRun(kit, question, progress, { width, searchPage, chars: limit / 2, limit });
+    // what a tool result may add depends on what the model holds: a kept conversation's tokens count too (#480)
+    this.run.held = () => this.held();
     this.folders = new FolderReader(this.run, folderMemory, limits);
     this.conversation = new KeptConversation(this.run, limits.compactAt, limits.width);
+  }
+
+  /** how many characters the model holds once the turn is sent again: none before the first turn (#480) */
+  private held(): number {
+    if (!this.turnNow) return 0;
+    if (!this.kit.talk) return this.turnNow.full(true).length;
+    return this.conversation.held(this.turnNow, control.limits.charsPerToken);
   }
 
   /** whether the person has stopped the answer: read afresh each time, since they can stop it at any moment */
@@ -211,6 +216,7 @@ class Answering {
     // a document that cannot be opened on this PC was not read
     if (got.length < run.whole.length) run.whole = got;
     const turn = this.turnOf(turnNumber, last, files, listing);
+    this.turnNow = turn;
     const reply = kit.talk
       ? await this.conversation.ask(turn)
       : await kit.askJson(

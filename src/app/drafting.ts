@@ -4,7 +4,7 @@
  * through RequestDraft/ApplyDraft, so a stop or a reload leaves nothing half-done.
  */
 import type { Store } from './store';
-import { AcceptDraft, RequestDraft } from './commands/drafts';
+import { AcceptDraft, RequestDraft, canRequestDraft } from './commands/drafts';
 import { SetResponse } from './commands/questions';
 import { isChangedElsewhere } from './changedElsewhere';
 import { isDraftStale } from '../domain/transitions';
@@ -16,7 +16,9 @@ import type { Question } from '../domain/model';
 import { fail, rejected } from '../domain/result';
 import type { Services } from '../ports';
 
-export const eligibleForDraft = (q: Question) => q.status === 'open' && !q.response.trim() && !!q.text.trim()
+export { canRequestDraft };
+
+export const eligibleForDraft = (q: Question) => canRequestDraft(q) && !q.response.trim()
   && (!q.draft || q.draft.status === 'failed' || isDraftStale(q));
 
 function retryKeptDraft(store: Store, opId: string | undefined): boolean {

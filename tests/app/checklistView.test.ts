@@ -211,3 +211,13 @@ it('lists a gap’s searches once each, in first-search order, with the text and
   expect(gapSearches(legacy)).toEqual([]);
   expect(gapSearches({ ...legacy, searched: [] })).toEqual([]);
 });
+
+it('groups list-backed and legacy rows according to the effective filter and flagged heading', () => {
+  const state = checklistDeal();
+  expect(viewFor(state, 'finding')).toMatchObject({ grouped: true, flaggedAbove: false });
+  state.items = {};
+  expect(viewFor(state, 'all')).toMatchObject({ grouped: true, flaggedAbove: true });
+  expect(viewFor(state, 'finding')).toMatchObject({ grouped: false, flaggedAbove: true });
+  expect(viewFor(state, 'gap')).toMatchObject({ grouped: false, flaggedAbove: false });
+  expect(viewFor(state, 'off')).toMatchObject({ on: 'all', grouped: true, flaggedAbove: true });
+});

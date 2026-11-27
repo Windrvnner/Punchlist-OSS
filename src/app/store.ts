@@ -18,6 +18,7 @@ import { overLimit, TOO_LONG } from '../domain/importExport';
 import type { Command, Plan } from './command';
 import { fingerprint, sameContent } from '../domain/versions';
 import type { ShownNote, DeletedCopy } from './commands/keptVersions';
+import { settleChecklistFilter } from './checklistView';
 import { type State, type Message, type Prefs, type PageState, type Conflict, initialState, DEFAULT_PREFS, FIRM, conflictLabel, versionsWord, findingName, bucketOf, deleteWaits } from './state';
 import { z } from 'zod';
 import type { Services, ConversationStore } from '../ports';
@@ -238,6 +239,7 @@ export class Store {
 
   constructor(public readonly services: Services, commands: Command<any>[]) {
     this.state = initialState(capabilities(services));
+    settleChecklistFilter(this);
     this.conversations = services.conversations ?? localConversations(services.local);
     for (const c of [...commands, Undo]) this.commands.set(c.name, c);
     services.ai = this.watchModel(services.ai);

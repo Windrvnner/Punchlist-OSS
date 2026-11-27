@@ -1,9 +1,10 @@
+import { briefParts, scopeHash } from '../app/conversations';
 import { Fragment } from 'preact';
 import { onListText, OnListMark } from './issuesList';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { TEXT_MAX } from '../domain/importExport';
 import { limitClass, limitTitle } from './limit';
-import { checkingSays, watchCheck } from '../app/checking';
+import { watchCheck } from '../app/checking';
 import { showTip, hideTip } from './tip';
 import { ReadOnlyContext } from './editField';
 import { useAppState, useStore, fmtDate, whenText, whenInSentence, useDismiss, useMinuteTick } from './hooks';
@@ -16,7 +17,7 @@ import { DocName } from './docName';
 import { FindingsHead } from './findingsHead';
 import { NO_WORKSTREAM, workstreamChoices } from '../domain/order';
 import { versionsWord, type State } from '../app/state';
-import { checkLeftCount, uncheckedChecklistCount } from '../app/dealCounts';
+import { checkLine } from '../app/dealCounts';
 import { findingsView } from '../app/findingsView';
 import { ConflictView } from './conflict';
 import { AskFirst } from './dialogs';
@@ -25,7 +26,7 @@ import { SetFindingStatus, ReviewFinding, DeleteFinding, TITLE_MAX } from '../ap
 import { findingHistory, reassess, type FindingHistoryEvent } from '../app/findings';
 import type { Deal, Finding, Source } from '../domain/model';
 import { localYmd, CHECK_REASON } from '../domain/model';
-import { splitCited } from '../domain/cite';
+import { restsOnAllSources, splitCited } from '../domain/cite';
 import { SERVICE } from '../control';
 import { keptDrafts, hasTexts } from '../app/keptText';
 import { useSaveOut } from './saveOut';
@@ -46,7 +47,8 @@ export function markText(f: Finding, questions?: Record<string, { n: number } | 
 
 /** the dot after a finding's workstream: none when it has no workstream (an imported point the model could not place), so no line starts with a dot */
 const dot = (f: { workstream: string }) => (f.workstream ? ' · ' : '');
-export const findingHref = (f: { dealId: string; id: string }) => `#finding-${f.dealId}-${f.id}`;
+export const findingHref = (f: { dealId: string; id: string }) =>
+  `#${scopeHash({ kind: 'finding', dealId: f.dealId, findingId: f.id })}`;
 
 /** Text whose sentences end in [n] become cited phrases pointing at sources[n-1]. */
 export function Cited({ text, sources, onOpen, whole, onMore }: { text: string; sources: Source[]; onOpen?: (s: Source) => void; whole?: boolean; onMore?: () => void }) {
@@ -66,9 +68,8 @@ export function Cited({ text, sources, onOpen, whole, onMore }: { text: string; 
  */
 export function Brief({ paragraphs, deal, onFinding, marked }: { paragraphs: string[]; deal: Deal; onFinding?: (f: Finding) => void; marked?: string }) {
   const s = useAppState();
-  return <>{paragraphs.map((p, i) => <p key={i}>{p.split(/(\{[^|}]+\|f_[0-9A-Z]{26}\})/).map((seg, j) => {
-    const m = /^\{([^|}]+)\|(f_[0-9A-Z]{26})\}$/.exec(seg);
-    if (!m) return <span key={j}>{seg}</span>;
+  return <>{paragraphs.map((p, i) => <p key={i}>{briefParts(p).map((m, j) => {
+    if (typeof m === 'string') return <span key={j}>{m}</span>;
     const f = s.findings[m[2]];
     if (!f) return <span key={j}>{m[1]}</span>;
     const open = () => { if (onFinding) onFinding(f); else location.hash = findingHref(f).slice(1); };
@@ -134,28 +135,27 @@ export function CheckLine({ deal: d }: { deal: Deal }) {
   useEffect(() => s.can.checkAll ? watchCheck(store, d.id) : undefined, [store, d.id, s.can.checkAll]);
   const on = (iso: string) => fmtDate(localYmd(iso)); const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
   const out = c?.left ? [c.left.items ? n(c.left.items, 'checklist item', 'checklist items') : '', c.left.findings ? n(c.left.findings, 'finding', 'findings') : ''].filter(Boolean).join(' and ') : '';
-  const deep = !!c?.offerDeep && !c.left && !c.failedAt;
-  // what the latest check left out can be checked on its own while the documents are the ones it checked
-  const rest = checkLeftCount(c, deep);
-  const shared = checkingSays(c?.checking, c?.busy === 'deep');
-  // checklist items no check has reached yet, such as items brought in since the last one; not while the first pass is still reading
-  const unchecked = uncheckedChecklistCount(s, d);
+  const line = checkLine(s, d.id);
+  const kind = line?.kind;
+  const shared = line?.shared;
   // the names shown on hover go when the line no longer has them
   // the names go in the same frame as the line that named them, not a frame after it (#695)
   const lineRef = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
     if (!shared?.who && lineRef.current) hideTip(lineRef.current);
   }, [shared?.who]);
-  const said = shared ? shared.text : c?.busy ? `Checking the checklist and findings${c.busy === 'deep' ? ' in depth' : ''}`
-    : c?.failedAt ? `The check on ${on(c.failedAt)} did not finish`
-    : c?.left ? `${on(c.left.at)} check left out ${out}`
-    : deep ? `${c!.at ? `${on(c!.at)} spot` : 'Spot'} check disagreed with ${c!.offerDeep!.overturned} of its ${c!.offerDeep!.size} results`
-    : unchecked ? `${n(unchecked, 'checklist item', 'checklist items')} not checked yet` : '';
-  const warn = !c?.busy && (!!c?.failedAt || !!c?.left || deep || unchecked > 0);
+  const checking = `Checking the checklist and findings${c?.busy === 'deep' ? ' in depth' : ''}`;
+  const spot = c?.at ? `${on(c.at)} spot` : 'Spot';
+  const said = kind === 'running' ? shared?.text ?? checking
+    : kind === 'failed' ? `The check on ${on(c!.failedAt!)} did not finish`
+    : kind === 'left' ? `${on(c!.left!.at)} check left out ${out}`
+    : kind === 'deep' ? `${spot} check disagreed with ${c!.offerDeep!.overturned} of its ${c!.offerDeep!.size} results`
+    : kind === 'unchecked' ? `${n(line!.unchecked, 'checklist item', 'checklist items')} not checked yet` : '';
   // the line goes once nothing is due; if the focus was in it, it moves to the deal's ⋯, where Check again stays, not to the page
   const had = useRef(false);
   useEffect(() => { if (!said && had.current) { had.current = false; if (!document.activeElement || document.activeElement === document.body) document.getElementById('deal-more')?.focus(); } }, [!!said]);
   if (!s.can.checkAll || !said) return null;
+  const { warn, deep, rest } = line!;
   return <div class="ovcheck" id="ov-check" onFocusIn={() => { had.current = true; }} onFocusOut={(e) => { if (e.relatedTarget && !(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) had.current = false; }}>
     {said && <span ref={lineRef} class={`when ${warn ? 'warn' : ''}`} id="f-checked" role="status" {...(shared?.who ? { tabIndex: 0, 'aria-description': shared.who, onMouseEnter: (e: MouseEvent) => showTip(e.currentTarget as HTMLElement, shared.who!), onMouseLeave: (e: MouseEvent) => hideTip(e.currentTarget as HTMLElement), onFocus: (e: FocusEvent) => showTip(e.currentTarget as HTMLElement, shared.who!, 0), onBlur: (e: FocusEvent) => hideTip(e.currentTarget as HTMLElement) } : {})}>{warn && <i class="dot" aria-hidden="true" />}{said}</span>}
     {/* while a check runs the button is off but keeps the focus (aria-disabled, not disabled, which would drop the focus to the page) */}
@@ -402,8 +402,8 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   const { last, previous: prev, previousReview: wasReviewed } = findingHistory(s, f.id);
   const lastText = last ? historyText(last) : '';
   const busy = s.ui.reassessing.includes(f.id);
-  // which sources the detail's markers point at
-  const marked = new Set(f.body.flatMap((b) => splitCited(b, f.sources.length).flatMap((p) => p.refs)));
+  // with no markers in any paragraph, the whole detail rests on all its sources
+  const whole = restsOnAllSources(f.body, f.sources.length, f.ownWords);
   const docs = byDocument(f.sources);
   const listed = !fewDocuments(f.sources);
   const raisedBy = `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}`;
@@ -445,7 +445,9 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
         {note && <div class="fnote" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setNoteState(null); requestAnimationFrame(() => document.getElementById('f-status')?.focus()); } }}><div class="lbl">{note.status === 'open' ? 'Reopen' : 'Mark closed'}</div><textarea maxLength={TEXT_MAX} id="fnote-text" rows={2} placeholder="Note (optional)" aria-label="Note" ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus(); } }} value={note.text} onInput={(e) => setNote({ ...note, text: (e.currentTarget as HTMLTextAreaElement).value })} /><div class="cacts"><button type="button" class="btn sm pri" id="fnote-save" onClick={() => void commit(note.status, note.text)}>Save</button><button type="button" class="btn sm" onClick={() => setNote(null)}>Cancel</button></div></div>}
         {/* up to four documents, its sources as chips above the detail, as under an answer */}
         {!busy && !listed && <SourceChips sources={f.sources} onOpen={onOpen} dealId={dealId} />}
-        {busy ? <div class="ai pending" aria-label="Updating"><span class="dots"><i /><i /><i /></span></div> : f.body.map((b, i) => <p class="dtxt" key={i}><Cited text={b} sources={f.sources} onOpen={onOpen} whole={!marked.size && !f.ownWords} onMore={listed ? showSources : undefined} /></p>)}
+        {busy ? <div class="ai pending" aria-label="Updating"><span class="dots"><i /><i /><i /></span></div>
+          : f.body.map((b, i) => <p class="dtxt" key={i}><Cited text={b} sources={f.sources} onOpen={onOpen}
+            whole={whole} onMore={listed ? showSources : undefined} /></p>)}
         {/* more documents than a pop shows: every one, with its places, in a list like Previous version */}
         {!busy && listed && <details class="prev fsrcs" id="f-sources" ref={srcList} open={srcOpen} onToggle={(e) => setSrcOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>{docs.length} sources</summary>
           <div class="sgl">{docs.map((g) => <div class="sgr" key={g.doc.docId}>

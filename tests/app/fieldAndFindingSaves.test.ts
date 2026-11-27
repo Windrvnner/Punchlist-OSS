@@ -303,3 +303,13 @@ it('marks handed text changed elsewhere when the record itself has not changed (
   expect(save.view.external).toBe(true);
   expect(unsavedFields.get(key)).toEqual({ text: `${firstEdit}\n\n${handed}`, base: original, rev: -1 });
 });
+
+it('keeps a two-version record refusal on an edit field waiting for Retry', async () => {
+  const { save, type, pending, commit, key, unsavedFields } = await field();
+  type(firstEdit);
+  const saving = save.save(firstEdit, commit);
+  pending[0].resolve({ ok: false, error: { kind: 'conflict', message: 'This record has two versions. Choose one.' } });
+  await saving;
+  expect(save.view).toMatchObject({ external: false, status: 'failed' });
+  expect(unsavedFields.get(key)).toMatchObject({ text: firstEdit, base: original });
+});

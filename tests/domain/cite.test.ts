@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitCited } from '../../src/domain/cite';
+import { restsOnAllSources, splitCited } from '../../src/domain/cite';
 
 const flat = (t: string, n = 3) => splitCited(t, n).map((p) => [p.text, p.refs]);
 describe('citation markers', () => {
@@ -66,4 +66,12 @@ describe('citation markers', () => {
       expect(flat('The draft [1] sets 1.25x and the term sheet [2] has 1.30x.', 2)).toEqual([['The draft', [1]], [' ', []], ['sets 1.25x and the term sheet', [2]], [' has 1.30x.', []]]);
     });
   });
+});
+
+it('cites the whole text only when sources are present and no paragraph already cites one', () => {
+  expect(restsOnAllSources(['Lender consent required.'], 0)).toBe(false);
+  expect(restsOnAllSources(['Schedule [2019] applies.'], 2)).toBe(true);
+  expect(restsOnAllSources(['Lender consent required. [2]'], 2)).toBe(false);
+  expect(restsOnAllSources(['Lender consent required.', 'The waiver expires in March. [1]'], 2)).toBe(false);
+  expect(restsOnAllSources(['Reviewer’s own conclusion.'], 2, true)).toBe(false);
 });
