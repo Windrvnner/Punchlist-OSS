@@ -123,11 +123,9 @@ export async function readChecklistColumns(
   return read.ok ? ok(mappedTable(read.value)) : read;
 }
 
-export const clearedHeading = { headingDraft: null };
-
 /** A successfully replaced source starts without the previous table's heading draft (#380). */
 export function clearChecklistHeading(key: string) {
-  keepImport(key, clearedHeading);
+  keepImport(key, { headingDraft: null });
 }
 
 export function checklistPaste(paste: string): ChecklistText | null {
