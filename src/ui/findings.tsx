@@ -419,7 +419,7 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   const { last, previous: prev, previousReview: wasReviewed } = findingHistory(s, f.id);
   const lastText = last ? historyText(last) : '';
   const busy = s.ui.reassessing.includes(f.id);
-  // which sources the detail's markers point at
+  // with no markers in any paragraph, the whole detail rests on all its sources
   const whole = restsOnAllSources(f.body, f.sources.length, f.ownWords);
   const docs = byDocument(f.sources);
   const listed = !fewDocuments(f.sources);
