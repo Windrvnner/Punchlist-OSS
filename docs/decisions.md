@@ -402,6 +402,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   `src/app` (#953, #997).
 - A held field that receives composing input without a compositionstart stays held: its text shows Not saved until
   typing that is not composing in the focused field, Retry, or Take Theirs (#997).
+- A batch issue follows the Batch template: each fix is a sub-issue of the batch, listed as a plain bullet with no
+  checkbox (#1238).
 
 ## Deal screen
 
