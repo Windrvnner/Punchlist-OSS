@@ -333,7 +333,7 @@
     "kind": "limit",
     "line": "if (state.models.length < 2) return null;",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1409
   },
   {
     "file": "src/ui/composerParts.tsx",
@@ -942,14 +942,14 @@
     "kind": "limit",
     "line": "{table && table.sheets.length > 1 && <div class=\"srow\"><div class=\"k\">Sheet</div><div class=\"imwhere\">",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1410
   },
   {
     "file": "src/ui/firmChecklistRead.tsx",
     "kind": "limit",
     "line": "{table.sheets.length > 1 && <label><span>Sheet</span>",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1410
   },
   {
     "file": "src/ui/firmChecklistRead.tsx",
@@ -1670,7 +1670,7 @@
     "kind": "list",
     "line": "const selAt = sel ? list.findIndex((r) => r.id === sel.id) : -1;",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1396
   },
   {
     "file": "src/ui/qa.tsx",
@@ -1754,7 +1754,7 @@
     "kind": "limit",
     "line": "{table.sheets.length > 1 && <label><span>Sheet</span>",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1402
   },
   {
     "file": "src/ui/qaImportForm.tsx",
