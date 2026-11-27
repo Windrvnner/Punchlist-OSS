@@ -1,7 +1,7 @@
 /**
  * A field bound to one record attribute. Native <textarea>/<input>, so the
  * browser owns editing, focus, line breaks and the caret. Keeps a local draft
- * while focused and reports typing, blur and Enter (single-line) to the app's EditFieldSave.
+ * while focused and reports typing, blur and Enter (single-line) to the app's FieldSave, which decides when to save.
  * Shows pending / not-saved / updated-elsewhere beside the field.
  */
 import { TEXT_MAX } from '../domain/importExport';
@@ -10,7 +10,7 @@ import {
   type FieldDraft, type FieldValue, type ReadField, restoreFieldDraft, showFieldDraft, takeHandedText,
 } from '../app/fieldDrafts';
 import {
-  type FieldAtFocus, type FieldCommit, type FieldComposition, EditFieldSave, type FieldSaveView,
+  type FieldAtFocus, type FieldCommit, type FieldComposition, FieldSave, type FieldSaveView,
 } from '../app/fieldSave';
 import { saveKeptDrafts } from '../app/keptText';
 import { CONNECTED } from '../app/connection';
@@ -244,8 +244,8 @@ function useFieldSave(
   input: LocalInput, locked: { current: string | null },
 ) {
   const [view, setView] = useState<FieldSaveView>();
-  const saver = useRef<EditFieldSave | undefined>(undefined);
-  const save = saver.current ??= new EditFieldSave(record, keep, kept, {
+  const saver = useRef<FieldSave | undefined>(undefined);
+  const save = saver.current ??= new FieldSave(record, keep, kept, {
     text: () => input.draftRef.current,
     composition: () => input.composition.current,
     partial: () => input.halfRef.current,
@@ -267,7 +267,7 @@ function useFieldSave(
   return [save, view ?? save.view] as const;
 }
 
-function markHalf(input: LocalInput, save: EditFieldSave) {
+function markHalf(input: LocalInput, save: FieldSave) {
   input.setHalf(true);
   save.refuseInput('Enter a real date');
 }
@@ -278,7 +278,7 @@ function cancelCompositionEnd(input: LocalInput) {
   input.compositionEnd.current = null;
 }
 
-function holdComposition(input: LocalInput, save: EditFieldSave) {
+function holdComposition(input: LocalInput, save: FieldSave) {
   if (input.composition.current === 'idle') return false;
   cancelCompositionEnd(input);
   input.composition.current = 'held';
@@ -286,7 +286,7 @@ function holdComposition(input: LocalInput, save: EditFieldSave) {
   return true;
 }
 
-function compositionEvents(input: LocalInput, save: EditFieldSave, typed: (text: string) => void) {
+function compositionEvents(input: LocalInput, save: FieldSave, typed: (text: string) => void) {
   // #239: let the browser finish the candidate before the field can save it.
   const onCompositionStart = () => {
     cancelCompositionEnd(input);
@@ -327,7 +327,7 @@ function isCompositionKey(event: KeyboardEvent, composing: boolean) {
 }
 
 function inputEvents(
-  input: LocalInput, save: EditFieldSave, { commit, debounceMs, multiline, locked }: {
+  input: LocalInput, save: FieldSave, { commit, debounceMs, multiline, locked }: {
     commit: FieldCommit; debounceMs: number; multiline?: boolean; locked: string | null;
   },
 ) {
@@ -388,7 +388,7 @@ function inputEvents(
 function useFieldLifecycle({
   save, keep, read, commit, onText, input, locked,
 }: {
-  save: EditFieldSave;
+  save: FieldSave;
   keep: string | undefined;
   read: ReadField | undefined;
   commit: FieldCommit;

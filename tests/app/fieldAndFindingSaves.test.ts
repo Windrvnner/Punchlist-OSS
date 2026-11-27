@@ -26,7 +26,7 @@ async function startDrafts() {
 
 async function field(restored?: string) {
   await startDrafts();
-  const { EditFieldSave } = await import('../../src/app/fieldSave');
+  const { FieldSave } = await import('../../src/app/fieldSave');
   const { restoreFieldDraft, unsavedFields } = await import('../../src/app/fieldDrafts');
   const key = 'q_credit:question';
   let text = restored ?? original;
@@ -44,7 +44,7 @@ async function field(restored?: string) {
     show: () => {},
   };
   if (restored !== undefined) unsavedFields.set(key, { text: restored, base: original, rev: 1 });
-  const save = new EditFieldSave({ value: original, rev: 1 }, key, restoreFieldDraft(key, original), input);
+  const save = new FieldSave({ value: original, rev: 1 }, key, restoreFieldDraft(key, original), input);
   const pending: {
     value: string;
     over: string;
