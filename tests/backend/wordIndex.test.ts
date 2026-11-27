@@ -77,10 +77,12 @@ describe("each PC's word index", () => {
     const ix = wordIndex(nodeFolder(d));
     expect([ix.has('deal', 'x'), ix.has('deal', 'y')]).toEqual([false, false]);
   });
-  it('does not read a words4 index, whose words kept combining marks', () => {
+  it('does not read a words3 index (most-used words, #1147) or a words4 one (words kept marks)', () => {
     const d = dir();
-    fs.writeFileSync(path.join(d, 'words4-deal.jsonl'), '{"d":"x","n":1,"t":"","w":"turbine:1"}\n');
-    expect(wordIndex(nodeFolder(d)).has('deal', 'x')).toBe(false);
+    fs.writeFileSync(path.join(d, 'words3-deal.jsonl'), '{"d":"x","n":1,"t":"","w":"turbine:1"}\n');
+    fs.writeFileSync(path.join(d, 'words4-deal.jsonl'), '{"d":"y","n":1,"t":"","w":"turbine:1"}\n');
+    const ix = wordIndex(nodeFolder(d));
+    expect([ix.has('deal', 'x'), ix.has('deal', 'y')]).toEqual([false, false]);
   });
   it('scores anything given as name, title and body words by the same BM25 the index uses', () => {
     const corpus = { size: 10, avgLength: 20, docsWith: (w: string) => (w === 'lockup' ? 1 : 9) };

@@ -13,3 +13,11 @@ describe('the words the search index keeps, shared by the app and the backend (#
     expect(fold('agreements')).toBe('agreement');
   });
 });
+
+describe('tokens split on letters and numbers alone, as the search index does (#1379)', () => {
+  it('ends a word at a combining mark, while a composed letter stays in its word', () => {
+    expect(tokens('cafe\u0301')).toEqual(['cafe']);
+    expect(tokens('caf\u00e9')).toEqual(['caf\u00e9']);
+    expect(tokens('दिन')).toEqual(['द', 'न']);
+  });
+});
