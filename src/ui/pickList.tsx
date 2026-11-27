@@ -4,7 +4,7 @@ import { useDismiss } from './hooks';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
 import { key } from '../domain/checklist';
-import { pickNames } from '../app/state';
+import { pickNames } from '../app/dealUi';
 
 /** One of the firm's lists for a layer, and how many items it has. */
 export type PickName = { name: string; n: number };
