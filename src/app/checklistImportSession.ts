@@ -71,7 +71,6 @@ function readPreview(
 /** A single import, from its original file or paste through the reviewed list and its Undo All. */
 export class ChecklistImportSession {
   private readonly key: string;
-  private readonly instance = Symbol();
   private setAside: boolean;
   private paste: string;
   private text: ChecklistText | null;
@@ -143,7 +142,7 @@ export class ChecklistImportSession {
     if (!this.live) return;
     const { paste, table, text, reads, review, choices } = this;
     const draft = { paste, table, text, reads, review, choices };
-    this.setAside = keepChecklistImport(this.key, draft, this.setAside, this.instance);
+    this.setAside = keepChecklistImport(this.key, draft, this.setAside);
     this.notify();
   }
 
@@ -451,7 +450,7 @@ export class ChecklistImportSession {
     const target = this.target;
     this.activity('importing');
     try {
-      const result = await submitChecklist(this.store, this.key, target, selection.items, file, this.instance);
+      const result = await submitChecklist(this.store, this.key, target, selection.items, file);
       if (!result.ok) return this.activity('', `Couldn’t import: ${result.error.message}`);
       this.busy = '';
       this.back();

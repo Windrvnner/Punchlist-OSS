@@ -3,7 +3,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryKeptImports } from '../../src/adapters/keptImports';
 import { ChecklistImportSession } from '../../src/app/checklistImportSession';
 import { importKey, initializeKeptImports, keptImport, keptImportsReady } from '../../src/app/keptImports';
-import { keepChecklistImport } from '../../src/app/checklistKept';
 import { registry } from '../../src/app/commands/undo';
 import { RestoreList } from '../../src/app/commands/checklist';
 import { listId } from '../../src/domain/checklist';
@@ -70,7 +69,6 @@ it('brings in the restored review, holds the draft until the write, and offers U
   const before = keptImport(key);
   const pending = session.bringIn();
   await held.entered;
-  keepChecklistImport(key, { paste: 'Reentrant keep' }, false);
   session.close();
   expect(app.store.get().ui.firmChecklist?.step).toBe('import');
   expect(keptImport(key)).toEqual(before);

@@ -6,24 +6,9 @@ import type { ImportTable } from './transfer';
 import type { ListReading } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, type Layer } from '../domain/checklist';
-import { dropImport, keptImport, keepImport } from './keptImports';
+import { keptImport, keepImport } from './keptImports';
 import type { Asked, Review } from './checklistImport';
 import type { ChecklistText } from './listRead';
-
-const submitting = new Map<string, symbol | undefined>();
-
-/** Each way into the checklist import holds its own draft during the write (#931). */
-export function holdChecklistSubmission(key: string, instance?: symbol) {
-  if (submitting.has(key)) return null;
-  submitting.set(key, instance);
-  const kept = keptImport(key);
-  return {
-    written: () => {
-      if (kept && keptUnchanged(kept, keptImport(key))) dropImport(key);
-    },
-    release: () => submitting.delete(key),
-  };
-}
 
 /** Every choice and check mark, kept beside the list */
 export interface ChecklistChoices {
@@ -121,11 +106,7 @@ export function readKeptChecklist(key: string, fresh: boolean): { left: Checklis
  * Writes the import as it is now. A list read in its place is written over whole. Before a list is read only the
  * paste box is kept, as typed. Returns whether a kept import that was not shown is still set aside (#381).
  */
-export function keepChecklistImport(
-  key: string, now: ChecklistKept & { paste: string }, setAside: boolean, instance?: symbol,
-): boolean {
-  // A second opening may edit the same draft while its predecessor writes. Only the submitting form is held (#1200).
-  if (submitting.has(key) && (!instance || submitting.get(key) === instance)) return setAside;
+export function keepChecklistImport(key: string, now: ChecklistKept & { paste: string }, setAside: boolean): boolean {
   const { paste, table, text } = now;
   if (!table && !text) return keepPasteAlone(key, paste, setAside);
   keepImport(key, { ...now });
@@ -145,12 +126,4 @@ function keepPasteAlone(key: string, paste: string, setAside: boolean): boolean 
   }
   if (paste.trim() || keptImport(key)?.paste) keepImport(key, { paste });
   return false;
-}
-
-/** Whether the kept draft is as it was: one written while the list was brought in is newer, and stays (#931). */
-function keptUnchanged(before: Readonly<Record<string, unknown>>, now: Readonly<Record<string, unknown>> | undefined) {
-  if (!now) return false;
-  const parts = Object.keys(before);
-  const same = (part: string) => part in now && Object.is(before[part], now[part]);
-  return parts.length === Object.keys(now).length && parts.every(same);
 }
