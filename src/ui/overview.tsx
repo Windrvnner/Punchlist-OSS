@@ -149,10 +149,9 @@ function checklistLine(
 }
 /** A standing part's words, by the checklist filter it opens; the settled total opens none. */
 function standingWord(key: UiState['checklistFilter'] | undefined, n: number) {
-  if (key === 'gap') return n === 1 ? 'gap' : 'gaps';
-  if (key === 'gone') return n === 1 ? 'finding deleted' : 'findings deleted';
-  const words: Record<string, string> =
-    { all: 'to resolve', finding: 'flagged', open: 'not settled', satisfied: 'satisfied', person: 'by a person' };
+  const words: Record<string, string> = { all: 'to resolve', finding: 'flagged', gap: n === 1 ? 'gap' : 'gaps',
+    gone: n === 1 ? 'finding deleted' : 'findings deleted', open: 'not settled', satisfied: 'satisfied',
+    person: 'by a person' };
   return key ? words[key] : 'settled';
 }
 type Placed = { lx: number; up: boolean; mode: 'r' | 'l' | 'c'; x: number; w: number; bare?: boolean };
