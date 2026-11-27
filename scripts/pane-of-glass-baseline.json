@@ -1,1 +1,65 @@
-[]
+[
+  {
+    "file": "src/ui/answer.tsx",
+    "kind": "list",
+    "line": "const suggested = deal ? (suggest ?? []).map((id) => state.questions[id]).filter((q) => !!q) : [];",
+    "count": 1,
+    "issue": 1264
+  },
+  {
+    "file": "src/ui/answer.tsx",
+    "kind": "list",
+    "line": "return tags.filter(Boolean).join(' · ');",
+    "count": 1,
+    "issue": 1264
+  },
+  {
+    "file": "src/ui/app.tsx",
+    "kind": "list",
+    "line": "const said = (text: string) => Object.values(s.deals).reduce((t, d) => (t.includes(d.name) ? t.split(d.name).join(middleName(d.name)) : t), text);",
+    "count": 1,
+    "issue": 1280
+  },
+  {
+    "file": "src/ui/app.tsx",
+    "kind": "list",
+    "line": "const shown = s.ui.toasts.slice(-3);",
+    "count": 1,
+    "issue": 1280
+  },
+  {
+    "file": "src/ui/app.tsx",
+    "kind": "list",
+    "line": "const t = [...st.toasts].reverse().find((x) => x.action?.opId);",
+    "count": 1,
+    "issue": 1280
+  },
+  {
+    "file": "src/ui/app.tsx",
+    "kind": "pattern",
+    "line": "const startedOn = useRef<string | null>((/d_[0-9A-Za-z]+/.exec(location.hash) ?? [null])[0]);",
+    "count": 1,
+    "issue": 1356
+  },
+  {
+    "file": "src/ui/checklist.tsx",
+    "kind": "limit",
+    "line": "const first = r.sources?.[0]; const where = first ? `${first.doc}, ${first.loc}${r.sources!.length > 1 ? ` and ${r.sources!.length - 1} more` : ''}` : r.docs.slice(0, 2).map((x) => x.name).join(', ') + (r.docs.length > 2 ? ` and ${r.docs.length - 2} more` : '');",
+    "count": 2,
+    "issue": 1292
+  },
+  {
+    "file": "src/ui/checklist.tsx",
+    "kind": "list",
+    "line": "const first = r.sources?.[0]; const where = first ? `${first.doc}, ${first.loc}${r.sources!.length > 1 ? ` and ${r.sources!.length - 1} more` : ''}` : r.docs.slice(0, 2).map((x) => x.name).join(', ') + (r.docs.length > 2 ? ` and ${r.docs.length - 2} more` : '');",
+    "count": 1,
+    "issue": 1298
+  },
+  {
+    "file": "src/ui/checklist.tsx",
+    "kind": "list",
+    "line": "const short = mode >= 1; const folded = mode >= 2 ? filters.filter(([k]) => RARE.includes(k)) : [];",
+    "count": 1,
+    "issue": 1298
+  }
+]
