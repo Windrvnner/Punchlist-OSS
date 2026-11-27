@@ -110,18 +110,34 @@ type Hook = (c: Call, n: number) => unknown;
 export const isFillAsk = (c: { prompt: string }) => c.prompt.includes('were not settled by the documents first chosen for them');
 /** what the stand-in says when a check fills its gaps, unless a test says otherwise: the agent finds nothing more */
 const nothingMore = (c: Call) => (c.system?.includes('You work in turns') ? { text: 'Nothing in the data room settles them.', sources: [] } : { text: '', sources: [] });
-export function setup(script: Hook, recs: Record<string, DocRecord[]>, more: Partial<AiOptions> & { pick?: Hook; fix?: Hook; affects?: Hook; verify?: Hook; hears?: Hook; pickFor?: Hook; query?: Hook; fill?: Hook; describes?: boolean; describe?: Hook; wanted?: AiDocs['wanted']; away?: AiDocs['away'] } = {}) {
+/** what a test may give `setup` besides the app's own options; `changes`: a Word draft's tracked changes */
+type SetupMore = Partial<AiOptions> & {
+  pick?: Hook; fix?: Hook; affects?: Hook; verify?: Hook; hears?: Hook; pickFor?: Hook; query?: Hook; fill?: Hook;
+  describes?: boolean; describe?: Hook; wanted?: AiDocs['wanted']; away?: AiDocs['away']; changes?: AiDocs['changes'];
+};
+export function setup(script: Hook, recs: Record<string, DocRecord[]>, more: SetupMore = {}) {
   const calls: Call[] = []; const coreCalls: Call[] = []; const pickCalls: Call[] = []; const fixCalls: Call[] = []; const affectCalls: Call[] = []; const verifyCalls: Call[] = []; const hearCalls: Call[] = []; const pickForCalls: Call[] = []; const queryCalls: Call[] = []; const describeCalls: Call[] = []; const fillCalls: Call[] = []; const usage: UsageEntry[] = []; const all: Call[] = [];
   const { pick = () => 'I cannot say', fix = () => '{}', affects = () => 'I cannot say', verify = () => ({ stands: true, why: '' }), hears = () => ({ affected: [] }), pickFor = () => 'I cannot say', query = () => 'I cannot say', fill = nothingMore, describes = false, describe = (c: Call) => ({ summary: `This is ${/Describe the document (.*)\.\n/.exec(c.prompt)![1]}.`, keywords: ['described'] }), wanted, away, ...options } = more;
   const svc = new StandInService((c) => { const call = c as Call; all.push(call); const r = isFillAsk(call) ? (fillCalls.push(call), fill(call, fillCalls.length)) : isFixAsk(call) ? (fixCalls.push(call), fix(call, fixCalls.length)) : isDescribeAsk(call) ? (describeCalls.push(call), describe(call, describeCalls.length)) : isHearAsk(call) ? (hearCalls.push(call), hears(call, hearCalls.length)) : isAffectsAsk(call) ? (affectCalls.push(call), affects(call, affectCalls.length)) : isVerifyAsk(call) ? (verifyCalls.push(call), verify(call, verifyCalls.length)) : isCoreAsk(call) ? (coreCalls.push(call), {}) : isQueryAsk(call) ? (queryCalls.push(call), query(call, queryCalls.length)) : isPickForAsk(call) ? (pickForCalls.push(call), pickFor(call, pickForCalls.length)) : isPickAsk(call) ? (pickCalls.push(call), pick(call, pickCalls.length)) : (calls.push(call), script(call, calls.length)); return typeof r === 'string' ? r : JSON.stringify(r); });
   const keeper = new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock });
   const docs: AiDocs = { records: (d) => recs[d] ?? [], wanted: wanted ?? (async (d, ids) => (recs[d] ?? []).filter((r) => ids.includes(r.docId)).map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) }))),
     ...(away ? { away } : {}),
+    ...(more.changes ? { changes: more.changes } : {}),
     ...(describes ? { describe: (d: string, id: string, r: { summary: string; keywords: string[] }) => { recs[d] = recs[d].map((x) => (x.docId !== id || x.summary !== undefined ? x : { ...x, ...r })); } } : {}) };
   const repo = options.repo ?? memRepo(clock); let n = 0;
   const ai = nodeAi({ service: svc, docs, keeper, usage: (e) => usage.push(e), clock, newId: () => `01HZZZZZZZZZZZZZZZZ${String(n++).padStart(7, '0')}`, retry: { sleep: async () => {} }, ...options, repo });
   return { ai, svc, all, calls, fillCalls, coreCalls, pickCalls, pickForCalls, queryCalls, fixCalls, affectCalls, verifyCalls, hearCalls, describeCalls, usage, repo, recs };
 }
+/** `count` changed passages of a Word draft, about 120 characters a line in the prompt (#1092) */
+export const clauseChanges = (count: number): AiDocs['changes'] => async () => {
+  const passages = Array.from({ length: count }, (_, k) => ({
+    before: `Clause ${k + 1}: the ratio is 1.15x.`, after: `Clause ${k + 1}: the ratio is 1.20x.`,
+    changes: [{ kind: 'insert' as const, by: 'sroe', at: '2026-10-01T10:00:00', text: '1.20x' }],
+  }));
+  return { ok: true, value: { tracked: count, complete: true, passages } };
+};
+/** the tracked-change lines a prompt lists */
+export const wasLines = (prompt: string) => prompt.split('\n').filter((l) => l.startsWith('  - was: '));
 /** a question id in the shape the app draws one (`q_` and a ULID), made from `n` so a test can name it (#1105) */
 export const qid = (n: number | string) => `q_${String(n).padStart(26, '0')}`;
 export const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };

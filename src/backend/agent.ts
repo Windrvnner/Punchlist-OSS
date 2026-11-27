@@ -61,7 +61,7 @@ import type { ModelThread, Research } from '../ports';
 import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
 import { strings, prose, list as listOf } from './lenient';
-import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY } from './limits';
+import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY, withFewerChanges, type ChangeShare } from './limits';
 import { control, SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
 import type { Cited, Run, Sent } from './agentKit';
@@ -88,14 +88,6 @@ type Answered = {
 type Limits = {
   turns: number; width: number; folderDocs: number; searchPage: number; compactAt: (model: string) => number;
 };
-
-/**
- * the most characters a page of findings or questions may hold: half of what the kept conversation holds before it is
- * compacted, so that a search of everything, which gives a page of each in one result, never outgrows what one call
- * may send; the same whichever is searched, so that a page asked for by kind starts where a search of everything's
- * page of that kind stopped (recordSearch.ts `pageOf`, #1091)
- */
-const pageChars = (limits: Limits, model: string) => (limits.compactAt(model) * control.limits.charsPerToken) / 2;
 
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […], "offer": {…}}';
@@ -153,6 +145,8 @@ class Answering {
   private readonly run: AgentRun;
   private readonly folders: FolderReader;
   private readonly conversation: KeptConversation;
+  /** the turn being worked on, once the first has begun */
+  private turnNow: Turn | undefined;
 
   constructor(
     private readonly kit: AgentKit,
@@ -162,9 +156,20 @@ class Answering {
     folderMemory: FolderMemory,
   ) {
     const { width, searchPage } = limits;
-    this.run = new AgentRun(kit, question, progress, { width, searchPage, chars: pageChars(limits, question.model) });
+    const limit = limits.compactAt(question.model) * control.limits.charsPerToken;
+    // a page of findings or questions is half of it, the same each time it is asked for (recordSearch.ts `pageOf`)
+    this.run = new AgentRun(kit, question, progress, { width, searchPage, chars: limit / 2, limit });
+    // what a tool result may add depends on what the model holds: a kept conversation's tokens count too (#480)
+    this.run.held = () => this.held();
     this.folders = new FolderReader(this.run, folderMemory, limits);
     this.conversation = new KeptConversation(this.run, limits.compactAt, limits.width);
+  }
+
+  /** how many characters the model holds once the turn is sent again: none before the first turn (#480) */
+  private held(): number {
+    if (!this.turnNow) return 0;
+    if (!this.kit.talk) return this.turnNow.full(true).length;
+    return this.conversation.held(this.turnNow, control.limits.charsPerToken);
   }
 
   /** whether the person has stopped the answer: read afresh each time, since they can stop it at any moment */
@@ -201,19 +206,38 @@ class Answering {
 
   /** one turn of the main session: the answer when it gives one, else null once its tool has been used */
   private async turn(turnNumber: number): Promise<Result<Answered> | null> {
-    const { kit, question, run } = this;
+    const { run } = this;
     // stopped by the person: answered now, from what was found
     const last = turnNumber === this.limits.turns || this.stopped;
     if (this.stopped && !run.steps.some((x) => x.text === 'Stopped')) {
       run.steps.push({ kind: 'stop', text: 'Stopped', result: 'answered from what was found', done: true });
     }
-    const { files, listing, got } = await kit.send(run.whole, question.model, run.spansDeals);
+    // a turn refused as too long lists fewer tracked changes, while it lists any (#1381)
+    const reply = await withFewerChanges((share) => this.reply(turnNumber, last, share));
+    if (!reply) {
+      return fail({ kind: 'failed', message: UNREAD_REPLY });
+    }
+    const tool = typeof reply.tool === 'string' ? reply.tool.trim().toLowerCase() : '';
+    if (strings(reply.notes).length) run.notes = strings(reply.notes).join(' ');
+    if (!tool || (last && !strings(reply.text).length)) return this.answered(reply, last);
+    run.done.push(await this.useTool(tool, reply));
+    return null;
+  }
+
+  /**
+   * the main session's reply to this turn, with the documents read so far and their tracked changes as `share`
+   * leaves them
+   */
+  private async reply(turnNumber: number, last: boolean, share: ChangeShare): Promise<Record<string, unknown> | null> {
+    const { kit, question, run } = this;
+    const { files, listing, got } = await kit.send(run.whole, run.spansDeals, share);
     // a document that cannot be opened on this PC was not read
     if (got.length < run.whole.length) run.whole = got;
     const turn = this.turnOf(turnNumber, last, files, listing);
-    const reply = kit.talk
-      ? await this.conversation.ask(turn)
-      : await kit.askJson(
+    this.turnNow = turn;
+    return kit.talk
+      ? this.conversation.ask(turn)
+      : kit.askJson(
         {
           kind: 'answer', model: question.model, system: turn.system, prompt: turn.full(true), files,
           unusable: turn.unusable,
@@ -221,12 +245,6 @@ class Answering {
         turn.keys,
         turn.shape,
       );
-    if (!reply) return fail({ kind: 'failed', message: UNREAD_REPLY });
-    const tool = typeof reply.tool === 'string' ? reply.tool.trim().toLowerCase() : '';
-    if (strings(reply.notes).length) run.notes = strings(reply.notes).join(' ');
-    if (!tool || (last && !strings(reply.text).length)) return this.answered(reply, last);
-    run.done.push(await this.useTool(tool, reply));
-    return null;
   }
 
   /** the pieces of this turn's prompt */

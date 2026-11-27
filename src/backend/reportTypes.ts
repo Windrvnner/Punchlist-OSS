@@ -5,6 +5,7 @@
 import type { DocRecord } from './documents';
 import type { Sent, Cited, Unusable } from './agentKit';
 import type { Source } from '../domain/model';
+import type { ChangeShare } from './limits';
 import { word } from './lenient';
 
 /** a report read through, as written to the check log */
@@ -103,8 +104,11 @@ export interface ReportKit {
    * was not given, as `ask` refuses it (#1162)
    */
   unusable: (sent: Sent[], keys: string[], shown?: readonly string[]) => Unusable;
-  /** put a document in the service's store, listed for a prompt to `model`; null when it cannot be sent from this PC */
-  send: (rec: DocRecord, model: string) => Promise<SentDoc | null>;
+  /**
+   * put a document in the service's store, listed for a prompt with its tracked changes as `share` leaves them
+   * (#1381); null when it cannot be sent from this PC
+   */
+  send: (rec: DocRecord, share: ChangeShare) => Promise<SentDoc | null>;
   /** keep the citations that name the document sent and a page it has, and renumber the markers to match */
   fit: (text: string, cited: Cited[] | undefined, sent: Sent[]) => { text: string; sources: Source[] };
   workstreams: readonly string[];

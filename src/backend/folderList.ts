@@ -6,20 +6,16 @@
 
 import { tokens } from './words';
 
-/** a leading folder number ("04. ", "04.1 ", "2024-25 ", or "04 1 " once tokenized), as written or tokenized */
-const LEADING_NUMBER = /^\d+(?:[.\s-]+\d+)*[.\s-]+/;
-
 /** a folder's name as a person says it: lower case, without a leading number, "the" or the word "folder", spaces collapsed */
-export const folderKey = (s: string) => plain(s).replace(LEADING_NUMBER, '').replace(/^the /, '').trim();
+export const folderKey = (s: string) => plain(s).replace(/^\d+(?: \d+)* /, '').replace(/^the /, '').trim();
 /**
  * a folder's name in the search index's words (letters of any alphabet), without "the" and the word "folder",
  * but with its number: "07. Permits" and "07 permits" are the same
  */
 const plain = (s: string) => withoutTheAndFolder(` ${tokens(s).join(' ')} `);
 /**
- * a space-padded name without the word "folder" and a leading "the", spaces collapsed: the rule, once.
- * A "folder" inside a name goes too, as it does in the words; folders whose names are then equal are left to the
- * word match (#1154)
+ * a space-padded name without the word "folder" and a leading "the", spaces collapsed. A "folder" inside a name goes
+ * too, as it does in the words
  */
 const withoutTheAndFolder = (padded: string) => padded
   .replace(/ folders? /g, ' ')
@@ -33,20 +29,6 @@ export function foldersOf(paths: string[]): string[] {
   for (const p of paths) { const parts = p.split('/'); for (let i = 1; i < parts.length; i++) out.add(parts.slice(0, i).join('/')); }
   return [...out];
 }
-
-/** a name as written: lower case, without a leading number, "the" or the word "folder"; punctuation such as "&" kept */
-const asWritten = (s: string) => withoutTheAndFolder(` ${s.trim().toLowerCase().replace(LEADING_NUMBER, '')} `);
-
-/**
- * The one folder whose last name is the name typed, compared as written (#1154): the words compare "O&M" and "OM" as
- * one, so a folder named exactly as typed wins over the other. Several equal names, or none, leave it to the words.
- */
-const namedAsTyped = (dirs: string[], typed: string) => {
-  const name = asWritten(typed);
-  if (!name) return [];   // a name of only a number says nothing: "2024." is not "2025."
-  const same = dirs.filter((d) => asWritten(d.split('/').at(-1)!) === name);
-  return same.length === 1 ? same : [];
-};
 
 /**
  * The folders that a person's words name, among `dirs` (paths from the data room, "VDR/04. Permits/Environmental").
@@ -62,9 +44,7 @@ export function matchFolders(dirs: string[], said: string): string[] {
   const numbered = parts.some((p) => /^\d/.test(plain(p)));
   const words = parts.map(folderKey).join(' ').split(' ').filter(Boolean);
   const byWords = () => (!words.length ? [] : dirs.filter((d) => { const own = plain(d.split('/').at(-1)!).split(' '); return words.every((w) => own.includes(w)); }));
-  const typed = parts.length === 1 ? namedAsTyped(dirs, said) : [];
-  const byName = () => [...(numbered ? [ending(plain)] : []), ending(folderKey)].find((x) => x.length) ?? byWords();
-  const found = typed.length ? typed : byName();
+  const found = [...(numbered ? [ending(plain)] : []), ending(folderKey)].find((x) => x.length) ?? byWords();
   return found.filter((d) => !found.some((x) => x !== d && d.startsWith(`${x}/`))).sort();
 }
 

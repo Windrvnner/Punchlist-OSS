@@ -31,6 +31,7 @@ import type { DocRecord } from './documents';
 import { list as listOf, readJson, word } from './lenient';
 import { unknownIds } from './recordIds';
 import { read } from './reportRead';
+import { withFewerChanges, type ChangeShare } from './limits';
 import {
   type ReportKit, type ReportLine, type ReadLine,
   SORT_PART, TRIES, isCut, isTooLong, isUnreachable, yes,
@@ -129,9 +130,13 @@ async function sort(k: ReportKit, todo: DocRecord[]) {
   }
 }
 
-/** Step 2: the fast model reads the first pages of a document its path left unclear. Null when it cannot say. */
-async function look(k: ReportKit, rec: DocRecord): Promise<boolean | null> {
-  const s = await k.send(rec, k.models.fast);
+/**
+ * Step 2: the fast model reads the first pages of a document its path left unclear. Null when it cannot say. Refused
+ * as too long, it is asked again with fewer of its tracked changes listed, while any are (#1381).
+ */
+const look = (k: ReportKit, rec: DocRecord) => withFewerChanges((share) => lookOnce(k, rec, share));
+async function lookOnce(k: ReportKit, rec: DocRecord, share: ChangeShare): Promise<boolean | null> {
+  const s = await k.send(rec, share);
   if (!s) return null;
   const question = SORT_ASK.replace('Which of them are', 'Is it one of the');
   const prompt = [
