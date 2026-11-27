@@ -136,22 +136,24 @@ function checklistLine(
   dealId: string, counts: NonNullable<ReturnType<typeof checklistStandingCounts>>,
   filter: (kind: UiState['checklistFilter']) => () => void,
 ): Line {
-  const { parts, off } = checklistStandingParts(counts);
-  const subLabel = (word: string, n: number) => {
-    if (n === 1) return word;
-    if (word === 'gap') return 'gaps';
-    return word === 'finding deleted' ? 'findings deleted' : word;
-  };
+  const offLabel = `${num(counts.off)} turned off`
+    + (counts.offOpen ? `, ${num(counts.offOpen)} with an open finding` : '');
   return {
-    id: 'ov-checklist', title: 'Checklist', href: '#' + pageHash('checklist', dealId),
-    go: filter('all'), total: counts.all,
-    off: off ? [`${num(off.n)} turned off` + (off.open ? `, ${num(off.open)} with an open finding` : ''),
-      filter(off.filter)] : undefined,
-    segs: parts.map(({ k, n, word, filter: target, sub }) => ({
-      k, n, word, go: target && filter(target),
-      sub: sub?.map((row) => [subLabel(row.word, row.n), row.n, filter(row.filter)]),
+    id: 'ov-checklist', title: 'Checklist', href: `#${pageHash('checklist', dealId)}`, go: filter('all'),
+    total: counts.all, off: counts.off ? [offLabel, filter('off')] : undefined,
+    segs: checklistStandingParts(counts).map(({ k, n, filter: key, sub }) => ({
+      k, n, word: standingWord(key, n), go: key && filter(key),
+      sub: sub?.map((row) => [standingWord(row.filter, row.n), row.n, filter(row.filter)]),
     })),
   };
+}
+/** A standing part's words, by the checklist filter it opens; the settled total opens none. */
+function standingWord(key: UiState['checklistFilter'] | undefined, n: number) {
+  if (key === 'gap') return n === 1 ? 'gap' : 'gaps';
+  if (key === 'gone') return n === 1 ? 'finding deleted' : 'findings deleted';
+  const words: Record<string, string> =
+    { all: 'to resolve', finding: 'flagged', open: 'not settled', satisfied: 'satisfied', person: 'by a person' };
+  return key ? words[key] : 'settled';
 }
 type Placed = { lx: number; up: boolean; mode: 'r' | 'l' | 'c'; x: number; w: number; bare?: boolean };
 const LEAD: Record<Seg['k'], string> = { open: 'var(--high)', prog: 'var(--accent)', done: 'var(--bar-ix)' };

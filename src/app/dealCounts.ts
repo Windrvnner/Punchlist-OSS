@@ -99,25 +99,15 @@ export function checkLine(state: State, dealId: string) {
   return null;
 }
 
-type ChecklistFilter = State['ui']['checklistFilter'];
-type StandingSub = { word: string; n: number; filter: ChecklistFilter };
-type StandingPart = {
-  k: 'open' | 'prog' | 'done'; word: string; n: number; filter?: ChecklistFilter; sub?: StandingSub[];
-};
+type StandingSub = 'finding' | 'gap' | 'gone' | 'satisfied' | 'person';
 
-/** Each part of the Overview standing points at the rows counted in it. */
+/** Each part of the Overview standing, with the checklist filters that open the rows counted in it. */
 export function checklistStandingParts(counts: NonNullable<ReturnType<typeof checklistStandingCounts>>) {
-  const parts: StandingPart[] = [
-    { k: 'open', word: 'to resolve', n: counts.toResolve, filter: 'all', sub: [
-      { word: 'flagged', n: counts.finding, filter: 'finding' }, { word: 'gap', n: counts.gap, filter: 'gap' },
-      { word: 'finding deleted', n: counts.gone, filter: 'gone' },
-    ] },
-    { k: 'prog', word: 'not settled', n: counts.open, filter: 'open' },
-    counts.person ? { k: 'done', word: 'settled', n: counts.settled, sub: [
-      { word: 'satisfied', n: counts.satisfied, filter: 'satisfied' },
-      { word: 'by a person', n: counts.person, filter: 'person' },
-    ] } : { k: 'done', word: 'satisfied', n: counts.satisfied, filter: 'satisfied' },
+  const sub = (...filters: StandingSub[]) => filters.map((filter) => ({ filter, n: counts[filter] }));
+  return [
+    { k: 'open' as const, n: counts.toResolve, filter: 'all' as const, sub: sub('finding', 'gap', 'gone') },
+    { k: 'prog' as const, n: counts.open, filter: 'open' as const },
+    counts.person ? { k: 'done' as const, n: counts.settled, sub: sub('satisfied', 'person') }
+      : { k: 'done' as const, n: counts.satisfied, filter: 'satisfied' as const },
   ];
-  const off = counts.off ? { n: counts.off, open: counts.offOpen, filter: 'off' as const } : null;
-  return { parts, off };
 }

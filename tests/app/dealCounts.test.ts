@@ -467,19 +467,13 @@ it('selects the Overview check independently of the run mode and warning tone', 
 
 it('describes the standing segments and exactly which checklist filters they open', () => {
   const counts = checklistStandingCounts(checklistDeal(), dealId)!;
-  const { parts, off } = checklistStandingParts(counts);
-  expect(off).toEqual({ n: 3, open: 1, filter: 'off' });
-  expect(parts).toEqual([
-    { k: 'open', word: 'to resolve', n: 119, filter: 'all', sub: [
-      { word: 'flagged', n: 117, filter: 'finding' }, { word: 'gap', n: 1, filter: 'gap' },
-      { word: 'finding deleted', n: 1, filter: 'gone' },
+  expect(checklistStandingParts(counts)).toEqual([
+    { k: 'open', n: 119, filter: 'all', sub: [
+      { filter: 'finding', n: 117 }, { filter: 'gap', n: 1 }, { filter: 'gone', n: 1 },
     ] },
-    { k: 'prog', word: 'not settled', n: 21, filter: 'open' },
-    { k: 'done', word: 'settled', n: 2017, sub: [
-      { word: 'satisfied', n: 2016, filter: 'satisfied' }, { word: 'by a person', n: 1, filter: 'person' },
-    ] },
+    { k: 'prog', n: 21, filter: 'open' },
+    { k: 'done', n: 2017, sub: [{ filter: 'satisfied', n: 2016 }, { filter: 'person', n: 1 }] },
   ]);
-  const plain = checklistStandingParts({ ...counts, person: 0, settled: 2016, off: 0, offOpen: 0 });
-  expect(plain.off).toBeNull();
-  expect(plain.parts.at(-1)).toEqual({ k: 'done', word: 'satisfied', n: 2016, filter: 'satisfied' });
+  const plain = checklistStandingParts({ ...counts, person: 0, settled: 2016 });
+  expect(plain.at(-1)).toEqual({ k: 'done', n: 2016, filter: 'satisfied' });
 });
