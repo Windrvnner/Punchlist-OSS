@@ -268,6 +268,12 @@ describe('the line-by-line allowance', () => {
     expect(stderr).toContain('Only the syntax forms listed in docs/development.md are caught');
     expect(stderr).toContain("review's job");
     expect(stderr).toContain('references that are not called');
+    for (const form of ['.map', '.flatMap', '.includes', '.join', '.concat', '.at', 'Array.from', 'new Set']) {
+      expect(stderr).toContain(form);
+    }
+    expect(stderr).toContain('.replace without a regex');
+    expect(stderr).toContain('a bare .length read');
+    expect(stderr).toContain('Math.min, Math.max');
     expect(stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
   });
 

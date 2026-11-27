@@ -1,5 +1,5 @@
 // Keep "The frontend is a pane of glass" in CLAUDE.md true: every access the check finds in a screen is listed line
-// by line in scripts/pane-of-glass-baseline.json, with the issue that removes it.
+// by line in scripts/pane-of-glass-baseline.json, with the issue that removes it or the decision that keeps it.
 //
 // It catches only the syntax forms that scripts/pane-of-glass-rules.mjs and pane-of-glass-matches.mjs list. Any other
 // method, property or construct is review's job (docs/development.md).
@@ -17,9 +17,10 @@ const read = (file) => readFileSync(file, 'utf8');
 const openIssuesNotice = 'Issues named in the allowances are checked as open by CI (scripts/check-open-issues.mjs).';
 const limits = [
   'Only the syntax forms listed in docs/development.md are caught. Any other method, property or construct is',
-  "review's job: for example .split, .trim, .startsWith, .pop, .shift, a method name held in a variable,",
-  'Function.prototype.call, destructured length or Date.parse, performance.now, queueMicrotask, plain if logic on',
-  'state, references that are not called, and named constants.',
+  "review's job: for example .map, .flatMap, .includes, .join, .concat, .at, .replace without a regex, .split,",
+  '.trim, .startsWith, .pop, .shift, Array.from, new Set, a bare .length read, Math.min, Math.max, a method name held',
+  'in a variable, Function.prototype.call, destructured length or Date.parse, performance.now, queueMicrotask, plain',
+  'if logic on state, references that are not called, and named constants.',
   'See "The frontend is a pane of glass" in CLAUDE.md.',
   openIssuesNotice,
 ];

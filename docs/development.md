@@ -127,8 +127,9 @@ one (computed reads such as `rows['length']` and other arithmetic such as `rows.
 assignment to `.length`, and a numeric `maxLength`, `minLength`, `min`, or `max` attribute;
 `Date.parse`, `Date.UTC`, `Date.now`, and `new Date` with arguments;
 and a regex literal or a `RegExp` call.
-Any other method, property, or construct is review's job, for example `.split`, `.trim`, `.startsWith`, `.pop`,
-`.shift`, a method name held in a variable, `Function.prototype.call`, destructured `length` or `Date.parse`,
+Any other method, property, or construct is review's job, for example `.map`, `.flatMap`, `.includes`, `.join`,
+`.concat`, `.at`, `.replace` without a regex, `.split`, `.trim`, `.startsWith`, `.pop`, `.shift`, `Array.from`,
+`new Set`, a bare `.length` read, `Math.min`, `Math.max`, a method name held in a variable, `Function.prototype.call`, destructured `length` or `Date.parse`,
 `performance.now`, `queueMicrotask`, plain `if` logic on state, references that are not called
 (`const f = Date.now`, `rows.sort` passed as a value), and named constants.
 
