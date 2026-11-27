@@ -93,10 +93,14 @@ export function checkLine(state: State, dealId: string) {
   // is still reading
   const unchecked = uncheckedChecklistCount(state, deal);
   const warn = !check?.busy && (!!check?.failedAt || !!check?.left || deep || unchecked > 0);
-  const kind = shared || check?.busy ? 'running' as const : check?.failedAt ? 'failed' as const
-    : check?.left ? 'left' as const : deep ? 'deep' as const : unchecked ? 'unchecked' as const : null;
+  const kind = lineKind(check, !!shared || !!check?.busy, deep, unchecked);
   return kind && { kind, warn, deep, rest, shared, unchecked };
 }
+
+/** What takes the line, in order: a running check, a failed one, a left-out part, a spot check that disagreed. */
+const lineKind = (check: State['checks'][string] | undefined, running: boolean, deep: boolean, unchecked: number) =>
+  running ? 'running' as const : check?.failedAt ? 'failed' as const : check?.left ? 'left' as const
+    : deep ? 'deep' as const : unchecked ? 'unchecked' as const : null;
 
 type StandingSub = 'finding' | 'gap' | 'gone' | 'satisfied' | 'person';
 
