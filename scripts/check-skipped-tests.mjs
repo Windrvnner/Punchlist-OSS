@@ -14,7 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { allowanceProblems, decisionEntries, entryProblems, groupMatches } from './allowance.mjs';
 import { vitestResults } from './gate-compare.mjs';
 import { insideGate } from './gate-dir.mjs';
-import { liveExclude, testInclude } from './vitest-files.mjs';
+import { testInclude } from './vitest-files.mjs';
 
 const allowancePath = 'scripts/skipped-tests-allowance.json';
 const notRun = new Set(['skipped', 'pending', 'todo']);
@@ -37,13 +37,11 @@ export function skippedProblems(matches, allowance, { decisions, verified, scope
   ];
 }
 
-// The test files, among `files`, that no Vitest include pattern covers and that the live exclusions do not leave out.
+// The test files, among `files`, that no Vitest include pattern covers.
 export function unrunTestFiles(files) {
-  const left = liveExclude({});
   const covered = (file) => testInclude.some((pattern) => path.matchesGlob(file, pattern));
-  const leftOut = (file) => left.some((pattern) => path.matchesGlob(file, pattern));
   return files
-    .filter((file) => !covered(file) && !leftOut(file))
+    .filter((file) => !covered(file))
     .map((file) => `${file} is never run by Vitest`);
 }
 

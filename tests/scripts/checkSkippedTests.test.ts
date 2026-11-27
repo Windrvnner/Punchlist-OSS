@@ -95,11 +95,6 @@ describe('test files Vitest never runs', () => {
     expect(isTestFile('tests/desktop/smoke.spec.mjs')).toBe(false);
   });
 
-  it('does not count the live tests the config leaves out', () => {
-    const files = ['tests/e2e/live-agent.test.ts', 'tests/e2e/ai-check-live.test.ts', 'tests/e2e/split.test.ts'];
-    expect(unrunTestFiles(files)).toEqual([]);
-  });
-
   it('finds none among the tracked test files', () => {
     const tracked = spawnSync('node', [script, '--files'], { encoding: 'utf8' });
     expect(tracked.stderr).toBe('');
