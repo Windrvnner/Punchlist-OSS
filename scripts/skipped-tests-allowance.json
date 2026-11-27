@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "file": "tests/desktop/folder.test.ts",
+    "kind": "skipped",
+    "line": "the Punchlist folder finds a folder it cannot list, and one it cannot write to, by trying",
+    "count": 1,
+    "platform": "linux",
+    "reason": "Skipped when the run is root, which reads any folder; the test needs an ordinary user",
+    "issue": 1242
+  },
+  {
+    "file": "tests/desktop/folder.test.ts",
+    "kind": "skipped",
+    "line": "the Punchlist folder finds a folder it cannot list, and one it cannot write to, by trying",
+    "count": 1,
+    "platform": "win32",
+    "reason": "Skipped on Windows, where the folder permission modes the test sets do not apply",
+    "issue": 1242
+  }
+]
