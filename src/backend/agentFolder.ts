@@ -357,9 +357,7 @@ class FolderPass {
       const short = `${finding.at}: passages at ${finding.places}.`;
       const newDocs = finding.got.filter((x) => !this.before.has(x));
       const listing = newDocs.reduce((sum, x) => sum + listingChars(this.run.idOf(x)), 0);
-      const line = used + full.length + listing <= room / 2 ? full
-        : !lines.length || used + short.length + listing <= room ? short
-        : '';
+      const line = fittingLine(full, short, used + listing, room, !lines.length);
       if (line) {
         lines.push(line);
         used += line.length + listing;
@@ -374,6 +372,15 @@ class FolderPass {
     }
     return lines;
   }
+}
+
+/**
+ * the line that fits the room after `used` characters: in full within half of it, else by its places within all of it;
+ * the first line given always has its places (#480)
+ */
+function fittingLine(full: string, short: string, used: number, room: number, first: boolean): string {
+  if (used + full.length <= room / 2) return full;
+  return first || used + short.length <= room ? short : '';
 }
 
 /** a step done, with its result */
