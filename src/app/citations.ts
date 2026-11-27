@@ -10,9 +10,6 @@ import type { DraftRef } from '../ports';
 
 export { pageOf };
 
-/** Reading mode opens only the first place of a grouped citation. */
-export const firstCitationPage = (loc: string) => pageOf(loc.split(' · ')[0]);
-
 /** Up to this many documents a pop lists them all; beyond it, with somewhere to send the rest, it lists POP_SHOWN. */
 export const POP_ALL = 4;
 /** How many documents a capped pop lists before "N more". */

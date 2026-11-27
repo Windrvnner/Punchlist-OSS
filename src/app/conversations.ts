@@ -12,7 +12,7 @@ import { docKey, ownFilesId, type Question, type Source } from '../domain/model'
 import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { findQuestions } from '../domain/suggest';
 import { proposeQuestion, suggestedFor } from './suggestedQuestion';
-import { pageDigits, withoutMarkers } from '../domain/cite';
+import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
 import { TITLE_MAX } from './commands/findings';
 import { chipsSendable, dealCopied, filesSendable } from './attachments';
@@ -416,11 +416,7 @@ export async function askVerdict(store: Store, dealId: string, questionId: strin
 
 /** `from` says what cited it; `ask` is the question that led to the answer, when an answer cited it; `dealId` only on answers across deals. */
 export interface DocRef { doc: string; docId: string; loc: string; from: string; ask?: string; dealId?: string }
-function pageKey(loc: string) {
-  const page = pageDigits(loc);
-  if (page) return 'p. ' + page;
-  return /^([^!]+)!/.exec(loc)?.[1] ?? loc;
-}
+const pageKey = (loc: string) => { const m = /p\.\s*(\d+)/.exec(loc); if (m) return 'p. ' + m[1]; const sh = /^([^!]+)!/.exec(loc); return sh ? sh[1] : loc; };
 
 /**
  * The documents under review in a conversation, one entry per document page, in order. This is the

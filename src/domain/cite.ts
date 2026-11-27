@@ -69,12 +69,10 @@ export function splitCited(text: string, sourceCount: number): CitedPart[] {
   return out;
 }
 
-/** Page labels keep their original digits when used as a reading-list key. */
-export const pageDigits = (loc: string) => /p\.\s*(\d+)/.exec(loc)?.[1];
-
+/** The page a citation's place names ("p. 12 · cl. 4" is page 12), or null when it names none ("Ops!F12"). */
 export function pageOf(loc: string): number | null {
-  const digits = pageDigits(loc);
-  return digits === undefined ? null : Number(digits);
+  const match = /p\.\s*(\d+)/.exec(loc);
+  return match ? +match[1] : null;
 }
 
 /** A whole answer or finding can cite its sources when none of its sentences cites a particular source. */

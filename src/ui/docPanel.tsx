@@ -9,7 +9,7 @@ import { CachedMark } from './cached';
 import { DocName } from './docName';
 import { DocMenu } from './docMenu';
 import { useDrafts, draftDate, DraftsButton, DraftsMenu } from './drafts';
-import { newerThan, firstCitationPage } from '../app/citations';
+import { newerThan, pageOf } from '../app/citations';
 import { closeDocument } from './nav';
 import { loadPage, pageKeyFor, type DocRef } from '../app/conversations';
 import type { PageState } from '../app/state';
@@ -20,6 +20,9 @@ import { PageControls, placePageControls, zoomStep } from './pageControls';
 
 type PanelRef = RefObject<HTMLElement | null>;
 type SheetView = Extract<PageView, { kind: 'sheet' }>;
+
+/** The page a citation's place names, from its first place */
+const pageNo = (loc: string) => pageOf(loc.split(' · ')[0]);
 
 const docBody = (panel: PanelRef) => panel.current?.querySelector<HTMLElement>('.docbody');
 
@@ -162,7 +165,7 @@ function usePageTurns(store: Store, docs: DocRef[], current: DocRef, page: PageS
   const shown = pdf ? (pageAt ?? pdf.page) : null;
   // a document opened at no cited page (from the conversation with no place, or another draft) has no "Not cited":
   // only its page
-  const cited = firstCitationPage(current.loc) !== null;
+  const cited = pageNo(current.loc) !== null;
   const offCite = cited && pdf !== null && shown !== pdf.page;
   const place = pdf && (offCite || !cited) ? `p. ${shown}${pageCount ? ` of ${pageCount}` : ''}` : current.loc;
   // the up and down arrows step through the pages; a page the list cites is that citation, so the count says which
@@ -174,7 +177,7 @@ function usePageTurns(store: Store, docs: DocRef[], current: DocRef, page: PageS
       setPageAt(null);
       return;
     }
-    const citing = docs.findIndex((doc) => docKey(doc) === docKey(current) && firstCitationPage(doc.loc) === to);
+    const citing = docs.findIndex((doc) => docKey(doc) === docKey(current) && pageNo(doc.loc) === to);
     if (citing >= 0) store.ui({ doc: citing, docAside: null });
     else setPageAt(to);
   };
