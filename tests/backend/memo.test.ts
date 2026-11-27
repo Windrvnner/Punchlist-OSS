@@ -6,7 +6,7 @@ import { nodeAi, type AiDocs } from '../../src/backend/ai';
 import { StandInService } from '../../src/backend/service';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
 import type { Folder } from '../../src/backend/logRepository';
-import { TOO_LONG_REPLY } from '../../src/backend/limits';
+import { TOO_LONG_REPLY, tokensOf } from '../../src/backend/limits';
 import { memoContent, type Rating } from '../../src/domain/memo';
 import { memoDocument } from '../../src/domain/memoDoc';
 import { memRepo, type MemRepo } from '../adapters/memRepo';
@@ -27,7 +27,7 @@ function setup(rate: (c: Call, n: number) => unknown, sum: (c: Call, n: number) 
   // retries without the waits
   const retry = { sleep: async () => {} };
   const ai = nodeAi({ service: svc, docs, keeper, repo, shared, installId: pc, clock, retry });
-  return { ai, rates, sums, groups, repo, shared };
+  return { ai, rates, sums, groups, repo, shared, svc };
 }
 const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
 async function deal(repo: MemRepo) { val(await repo.transaction({ writes: [{ kind: 'deal', id: 'd1', data: { id: 'd1', name: 'Project Southridge', counterparty: 'Southridge Solar', sector: 'Solar' }, expectedRev: null }], index: { dealId: '_', add: [{ kind: 'deal', id: 'd1' }] } })); }
@@ -108,7 +108,8 @@ describe('the deal memo’s ratings and summary', () => {
   });
 
   it('asks again for what a reply left out or got wrong, then the thorough model, and leaves unrated what none could rate', async () => {
-    const s = setup((c, n) => (n === 1 ? { ratings: [{ id: 'f_1', rating: 'Severe' }, { id: 'f_404', rating: 'High' }, { id: 'f_2', rating: 'Medium' }] } : n === 2 ? 'no' : { ratings: [] }));
+    const first = { ratings: [{ id: 'f_1', rating: 'Severe' }, { id: 'f_2', rating: 'Medium' }] };
+    const s = setup((_c, n) => (n === 1 ? first : n === 2 ? 'no' : { ratings: [] }));
     await deal(s.repo); await finding(s.repo, 'f_1', 'One'); await finding(s.repo, 'f_2', 'Two');
     const m = val(await s.ai.memo!('d1'));
     expect(m.ratings).toEqual({ f_2: 'Medium' });
@@ -162,6 +163,19 @@ describe('the deal memo’s ratings and summary', () => {
     expect(Object.keys(m.ratings).length).toBe(45); expect(s.rates.map((c) => c.prompt.match(/^f_\w+ \(/gm)!.length)).toEqual([40, 5]);
   });
 
+  it('sizes a part of findings to the input limit with each finding\'s id counted (#1162)', async () => {
+    const LIMIT = 900;
+    const s = setup(by({}));
+    s.svc.inputLimit = () => LIMIT;
+    await deal(s.repo);
+    for (let k = 0; k < 80; k++) {
+      await finding(s.repo, `f_01HZX3K9Q4V7M2B5N8C1D6${String(k).padStart(4, '0')}`, `Finding ${k}`);
+    }
+    val(await s.ai.memo!('d1'));
+    expect(s.rates.length).toBeGreaterThan(2);
+    for (const call of s.rates) expect(tokensOf(call.prompt)).toBeLessThanOrEqual(LIMIT);
+  });
+
   it.each(ratingCases)('reports the state of open-finding ratings at scale with $name', async (testCase) => {
     const { actualRatings, expectedRatings, sums, pageOne } = await scriptedScaleMemo(testCase);
     expect(SCALE_FINDINGS.length).toBeGreaterThanOrEqual(40);
@@ -201,5 +215,72 @@ describe('the deal memo’s ratings and summary', () => {
   it('fails as unreachable when the model service is', async () => {
     const s = setup(() => { const e: any = new Error('down'); e.code = 'unreachable'; throw e; }); await deal(s.repo); await finding(s.repo, 'f_1', 'One');
     const r = await s.ai.memo!('d1'); expect(!r.ok && r.error.kind).toBe('unreachable');
+  });
+});
+
+describe('the memo asks name findings only by the ids they were shown (#1162)', () => {
+  /** a reply naming f_7, one character off f_1, until call `good` */
+  const until = (good: number, bad: unknown, right: unknown) => (_c: Call, n: number) => (n < good ? bad : right);
+  const two = async (s: ReturnType<typeof setup>) => {
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Yield above the advisor’s');
+    await finding(s.repo, 'f_2', 'Notice address differs');
+  };
+  const rated = (id: string) => ({ ratings: [{ id, rating: 'High' }, { id: 'f_2', rating: 'Low' }] });
+
+  it('asks again for ratings that name an id one character off, and takes the reply that names them right',
+    async () => {
+      const s = setup(until(2, rated('f_7'), rated('f_1')));
+      await two(s);
+      expect(val(await s.ai.memo!('d1')).ratings).toEqual({ f_1: 'High', f_2: 'Low' });
+      expect(s.rates.length).toBe(2);
+      expect(s.rates[1].prompt).toBe(s.rates[0].prompt);
+    });
+
+  it('saves no rating from replies that still name an unknown id when the tries run out', async () => {
+    const s = setup(() => rated('f_7'));
+    await two(s);
+    expect(val(await s.ai.memo!('d1')).ratings).toEqual({});
+    expect([...s.shared.files.values()].join('')).not.toContain('"rated"');
+  });
+
+  it('takes nothing from a cut-off reply whose whole entries name an unknown id, and asks the part again', async () => {
+    const whole = ['f_1', 'f_7', 'f_2'].map((id) => `{"id": "${id}", "rating": "High"}`).join(', ');
+    const cutOff = `{"ratings": [${whole}, {"id": "f_`;
+    const s = setup((_c, n) => (n === 1 ? cutOff : by({ f_1: 'Low', f_2: 'Low' })(_c)));
+    await two(s);
+    expect(val(await s.ai.memo!('d1')).ratings).toEqual({ f_1: 'Low', f_2: 'Low' });
+    expect(s.rates.length).toBeGreaterThan(1);
+  });
+
+  it('asks again for a grouping that names an id one character off, and groups by the right one', async () => {
+    const both = (id: string) => ({ risks: [{ title: 'Yield and notices', findings: [id, 'f_2'] }] });
+    let n = 0;
+    const s = setup(by({ f_1: 'High', f_2: 'Low' }), undefined, new Mem(), memRepo(clock), 'pc1',
+      () => both(++n === 1 ? 'f_7' : 'f_1'));
+    await two(s);
+    const m = val(await s.ai.memo!('d1'));
+    expect(s.groups.length).toBe(2);
+    expect(s.groups[1].prompt).toBe(s.groups[0].prompt);
+    expect(m.risks!.map((r) => r.findings)).toEqual([['f_1', 'f_2']]);
+  });
+
+  it('keeps nothing of a grouping that still names an unknown id when the tries run out', async () => {
+    const s = setup(by({ f_1: 'High', f_2: 'Low' }), undefined, new Mem(), memRepo(clock), 'pc1',
+      () => ({ risks: [{ title: 'Yield and notices', findings: ['f_7', 'f_2'] }] }));
+    await two(s);
+    const m = val(await s.ai.memo!('d1'));
+    expect(m.risks!.map((r) => r.findings).sort()).toEqual([['f_1'], ['f_2']]);
+  });
+
+  it('asks again for a brief whose link names an id one character off, and fails if every try does', async () => {
+    const link = (id: string) => ({ paragraphs: [`The yield matters ({the yield|${id}}).`] });
+    const s = setup(() => ({ ratings: [] }), until(2, link('f_7'), link('f_1')));
+    await two(s);
+    expect(val(await s.ai.dealBrief('d1')).paragraphs).toEqual(['The yield matters ({the yield|f_1}).']);
+    expect(s.sums.length).toBe(2);
+    const never = setup(() => ({ ratings: [] }), () => link('f_7'));
+    await two(never);
+    expect((await never.ai.dealBrief('d1')).ok).toBe(false);
   });
 });

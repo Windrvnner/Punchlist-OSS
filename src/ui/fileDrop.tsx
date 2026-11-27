@@ -101,3 +101,27 @@ export function FileDrop(props: {
     </DropZone>
   );
 }
+
+/** The box a list is pasted into, under the file row, as the checklist and issues-list imports both take one */
+export function PasteRow({ id, value, onInput }: { id: string; value: string; onInput: (text: string) => void }) {
+  return (
+    <div class="srow top cl-pasterow"><div class="k">Paste</div><div>
+      <textarea class="field cl-paste" id={id} aria-label="Paste a list" placeholder="Paste a list"
+        spellcheck={false} value={value} onInput={(e) => onInput((e.currentTarget as HTMLTextAreaElement).value)} />
+    </div></div>
+  );
+}
+
+/** The paste box's Next, off until something is pasted; its tooltip then says what it waits for */
+export function PasteNext({ id, lines, busy, onNext }: {
+  id: string;
+  lines: number;
+  busy: boolean;
+  onNext: () => void;
+}) {
+  return (
+    <span class="needs" title={lines ? undefined : 'Paste a list, or choose a file'}>
+      <button class="btn sm pri" type="button" id={id} disabled={!lines || busy} onClick={onNext}>Next</button>
+    </span>
+  );
+}

@@ -5,7 +5,8 @@
 import type { DocRecord } from './documents';
 import type { Cited } from './agent';
 import type { Source } from '../domain/model';
-import { list as listOf, strings, tagNumber, prose, PARAGRAPH_SEAM } from './lenient';
+import { list as listOf, readJson, isObject, strings, tagNumber, prose, PARAGRAPH_SEAM } from './lenient';
+import { unknownIds } from './recordIds';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
   isCut, yes,
@@ -15,9 +16,9 @@ import {
 const sentences = (...parts: string[]) => parts.join(' ');
 
 /** the opening of the prompt: what to list, and what to leave out */
-function issuesAsk(k: ReportKit, tag: string) {
+function issuesAsk(k: ReportKit, id: string) {
   const what = sentences(
-    `${tag} is a report by an outside advisor or consultant on this deal.`,
+    `${id} is a report by an outside advisor or consultant on this deal.`,
     'List every issue the advisor raises in it: anything they flag as a problem, risk, concern, shortfall,',
     'non-compliance, a missing, expired or doubtful permit, consent or license, or a point still open for the',
     'lenders or the deal. Where it is unclear whether something is an issue, list it.',
@@ -29,49 +30,51 @@ function issuesAsk(k: ReportKit, tag: string) {
     'Write each issue up as a finding: a one-line "title",',
     `a "workstream" (one of ${k.workstreams.join(' | ')}, or "" when unsure),`,
     'a "body" of one or two paragraphs with [n] markers that names the advisor and says what they raised,',
-    `and "sources" citing the page of ${tag} where it is raised.`,
+    `and "sources" citing the page of ${id} where it is raised.`,
     'Number each issue’s markers from [1].',
   );
   return `${what}\n${how}`;
 }
 
-/** the deal's findings, so an issue one already covers is named rather than raised again */
-function knownAsk(tag: string, known: Known[]) {
+/** the deal's findings, so an issue one already covers is named rather than raised again: each by its id (#1162) */
+function knownAsk(id: string, known: Known[]) {
   if (!known.length) return '';
   const mark = (f: Known) => (f.deleted ? ' (deleted)' : f.closed ? ' (closed)' : '');
-  const listed = known.map((f, i) => `F${i + 1}: ${f.title}${mark(f)}`).join('\n');
+  const listed = known.map((f) => `${f.id}: ${f.title}${mark(f)}`).join('\n');
   const rule = sentences(
-    'An issue an open finding, or one marked (deleted), already covers is given as {"covered": "F3"}',
-    `with its "sources", the page of ${tag} where it is raised, and nothing else.`,
-    'An issue only a finding marked (closed) covers is written up in full like any other, with "earlier": "F3".',
+    'An issue an open finding, or one marked (deleted), already covers is given as {"covered": "<finding id>"}',
+    `with its "sources", the page of ${id} where it is raised, and nothing else.`,
+    'An issue only a finding marked (closed) covers is written up in full like any other,',
+    'with "earlier": "<finding id>".',
   );
   return `\n\nThese findings are already on the deal:\n${listed}\n${rule}`;
 }
 
 /** what an earlier draft of the report raised, so a new draft raises only what is new */
-function earlierAsk(tag: string, before: ReadIssue[] | undefined) {
+function earlierAsk(id: string, before: ReadIssue[] | undefined) {
   if (!before?.length) return '';
+  // an earlier draft's issue is no saved record with an id of its own: it keeps its per-prompt label (#1162)
   const listed = before.map((x, i) => `E${i + 1}: ${x.title}`).join('\n');
   const rule = sentences(
     'An issue it raised that this report still raises is given as {"still": "E2"}',
-    `with its "sources", the page of ${tag} where it is raised now, and nothing else.`,
+    `with its "sources", the page of ${id} where it is raised now, and nothing else.`,
     'Put in "dropped" the E numbers of those this report no longer raises.',
   );
   return `\n\nAn earlier draft of this report raised these issues:\n${listed}\n${rule}`;
 }
 
 /** the reply's shape */
-function replyAsk(tag: string, before: ReadIssue[] | undefined) {
-  const source = (page: number) => `"sources": [{"doc": "${tag}", "page": ${page}, "quote": "…"}]`;
+function replyAsk(id: string, before: ReadIssue[] | undefined) {
+  const source = (page: number) => `"sources": [{"doc": "${id}", "page": ${page}, "quote": "…"}]`;
   const full = `{"title": "…", "workstream": "…", "body": ["…"], ${source(12)}}`;
   const still = before?.length ? `, {"still": "E1", ${source(8)}}` : '';
   const dropped = before?.length ? '"dropped": ["E1"], ' : '';
   const advisor = sentences(
     'Also give "advisor": who wrote the report, in a few words (such as "the independent engineer").',
-    `If ${tag} is not in fact a report by an outside advisor, reply {"report": false}.`,
+    `If ${id} is not in fact a report by an outside advisor, reply {"report": false}.`,
   );
   const order = 'Give every issue, in the order the report raises them.';
-  const issues = `[${full}, {"covered": "F2", ${source(30)}}${still}]`;
+  const issues = `[${full}, {"covered": "<finding id>", ${source(30)}}${still}]`;
   const droppedPart = dropped ? `, ${dropped.replace(/, $/, '')}` : '';
   const shape = `Reply as JSON: {"advisor": "…", "issues": ${issues}${droppedPart}}`;
   return `\n${advisor}\n${order}\n${shape}`;
@@ -82,9 +85,9 @@ interface ReadAt { k: ReportKit; s: SentDoc; before?: ReadLine }
 
 /** the prompt that reads a report's issues */
 export function readAsk(r: ReadAt, known: Known[]) {
-  const tag = r.s.sent[0].tag;
-  const body = issuesAsk(r.k, tag) + knownAsk(tag, known) + earlierAsk(tag, r.before?.issues);
-  return `Documents:\n${r.s.listing}\n\n${body}${replyAsk(tag, r.before?.issues)}`;
+  const id = r.s.sent[0].rec.docId;
+  const body = issuesAsk(r.k, id) + knownAsk(id, known) + earlierAsk(id, r.before?.issues);
+  return `Documents:\n${r.s.listing}\n\n${body}${replyAsk(id, r.before?.issues)}`;
 }
 
 /** a finding this report raised: its id is the one `idFor` gives the report and its title */
@@ -133,7 +136,7 @@ class ReportRead {
     const was = this.before?.issues[(tagNumber(row.still, 'E') ?? 0) - 1];
     const stillAt = was?.finding ?? was?.covered;
     if (stillAt) { await this.cite(stillAt, this.placed(row)); return true; }
-    const covering = known[(tagNumber(row.covered, 'F') ?? 0) - 1];
+    const covering = known.find((f) => f.id === row.covered);
     const title = titleOf(row);
     // one only a closed finding covers is raised again, so it must come written out: as covered only, it has no page
     if (covering?.closed && !covering.deleted && !title) { this.unplaced++; return true; }
@@ -167,8 +170,8 @@ class ReportRead {
       body: k.fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim())),
       sources: fitted.sources,
     };
-    // a closed finding on the same issue is named: a wrong number falls back to the one given as covering it
-    const was = known[(tagNumber(row.earlier, 'F') ?? 0) - 1] ?? covering;
+    // a closed finding on the same issue is named, by its id: with none named, the one given as covering it
+    const was = known.find((f) => f.id === row.earlier) ?? covering;
     if (was?.closed && !was.deleted) issue.earlier = was.id;
     if (!(await k.raise(id, issue))) return false;
     this.issues.push({ title, finding: id });
@@ -209,13 +212,30 @@ class ReportRead {
   }
 }
 
+/**
+ * A reply whose "covered" or "earlier" is not exactly the id of a finding it was shown, asked again (#1162); none
+ * given, or "", is not an id
+ */
+export const knownUnusable = (known: Known[], keys: string[]) => (text: string) => {
+  const ids = known.map((f) => f.id);
+  const rows = listOf(readJson(text, keys)?.issues).filter(isObject);
+  const named = rows.flatMap((row) => [row.covered, row.earlier]).filter((v) => v !== undefined && v !== '');
+  return unknownIds(named, ids).length > 0;
+};
+
 /** the report's issues from the model in one call; a reply cut off at the length limit comes back with `cut` */
 async function ask(r: ReportRead, known: Known[]) {
   const k = r.k;
   const prompt = readAsk(r, known);
-  const input = { kind: 'report', split: true, model: k.models.standard, system: k.system, files: r.s.files, prompt };
+  const keys = ['issues', 'report'];
+  // a reply citing a document other than the report, or naming a finding it was not shown, is asked again (#1162)
+  const cites = k.unusable(r.s.sent, keys, known.map((f) => f.id));
+  const named = knownUnusable(known, keys);
+  const unusable = async (text: string) => (await cites(text)) || named(text);
+  const input = { kind: 'report', split: true, model: k.models.standard, system: k.system, files: r.s.files, prompt,
+    unusable };
   try {
-    return { reply: await k.ask(input, ['issues', 'report']), cut: false };
+    return { reply: await k.ask(input, keys), cut: false };
   } catch (e) {
     if (!isCut(e)) throw e;
     return { reply: null, cut: true };

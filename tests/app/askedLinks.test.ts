@@ -103,7 +103,7 @@ it('works out the confidence the same way for a finding and a gap', async () => 
   const { preview } = await linksOf(env);
   expect(preview.links.map(({ point }) => [point.kind, point.what])).toEqual([['finding', INSURANCE]]);
   const asGap = point(INSURANCE);
-  const asFinding = { ...asGap, kind: 'finding' as const };
+  const asFinding: Unresolved = { ...asGap, kind: 'finding', findingId: 'f_a', itemId: undefined };
   const pool = [question(1, ASKS_INSURANCE)];
   const confidence = (p: Unresolved) => askedCandidates([p], pool, undefined, 0).candidates[0].confidence;
   expect(confidence({ ...asGap, need: 'The final report from the insurance advisor' })).toBe(100);
@@ -116,7 +116,8 @@ it('checks a short point whose every word a long question names: no minimum word
   expect(got.map((c) => c.confidence)).toEqual([100]);
 });
 
-const point = (what: string): Unresolved => ({ key: 'i:' + what, kind: 'gap', what, need: '', workstream: '' });
+const point = (what: string): Unresolved => (
+  { key: 'i:' + what, kind: 'gap', itemId: 'i_a', what, need: '', workstream: '' });
 const question = (n: number, text: string) => ({ id: 'q' + n, n, text }) as never;
 
 it('checks a question exactly at the cutoff and not one a percent below it', () => {

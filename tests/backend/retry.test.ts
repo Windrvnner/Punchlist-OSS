@@ -1,7 +1,7 @@
 /** Every AI call is asked again quietly before a failure is shown (decisions: Retries; src/backend/retry.ts). */
 import { describe, it, expect } from 'vitest';
 import { retrier, curable } from '../../src/backend/retry';
-import { setup, val, deal, doc, OK, itemsIn, Mem, type Call } from './reviewKit';
+import { setup, val, deal, doc, OK, itemsIn, Mem, type Call, nth } from './reviewKit';
 import type { Checklist } from '../../src/backend/ai';
 
 const fail = (extra: object = {}) => Object.assign(new Error('said 500: internal'), extra);
@@ -76,7 +76,21 @@ describe('every AI feature gets it', () => {
   }, 60_000);
 
   it('a draft whose first reply is empty is asked again and drafted; one that fails every try says so, as it always has', async () => {
-    let n = 0; const s = setup((c) => (itemsIn(c).length ? {} : ++n === 1 ? '' : { status: 'found', text: 'The lock-up ratio is 1.25x. [D1 p. 3]', sources: [{ doc: 'D1', page: 3 }] }), docs, {});
+    let n = 0;
+    const s = setup(
+      (c) =>
+        itemsIn(c).length
+          ? {}
+          : ++n === 1
+            ? ''
+            : {
+                status: 'found',
+                text: 'The lock-up ratio is 1.25x. [D1 p. 3]',
+                sources: [{ doc: nth(c, 1), page: 3 }],
+              },
+      docs,
+      {},
+    );
     await deal(s.repo);
     const r = await s.ai.draft({ dealId: 'd1', questionId: 'q1', questionText: 'What is the lock-up ratio?' });
     expect(r.ok).toBe(true); expect(n).toBeGreaterThanOrEqual(2);

@@ -26,13 +26,13 @@ describe('closed findings checked too', () => {
   it('when documents arrive: the fast model names a closed finding they could change; it is looked at with them and marked', async () => {
     let arrived = false;
     const s = setup(okAll, { d1: [FA, TS] }, { shared: new Mem(), installId: 'pc', checklist: list,
-      affects: (c) => ({ affected: c.prompt.includes('(closed)') ? ['F1 N1'] : [] }),
+      affects: (c) => ({ affected: c.prompt.includes('(closed)') ? ['f_1 doc_000000000000000000000003'] : [] }),
       verify: (c) => ({ stands: !(arrived && closedAsk(c)), why: 'The amendment changes the margin' }) });
     await deal(s.repo); val(await s.ai.firstPass('d1'));
     await finding(s.repo, 'f_1', 'Margin differs', { status: 'closed', sources: [{ doc: FA.name, loc: 'p. 2', docId: FA.docId }] });
     s.recs.d1 = [...s.recs.d1, doc(3, 'Amendment.pdf', { words: ['amendment', 'margin'] })]; arrived = true;
     val(await s.ai.firstPass('d1'));
-    expect(s.affectCalls.some((c) => c.prompt.includes('F1: Margin differs (closed)'))).toBe(true);
+    expect(s.affectCalls.some((c) => c.prompt.includes('f_1: Margin differs (closed)'))).toBe(true);
     expect(await stored(s.repo, 'f_1')).toMatchObject({ status: 'closed', updated: true, updatedWhy: 'Amendment.pdf arrived' });
   });
 });

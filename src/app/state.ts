@@ -445,16 +445,11 @@ export function settledQuestions(s: Pick<State, 'questions' | 'findings' | 'tomb
   return out;
 }
 
-/** An open finding or checklist gap for which no question has been asked. */
-export interface Unresolved {
-  key: string;
-  kind: 'gap' | 'finding';
-  what: string;
-  need: string;
-  itemId?: string;
-  findingId?: string;
-  workstream: string;
-}
+/** An open finding or checklist gap for which no question has been asked: a gap has its item, a finding its id. */
+export type Unresolved = { key: string; what: string; need: string; workstream: string } & (
+  | { kind: 'gap'; itemId: string; findingId?: undefined }
+  | { kind: 'finding'; findingId: string; itemId?: undefined }
+);
 
 type UnresolvedState = Pick<
   State, 'questions' | 'findings' | 'tombstones' | 'conflicts' | 'dealLoad' | 'checklists' | 'items'

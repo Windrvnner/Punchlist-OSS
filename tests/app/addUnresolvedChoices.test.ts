@@ -118,3 +118,19 @@ it('refuses the approved link when another PC rewrites the finding between plan 
   expect(result.ok).toBe(false);
   expect(store.get().questions[link.q.id].linkedFinding).toBeUndefined();
 });
+
+it('asks for each point by the id of its record: a gap by its item, a finding by the finding (#1162)', async () => {
+  const { store } = make();
+  const dealId = await deal(store);
+  const text = ITEMS[0].t;
+  store.services.ai.checklist = async () => ok([{ id: itemId(dealId, text), text, result: 'gap', docs: [] }]);
+  const asked: unknown[] = [];
+  store.services.ai.phrase = async ({ items }) => (asked.push(...items), ok(items.map(() => 'Please send it.')));
+  val(await store.dispatch(CreateFinding, { dealId, title: alphaTitle, workstream: 'Legal' }));
+  const finding = Object.values(store.get().findings).find((f) => f.title === alphaTitle)!;
+  await previewOf(store, dealId);
+  expect(asked).toEqual([
+    { kind: 'finding', id: finding.id, what: alphaTitle, need: '' },
+    { kind: 'gap', id: itemId(dealId, text), what: text, need: '' },
+  ]);
+});

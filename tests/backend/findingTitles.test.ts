@@ -4,11 +4,24 @@
 // naming the earlier one); one a person deleted is not raised again by that item. Another item's problem is its own
 // finding, however alike the two are worded.
 import { describe, it, expect } from 'vitest';
-import { setup, val, deal, finding, doc, itemsIn, Mem, checkLines } from './reviewKit';
+import { setup, val, deal, finding, doc, itemsIn, Mem, checkLines, nth } from './reviewKit';
 
 const DOCS = { d1: [doc(1, 'Credit Agreement.pdf'), doc(2, 'Term sheet.pdf')] };
 const SAME = 'Lock-up ratio differs between the credit agreement and the term sheet';
-const reply = (c: any) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, result: 'finding', title: SAME, workstream: 'Legal', body: ['They differ. [1]'], next: 'Ask.', sources: [{ doc: 'D1', page: 1 }, { doc: 'D2', page: 1 }] })) });
+const reply = (c: any) => ({
+  items: itemsIn(c).map((it) => ({
+    id: it.tag,
+    result: 'finding',
+    title: SAME,
+    workstream: 'Legal',
+    body: ['They differ. [1]'],
+    next: 'Ask.',
+    sources: [
+      { doc: nth(c, 1), page: 1 },
+      { doc: nth(c, 2), page: 1 },
+    ],
+  })),
+});
 const LIST = () => ({ broad: [{ id: 'b1', text: 'The lock-up ratio is the same in both documents' }, { id: 'b2', text: 'Distribution conditions are consistent' }], product: [], sector: [] });
 
 describe('a check problem and the findings already there', () => {

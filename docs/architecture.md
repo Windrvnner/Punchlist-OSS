@@ -239,9 +239,9 @@ A deal's checklist is made up of its own item records, linked to the findings an
   through `parts.ts`, when the service refuses it as too long or cuts the reply off), and tied out so that every line
   is accounted for (`src/app/listRead.ts`, `src/domain/listRead.ts`). Its items go to every deal that uses the list
   and is not marked Closed, with one **Undo** for all of them.
-- **An issues list** is attached and read through `src/app/issuesList.ts`. The model reads the file once, then proposes
-  titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command resolve the same matches
-  through `src/app/issuesListJoins.ts`.
+- **An issues list** is attached or pasted as text, and read through `src/app/issuesList.ts`. The model reads the
+  file once, then proposes titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command
+  resolve the same matches through `src/app/issuesListJoins.ts`.
 - **An import in progress** (the file, the model's reading, the choices, and the check marks) is kept on each PC,
   part by part, through the `KeptImports` port. Both shells use the IndexedDB adapter. `src/app/keptImports.ts` keeps
   the parts and coordinates Q&A submission checkpoints. A submission reaches the store before its operation starts

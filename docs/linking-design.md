@@ -226,7 +226,7 @@ A resolved decision holds when all of these are true:
 - **Reviews are grouped by document, across items:**
   - **The pairs:** a review covers only (item, document) pairs where the document is new for that item.
   - **One call:** each call to the standard model holds up to 8 of those documents and at most 120 pairs. The items in the call come with their basis **as text**: the response, the note, and the quote of each cited place, capped at about 2,000 characters per item. A cited page's text is never extracted ([decisions.md](decisions.md), "AI and models"), and a cited document is never sent as a file here.
-  - **The reply is compact:** for each item (by a label local to the call), one verdict per document in the order listed, for example `"I12": "N N M N"`. A `why` is given only for M (may change) and U (unsure). U counts as M.
+  - **The reply is compact:** for each item (by its id), one verdict per document in the order listed, for example `"i_3f9c…": "N N M N"`. A `why` is given only for M (may change) and U (unsure). U counts as M.
   - **Reading the reply:** each complete item is written as it arrives. A pair left out, or a reply that cannot be read, writes nothing for that pair.
   - There is no fast pass.
 - **Estimate,** shown before **Review all** runs: "about N calls", worked out from the pairs. For 40 new documents and 150 decided items, that is 6,000 pairs: 5 document groups × 10 calls of 120 pairs = **about 50 calls**.

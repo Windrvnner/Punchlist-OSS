@@ -5,7 +5,9 @@ import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmp, put, pdf, pcApp, newDeal, until, StandInService } from './kit';
-import { isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, itemsIn } from '../backend/reviewKit';
+import {
+  isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, itemsIn, listed, escapeRegExp,
+} from '../backend/reviewKit';
 import { watchFolders, freshen, FOLDER_CHECK } from '../../src/app/folderWatch';
 import { AddFolders } from '../../src/app/commands/deals';
 import type { nodeAi } from '../../src/backend/ai';
@@ -17,9 +19,15 @@ const seen = { calls: 0, down: false };
 function model() {
   return new StandInService((c) => {
     seen.calls++;
-    const ref = (name: string) => new RegExp(`^(D\\d+): (?:.*/)?${name.replace(/[()]/g, '\\$&')}`, 'm').exec(c.prompt)?.[1];
+    const ref = (name: string) =>
+      new RegExp(`^(doc_[0-9a-f]{24}): (?:.*/)?${escapeRegExp(name)}`, 'm').exec(c.prompt)?.[1];
     if (isDescribeAsk(c as any)) return JSON.stringify({ summary: 'A document.', keywords: [] });
-    if (isPickAsk(c as any) || isPickForAsk(c as any)) return JSON.stringify({ read: [1, 2, 3, 4] });
+    if (isPickAsk(c as any) || isPickForAsk(c as any))
+      return JSON.stringify({
+        read: listed(c as any)
+          .slice(0, 4)
+          .map((r) => r.id),
+      });
     if (isAffectsAsk(c as any)) return JSON.stringify({ items: [...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => m[1]), findings: [] });
     const items = itemsIn(c as any);
     if (items.length && seen.down) {

@@ -132,6 +132,9 @@ export function checklistPaste(paste: string): ChecklistText | null {
   return { name: '', lines: pastedLines(paste), written: textLines(paste), cellRows: pastedCellRows(paste) };
 }
 
+/** The lines in a paste box, as the paste step counts them: none while it holds only spaces */
+export const pastedLineCount = (paste: string) => checklistPaste(paste)?.lines.length ?? 0;
+
 export function checklistSourceLines(text: ChecklistText | null, table: ImportTable | null) {
   return text?.lines ?? (table ? tableLines(table.columns, table.rows) : null);
 }

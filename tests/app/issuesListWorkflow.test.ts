@@ -3,10 +3,11 @@ import { expect, it, vi } from 'vitest';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { DeleteFinding, SetFindingStatus } from '../../src/app/commands/findings';
 import { ImportIssuesList } from '../../src/app/commands/issuesList';
-import { readIssuesList, reviewIssuesList } from '../../src/app/issuesList';
+import { readIssuesList, readPastedIssuesList, reviewIssuesList } from '../../src/app/issuesList';
+import { pastedLineCount } from '../../src/app/listRead';
 import { dealFindings } from '../../src/app/state';
 import { WORKSTREAMS } from '../../src/domain/model';
-import { ok } from '../../src/domain/result';
+import { fail, ok, rejected } from '../../src/domain/result';
 import type { AiService, DocumentService, IssuePoint } from '../../src/ports';
 import { val } from '../backend/reviewKit';
 import { ITEMS } from '../fixtures/pastedList';
@@ -154,4 +155,42 @@ it('keeps an attached name with surrounding spaces as given, and the import agre
   expect(on(POINTS[0].n)).toBe(proposed);
   expect(on(POINTS[1].n)).toBe(on(POINTS[2].n));
   expect([prior, proposed]).not.toContain(on(POINTS[1].n));
+});
+
+it('reads a pasted list as a text file holding exactly the pasted words', async () => {
+  const { store, dealId } = await seedDeal();
+  const attach = vi.fn<DocumentService['attach']>(async () => ok(DOC));
+  store.services.docs.attach = attach;
+  store.services.ai.issuesList = vi.fn(proposedIssues);
+  const text = '1. Change of control\n2. Fees letter';
+  val((await readPastedIssuesList(store, dealId, text))!);
+  expect(attach).toHaveBeenCalledExactlyOnceWith(dealId, {
+    name: 'Pasted issues list.txt', bytes: new TextEncoder().encode(text),
+  });
+});
+
+it('attaches a pasted list byte for byte: tabs, CRLF and edge spaces stay as typed', async () => {
+  const { store, dealId } = await seedDeal();
+  const attach = vi.fn<DocumentService['attach']>(async () => ok(DOC));
+  store.services.docs.attach = attach;
+  store.services.ai.issuesList = vi.fn(proposedIssues);
+  const text = '  1.\tChange of control\r\n2. Fees letter  \r\n\r\n';
+  val((await readPastedIssuesList(store, dealId, text))!);
+  expect(attach.mock.calls[0][1].bytes).toEqual(new TextEncoder().encode(text));
+});
+
+it('fails a pasted list read before the model call when the attach is refused', async () => {
+  const { store, dealId } = await seedDeal();
+  store.services.docs.attach = async () => fail(rejected('Disk full'));
+  const issuesList = vi.fn(proposedIssues);
+  store.services.ai.issuesList = issuesList;
+  const read = await readPastedIssuesList(store, dealId, '1. Fees letter');
+  expect(read?.ok).toBe(false);
+  expect(issuesList).not.toHaveBeenCalled();
+});
+
+it('counts no lines in a paste that is empty or only spaces, so Next stays off', () => {
+  expect(pastedLineCount('')).toBe(0);
+  expect(pastedLineCount(' \n\t \n ')).toBe(0);
+  expect(pastedLineCount('1. Change of control\n2. Fees letter')).toBe(2);
 });

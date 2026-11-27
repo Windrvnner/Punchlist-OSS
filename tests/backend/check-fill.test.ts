@@ -2,12 +2,15 @@
 // Filling gaps through the chat agent (docs/core-documents-design.md, part 4): the agent only ever adds to what a check
 // found, and a run of it stops at the agent's own turn limit.
 import { it, expect } from 'vitest';
-import { setup, doc, val, deal, itemsIn, OK, isPickAsk, type Call } from './reviewKit';
+import { setup, doc, val, deal, itemsIn, OK, isPickAsk, LISTED_ID, queriedIn, type Call } from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
 
-const tag = (c: Call, d: DocRecord) => new RegExp(`^(D\\d+): (?:.*/)?${d.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm').exec(c.prompt)?.[1] ?? 'D?';
-const numbersOf = (c: Call, ...docs: DocRecord[]) => docs.map((d) => +(new RegExp(`^(\\d+)\\*?: (?:.*/)?${d.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?: — .*)?$`, 'm').exec(c.prompt)?.[1] ?? 0));
-const has = (c: Call, d: DocRecord) => tag(c, d) !== 'D?';
+const esc = (d: DocRecord) => d.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// a document's id as the call listed it (#1162)
+const tag = (c: Call, d: DocRecord) =>
+  new RegExp(`^(${LISTED_ID})(?: \\*)?: (?:.*/)?${esc(d)}`, 'm').exec(c.prompt)?.[1] ?? 'doc_?';
+const idsOf = (c: Call, ...docs: DocRecord[]) => docs.map((d) => tag(c, d));
+const has = (c: Call, d: DocRecord) => tag(c, d) !== 'doc_?';
 const isTurn = (c: Call) => !!c.system?.includes('You work in turns');
 const FA = doc(1, 'Credit Agreement.pdf'); const TS = doc(2, 'Term sheet.pdf');
 const PLAN = doc(16, 'DEC-77.pdf',
@@ -17,7 +20,8 @@ it('an item the documents the agent cites leave open, cited for another item of 
   const X1 = { id: 'x1', text: 'Decommissioning is provided for' }; const X2 = { id: 'x2', text: 'Insurance is in place' }; const X3 = { id: 'x3', text: 'Water rights are secured' };
   // x1 needs the plan; x2's reply could never be used, so it is not settled; x3 is a gap; against the plan, x2 and x3 would say they need something else
   const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...(it.text.startsWith('Decom') ? (has(c, PLAN) ? OK(c) : { result: 'more', need: 'a decommissioning plan' }) : has(c, PLAN) ? { result: 'more', need: 'something else' } : it.text.startsWith('Insurance') ? { result: 'banana' } : { result: 'more', need: 'the water rights' }) })) }), { d1: [FA, TS, PLAN] }, {
-    checklist: () => ({ broad: [X1, X2, X3], product: [], sector: [] }), pick: (c) => ({ read: numbersOf(c, FA) }), pickFor: () => ({ read: {} }),
+    checklist: () => ({ broad: [X1, X2, X3], product: [], sector: [] }),
+    pick: (c) => ({ read: idsOf(c, FA) }), pickFor: () => ({ read: {} }),
     fill: (c) => (isTurn(c)
       ? { text: 'DEC-77 is the plan. [1] Nothing on the others.', sources: [{ doc: tag(c, PLAN), page: 1 }] }
       : { text: 'It is the plan. [1]', sources: [{ doc: tag(c, PLAN), page: 1, quote: 'The plan' }] }) });
@@ -39,7 +43,7 @@ it('a busy agent stops at its turns per run, and the check\'s own searches are u
     checklist: () => ({ broad: items, product: [], sector: [] }),
     pick: () => ({ read: [] }), pickFor: () => ({ read: {} }),
     query: (c: Call) => ({
-      queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['decommissioning plan']])),
+      queries: Object.fromEntries(queriedIn(c).map((x) => [x.tag, ['decommissioning plan']])),
     }),
   };
   const quiet = setup(gapAll, { d1: [FA, TS] }, opts); await deal(quiet.repo); val(await quiet.ai.firstPass('d1'));
@@ -66,7 +70,7 @@ it('the gap filler\'s own search stops at limits.searchCalls', async () => {
   const reply = (c: Call) => (isTurn(c) ? turn() : isSearchRead(c) ? 'not a reading'
     : { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'the water rights' })) });
   const queries = (c: Call) => ({
-    queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['water rights']])),
+    queries: Object.fromEntries(queriedIn(c).map((x) => [x.tag, ['water rights']])),
   });
   const s = setup(reply, { d1: [FA, TS, WATER] }, {
     checklist: () => ({ broad: [X1], product: [], sector: [] }),
@@ -89,7 +93,7 @@ it('each search the gap filler makes has its own limits.searchCalls, so more cal
   const reply = (c: Call) => (isTurn(c) ? turn() : isSearchRead(c) ? { text: 'Nothing here.', sources: [] }
     : { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'the water rights' })) });
   const queries = (c: Call) => ({
-    queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['water rights']])),
+    queries: Object.fromEntries(queriedIn(c).map((x) => [x.tag, ['water rights']])),
   });
   const s = setup(reply, { d1: [FA, TS, WATER] }, {
     checklist: () => ({ broad: [X1], product: [], sector: [] }),
@@ -104,7 +108,7 @@ it('each search the gap filler makes has its own limits.searchCalls, so more cal
 it('a problem whose finding could not be saved is never handed to the agent, so it is never written over as satisfied', async () => {
   const X1 = { id: 'x1', text: 'Decommissioning is provided for' };
   const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...(has(c, PLAN) ? OK(c) : { result: 'finding', title: 'No decommissioning plan', workstream: 'Technical', body: ['None is provided. [1]'], next: '', sources: [{ doc: tag(c, FA), page: 2 }] }) })) }), { d1: [FA, TS, PLAN] }, {
-    checklist: () => ({ broad: [X1], product: [], sector: [] }), pick: (c) => ({ read: numbersOf(c, FA) }),
+    checklist: () => ({ broad: [X1], product: [], sector: [] }), pick: (c) => ({ read: idsOf(c, FA) }),
     fill: (c) => (isTurn(c)
       ? { text: 'DEC-77. [1]', sources: [{ doc: tag(c, PLAN), page: 1 }] }
       : { text: 'Plan. [1]', sources: [{ doc: tag(c, PLAN), page: 1, quote: 'Plan' }] }) });
@@ -135,3 +139,23 @@ it('each document search the gap filler makes has a search\'s own calls, as a ch
   expect(turns.filter((c) => c.prompt.includes('as many calls as one search may'))).toEqual([]);
   expect(s.all.filter(isSearchRead).length).toBeGreaterThan(15);
 }, 120_000);
+
+it('the items handed to the chat agent are listed as plain lines, never as numbers (#1162)', async () => {
+  const items = [{ id: 'x1', text: 'Decommissioning is provided for' }, { id: 'x2', text: 'Water rights are secured' }];
+  const s = setup(
+    (c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'a plan' })) }),
+    { d1: [FA, TS] },
+    {
+      checklist: () => ({ broad: items, product: [], sector: [] }),
+      pick: () => ({ read: [] }),
+      pickFor: () => ({ read: {} }),
+      fill: () => ({ text: 'Nothing settles them.', sources: [] }),
+    },
+  );
+  await deal(s.repo);
+  val(await s.ai.firstPass('d1'));
+  const listing = s.fillCalls[0].prompt.split('\n\n')[0];
+  expect(listing).toContain('Decommissioning is provided for');
+  expect(listing).toContain('Water rights are secured');
+  expect(listing).not.toMatch(/^\d+\. /m);
+});

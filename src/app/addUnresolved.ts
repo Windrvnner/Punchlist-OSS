@@ -33,7 +33,10 @@ function phrasingFor(store: Store, dealId: string): Phrasing {
   return phrasing;
 }
 
-const phraseKey = ({ kind, what, need }: PointInput) => JSON.stringify([kind, what, need]);
+const phraseKey = ({ kind, what, need }: Omit<PointInput, 'id'>) => JSON.stringify([kind, what, need]);
+
+/** The record a point is about, which the model is shown it by: a gap's item, or the finding (#1162). */
+const recordOf = (p: Unresolved) => (p.kind === 'gap' ? p.itemId : p.findingId);
 
 /** A reopened preview waits for the current run and only asks for points without a kept question. */
 async function phrasePoints(store: Store, dealId: string, points: Unresolved[]): Promise<Result<(string | null)[]>> {
@@ -43,7 +46,7 @@ async function phrasePoints(store: Store, dealId: string, points: Unresolved[]):
   while (phrasing.run) await phrasing.run.catch(() => {});
   const missing = points.filter((p) => !phrasing.text.has(phraseKey(p)));
   if (missing.length) {
-    const items = missing.map(({ kind, what, need }) => ({ kind, what, need }));
+    const items = missing.map((p) => ({ kind: p.kind, id: recordOf(p), what: p.what, need: p.need }));
     // The port retries model calls quietly and reports exhausted points as null.
     const run = ai.phrase({ dealId, items });
     phrasing.run = run;

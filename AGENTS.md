@@ -71,7 +71,7 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   meaning, drafting. Parsing, matching, numbering, dates and periods (a question number "Q1" versus a quarter "Q1
   2026"), sorting, counting, and formatting are done in code, with tests at deal scale. Never ask a model to decide
   something a rule can decide, and never show a model identifiers (such as question numbers) that its prose could
-  then be confused with; give it neutral handles (for a question, its permanent id) and map them back in code. A
+  then be confused with; give it neutral handles (a record's permanent id) and map them back in code. A
   model's answer is a proposal that code checks against the data. Even inside an AI feature, do everything around the
   model call in code (selecting, matching, formatting, validating), so the model service does as little as possible.
 - **Reuse before building.** Rework an existing screen, dialog, component, or piece of code rather than building something new, and name what you reused.

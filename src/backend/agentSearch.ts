@@ -86,12 +86,12 @@ async function searchDocuments(run: AgentRun, asked: Asked, query: string, repor
   const { reply, sent } = looked.value;
   const { text, sources } = kit.fit(prose(reply.text).join(' '), reply.sources as Cited[], sent, true);
   // what the helper opened was read by a model: it may be cited
-  for (const s of sent) run.tagOf(s.dealId, s.rec);
-  const tags = run.tagsOf(sources);
-  const lines = sources.map((s, i) => `${tags[i]} ${s.loc}${s.quote ? `: “${oneLine(s.quote)}”` : ''}`);
+  for (const s of sent) run.open(s.dealId, s.rec);
+  const ids = run.idsOf(sources);
+  const lines = sources.map((s, i) => `${ids[i]} ${s.loc}${s.quote ? `: “${oneLine(s.quote)}”` : ''}`);
   for (const s of sources) report.found.push(foundAt(s));
-  const opens = sent.map((s) => run.tagOf(s.dealId, s.rec).tag);
-  const says = text ? ` It says: ${withPlaces(text, tags, sources)}` : ' They say nothing about it.';
+  const opens = sent.map((s) => run.idOf(run.open(s.dealId, s.rec)));
+  const says = text ? ` It says: ${withPlaces(text, ids, sources)}` : ' They say nothing about it.';
   const passages = lines.length ? `\nPassages:\n${lines.join('\n')}` : '';
   const page = pageLine('documents', asked, shown);
   const unread = notOpened(run, shown.items, sent);

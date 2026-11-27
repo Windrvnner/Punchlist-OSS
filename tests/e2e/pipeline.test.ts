@@ -5,7 +5,18 @@ import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmp, put, pdf, carry, pcApp, newDeal, until, StandInService } from './kit';
-import { isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, isVerifyAsk, isHearAsk, itemsIn } from '../backend/reviewKit';
+import {
+  isPickAsk,
+  isPickForAsk,
+  isDescribeAsk,
+  isAffectsAsk,
+  isVerifyAsk,
+  isHearAsk,
+  itemsIn,
+  listed,
+  nth,
+  escapeRegExp,
+} from '../backend/reviewKit';
 import { CreateQuestion, SetResponse, EditQuestionField } from '../../src/app/commands/questions';
 import { ResolveConflict } from '../../src/app/commands/conflicts';
 import { Undo } from '../../src/app/commands/undo';
@@ -22,18 +33,30 @@ const LIST = () => ({
 /** the stand-in model: answers each kind of question the backend asks, the way a real model is told to */
 function model() {
   return new StandInService((c) => {
-    const ref = (name: string) => new RegExp(`^(D\\d+): (?:.*/)?${name.replace(/[()]/g, '\\$&')}`, 'm').exec(c.prompt)?.[1];
+    const ref = (name: string) =>
+      new RegExp(`^(doc_[0-9a-f]{24}): (?:.*/)?${escapeRegExp(name)}`, 'm').exec(c.prompt)?.[1];
     if (isDescribeAsk(c as any)) { const name = /Describe the document (.*)\.\n/.exec(c.prompt)?.[1] ?? 'it'; return JSON.stringify({ summary: `This is ${name}.`, keywords: ['lock-up'] }); }
-    if (isPickAsk(c as any) || isPickForAsk(c as any)) return JSON.stringify({ read: [1, 2, 3] });
+    if (isPickAsk(c as any) || isPickForAsk(c as any))
+      return JSON.stringify({
+        read: listed(c as any)
+          .slice(0, 3)
+          .map((r) => r.id),
+      });
     const items = itemsIn(c as any);
     if (items.length) return JSON.stringify({ items: items.map((it) =>
       /lock-up/.test(it.text) ? { id: it.tag, result: 'finding', title: 'Lock-up differs between the credit agreement and the term sheet', workstream: 'Legal', body: ['The agreement says 1.25x. [1] The term sheet says 1.30x. [2]'], next: 'Ask counsel which is right.', sources: [{ doc: ref('Credit Agreement.pdf'), page: 1 }, { doc: ref('Term sheet (signed).pdf'), page: 1 }] }
       : /signed/.test(it.text) ? (c.prompt.includes('Add "where"') ? { id: it.tag, result: 'ok', where: [{ doc: ref('Term sheet (signed).pdf'), page: 1, quote: 'term sheet' }] } : { id: it.tag, result: 'ok' })
       : { id: it.tag, result: 'more', need: 'The model audit report' }) });
     if (isAffectsAsk(c as any)) return JSON.stringify({ items: [], findings: [] });
-    if (isHearAsk(c as any)) return JSON.stringify({ affected: [...c.prompt.matchAll(/^(F\d+):/gm)].map((m) => `${m[1]} Q1`) });
+    // every finding, each by its id alone: the response in the call goes beside it (#1162)
+    if (isHearAsk(c as any)) {
+      return JSON.stringify({ affected: [...c.prompt.matchAll(/^(f_\w+):/gm)].map((m) => m[1]) });
+    }
     if (isVerifyAsk(c as any)) return JSON.stringify({ stands: false, why: 'The sponsor confirmed 1.30x, so the agreement draft will change.' });
-    return JSON.stringify({ text: 'The lock-up is 1.25x in the agreement. [1]', sources: [{ doc: ref('Credit Agreement.pdf') ?? 'D1', page: 1 }] });
+    return JSON.stringify({
+      text: 'The lock-up is 1.25x in the agreement. [1]',
+      sources: [{ doc: ref('Credit Agreement.pdf') ?? nth(c, 1), page: 1 }],
+    });
   });
 }
 
