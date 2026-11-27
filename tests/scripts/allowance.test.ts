@@ -1,8 +1,9 @@
 // @vitest-environment node
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   allowanceProblems, committedJson, decisionEntries, groupMatches, lowerAllowance, unlistedMatches,
@@ -210,5 +211,16 @@ describe('unlistedMatches and lowerAllowance', () => {
   it('lowers counts to the matches and drops entries without one', () => {
     const other = entry({ line: 'gone()' });
     expect(lowerAllowance(found(1), [entry({ count: 4 }), other])).toEqual([entry({ count: 1 })]);
+  });
+});
+
+describe('git failures', () => {
+  it('keep git stderr out of the process stderr and on the error', () => {
+    const module = pathToFileURL(path.resolve('scripts/allowance.mjs')).href;
+    const code = `import { git } from ${JSON.stringify(module)};
+      try { git('.', 'rev-parse', '--verify', 'no-such-revision'); } catch (e) { console.log(String(e.stderr)); }`;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8' });
+    expect(child.stderr).toBe('');
+    expect(child.stdout).toContain('fatal');
   });
 });
