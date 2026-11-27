@@ -352,10 +352,10 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     const mayBe = savedAgain.unclear.get(j);
     if (mayBe) { used[j] = 1; ask({ j }, mayBe, true); return; }
     // Added while a row of the version they edited is not lined up in theirs (one they reworded, say): it may be that row,
-    // so the person says, among the log's rows for those (a few at most), or it is added and counted
+    // so the person says, among the log's rows for those, however many; with none, it is added and counted (#1111)
     if (same === undefined && (unlined.has(r[kt] ?? '') || reworded)) {
       const maybe = base.rows.map((_, i) => (ks[i] < 0 && !told.has(i) ? ls[i] : -1)).filter((l) => l >= 0 && (bkk < 0 || bll < 0 || mine === theirsBy(l)));
-      if (maybe.length && maybe.length <= 5) { used[j] = 1; ask({ j }, maybe, true); return; }
+      if (maybe.length) { used[j] = 1; ask({ j }, maybe, true); return; }
     }
     if (same === undefined) { fresh.push(j); if (unlined.has(r[kt] ?? '') || reworded) out.left++; return; }
     for (const p of lp) {

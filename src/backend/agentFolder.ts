@@ -10,17 +10,12 @@ import { cites, dealDocKey, foundAt, sameDoc, withPlaces } from './agentRun';
 import { codeOf, type AgentKit, type Cited, type DealDoc, type Run, type Sent } from './agentKit';
 import type { ResearchStep } from '../ports';
 import type { DocRecord } from './documents';
-import { batchAsk, noun, oneLine, quoted, shorten } from './agentPrompts';
+import { batchAsk, noun, oneLine, quoted } from './agentPrompts';
 import { docsUnusable } from './recordIds';
 import { withFewerChanges, type ChangeShare } from './limits';
 
 /** batches of a folder review read at the same time */
 const AT_ONCE = 3;
-/**
- * the most characters one folder read tells the main session of what it found: well inside a model's context however
- * large the folder
- */
-const FOLDER_TEXT = 24_000;
 /** the fields a batch's reply is read for */
 const BATCH_KEYS = ['text', 'sources'];
 /** about how many characters listing one document to cite adds to the main session's prompt, apart from its handle */
@@ -85,8 +80,8 @@ export class FolderReader {
    * found, for the prompt. A folder read for the same thing before in this conversation reads only what was not read
    * then (documents added since included); for something else, or in another conversation, it is read again. More
    * than `folderDocs` documents still to read are read only when the person has `agreed`. What goes back is bounded
-   * (`FOLDER_TEXT`): batches that found nothing are counted, not listed, and past the bound a batch that found
-   * something gives its places only. Throws only when the service cannot be reached.
+   * (the run's `room`, #480): batches that found nothing are counted, not listed, and past the bound a batch
+   * that found something gives its places only. Throws only when the service cannot be reached.
    */
   async read(said: string, lookFor: string, agreed: boolean): Promise<string> {
     const look = oneLine(lookFor).toLowerCase();
@@ -134,15 +129,15 @@ export class FolderReader {
     await pass.readAll();
     // a batch that failed is not kept as read, so reading on takes it again
     for (const id of pass.readNow) place.read.add(id);
-    const summary = pass.summary();
     if (pass.stoppedEarly()) {
-      return `The person stopped the reading of ${folder.label} for ${quoted(lookFor)} after ${pass.readCount} of `
-        + `${toRead} documents, the most important first.${earlier} The rest were not read: if asked to read on, `
-        + `use the folder tool with the same folder and lookFor, and it reads the ones not read yet.\n${summary}`;
+      return pass.result(`The person stopped the reading of ${folder.label} for ${quoted(lookFor)} after `
+        + `${pass.readCount} of ${toRead} documents, the most important first.${earlier} The rest were not read: if `
+        + 'asked to read on, use the folder tool with the same folder and lookFor, and it reads the ones not read '
+        + 'yet.');
     }
     const which = readBefore ? `the other ${toRead}` : `all ${toRead}`;
-    return `You had ${which} documents in ${folder.label} read for ${quoted(lookFor)}, the most important first; `
-      + `${pass.readCount} were read.${earlier}\n${summary}`;
+    return pass.result(`You had ${which} documents in ${folder.label} read for ${quoted(lookFor)}, the most `
+      + `important first; ${pass.readCount} were read.${earlier}`);
   }
 
   /**
@@ -198,6 +193,8 @@ export class FolderReader {
 class FolderPass {
   /** what was opened before this read: still listed, whatever it finds */
   private readonly before: Set<Sent>;
+  /** what this read may hand the main session: the room the prompt had left before this read opened anything */
+  private readonly room: number;
   /** what this read was given and could read: kept for the conversation only if the read ends without failing */
   readonly readNow = new Set<string>();
   /** how many documents the batches read */
@@ -219,6 +216,7 @@ class FolderPass {
     private readonly batches: Batch[],
   ) {
     this.before = new Set(run.opened);
+    this.room = run.room();
   }
 
   /** whether the person stopped the read before every batch was started */
@@ -252,7 +250,6 @@ class FolderPass {
    * awaited here and nowhere deeper, so that batches read side by side interleave as they always have.
    */
   private async readBatch(index: number): Promise<void> {
-    const { kit } = this.run;
     const reading = this.startBatch(index);
     try {
       // a batch refused as too long lists fewer tracked changes, while it lists any, before it is not read (#1381)
@@ -324,7 +321,7 @@ class FolderPass {
     this.findings[reading.index] = {
       at: reading.at,
       ids: got.map((x) => this.run.idOf(x)).join(', '),
-      text: shorten(withPlaces(text, ids, sources), 1200),
+      text: withPlaces(text, ids, sources),
       places: [...new Set(sources.map((x, i) => `${ids[i]} ${x.loc}`))].join(', '),
       got,
     };
@@ -343,49 +340,84 @@ class FolderPass {
     for (const s of reading.sent) if (!keep.includes(s) && !reading.had.has(s)) this.run.unopen(s);
   }
 
-  /** what the batches found, bounded, with what found nothing and what could not be read */
-  summary(): string {
-    const found = this.boundedFindings();
-    const said = found.length ? `What they say:\n${found.join('\n')}` : 'None of them says anything about it.';
-    const quiet = this.quietBatches && found.length
+  /**
+   * The read's result: its heading, what the batches found, what found nothing and what could not be read. The whole
+   * of it, with the documents it lists, is within the room this read began with (#480), unless the heading and the
+   * counts alone are past it: then every batch that found something is counted, and nothing more is given.
+   */
+  result(heading: string): string {
+    const failed = this.failed.some(Boolean) ? `\nNot read: ${this.failed.filter(Boolean).join('; ')}.` : '';
+    if (!this.findings.some(Boolean)) return `${heading}\nNone of them says anything about it.${failed}`;
+    const quiet = this.quietBatches
       ? `\n${this.quietBatches} ${noun(this.quietBatches, 'batch', 'batches')} said nothing about it; their documents `
         + 'are not listed, but can be read by path.'
       : '';
-    const failed = this.failed.some(Boolean) ? `\nNot read: ${this.failed.filter(Boolean).join('; ')}.` : '';
-    return `${said}${quiet}${failed}`;
+    const said = `${heading}\nWhat they say:`;
+    const found = this.boundedFindings(this.room - `${said}${quiet}${failed}`.length);
+    return `${said}${found.map((x) => `\n${x}`).join('')}${quiet}${failed}`;
   }
 
   /**
-   * What was found, bounded: in full for the first half of the room, then by its places alone; a batch past the room
-   * is counted, and its documents are not listed to the model, so the prompt stays bounded however large the folder.
+   * What was found, within `room` characters: in full for the first half of it, then by its places alone; a batch
+   * past it is counted, and its documents are not listed to the model, so the prompt stays bounded however large the
+   * folder. The line counting them takes room too, so the findings are fitted again until it fits beside them.
    */
-  private boundedFindings(): string[] {
+  private boundedFindings(room: number): string[] {
+    let reserve = 0;
+    let fit = this.fitFindings(room);
+    // fewer findings fit beside a longer line, which counts more of them: the reserve only grows, up to the line that
+    // counts every batch, so this ends with the line within what it reserved
+    while (fit.over.length && reserve < moreCost(fit.over.length)) {
+      reserve = moreCost(fit.over.length);
+      fit = this.fitFindings(room - reserve);
+    }
+    for (const x of fit.over.flat()) this.run.quiet.add(x);
+    return fit.over.length ? [...fit.lines, moreLine(fit.over.length)] : fit.lines;
+  }
+
+  /**
+   * the batches' findings that fit `room`, each line with the line break before it and the documents it newly lists;
+   * past it, the new documents of each batch left over
+   */
+  private fitFindings(room: number): { lines: string[]; over: Sent[][] } {
     let used = 0;
-    let over = 0;
     const lines: string[] = [];
+    const over: Sent[][] = [];
     for (const finding of this.findings) {
       if (!finding) continue;
       const full = `${finding.at}: ${finding.ids}. ${finding.text}`;
       const short = `${finding.at}: passages at ${finding.places}.`;
       const newDocs = finding.got.filter((x) => !this.before.has(x));
       const listing = newDocs.reduce((sum, x) => sum + listingChars(this.run.idOf(x)), 0);
-      const line = used + full.length + listing <= FOLDER_TEXT / 2 ? full
-        : used + short.length + listing <= FOLDER_TEXT ? short
-        : '';
+      const line = fittingLine(full, short, used + 1 + listing, room);
       if (line) {
         lines.push(line);
-        used += line.length + listing;
+        used += 1 + line.length + listing;
       } else {
-        over++;
-        for (const x of newDocs) this.run.quiet.add(x);
+        over.push(newDocs);
       }
     }
-    if (over) {
-      const batches = `${over} more ${noun(over, 'batch', 'batches')}`;
-      lines.push(`${batches} found passages, past what fits here: search the folder for what they hold.`);
-    }
-    return lines;
+    return { lines, over };
   }
+}
+
+/** what the line counting the batches past the room adds to the result, with the line break before it */
+function moreCost(over: number): number {
+  return 1 + moreLine(over).length;
+}
+
+/** the line counting the batches that found something past the room */
+function moreLine(over: number): string {
+  return `${over} more ${noun(over, 'batch', 'batches')} found passages, past what fits here: search the folder for `
+    + 'what they hold.';
+}
+
+/**
+ * the line that fits the room after `used` characters: in full within half of it, else by its places within all of it
+ */
+function fittingLine(full: string, short: string, used: number, room: number): string {
+  if (used + full.length <= room / 2) return full;
+  return used + short.length <= room ? short : '';
 }
 
 /** a step done, with its result */

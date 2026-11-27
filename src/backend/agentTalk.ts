@@ -71,6 +71,17 @@ export class KeptConversation {
     this.calls = this.id && was?.call ? [was.call] : [];
   }
 
+  /**
+   * how many characters the model holds once `turn` is sent again: in a kept conversation, the tokens it holds
+   * (`charsPerToken` characters each) and what is new since; in a new one, the whole prompt (#480)
+   */
+  held(turn: Turn, charsPerToken: number): number {
+    const kept = this.id && this.tokens < this.compactAt(this.run.question.model);
+    if (!kept) return turn.full(true).length;
+    const now = this.run.whole.map(dealDocKey).join(',');
+    return this.tokens * charsPerToken + this.message(turn, false, now).prompt.length;
+  }
+
   /** one turn in the kept conversation: in full when it is new (or this question is), else only what is new since */
   async ask(turn: Turn, tried = 0): Promise<Record<string, unknown> | null> {
     const { kit, question } = this.run;

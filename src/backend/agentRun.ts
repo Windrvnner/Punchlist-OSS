@@ -46,15 +46,21 @@ export class AgentRun {
   /** what the main session has learned so far, as it last wrote it */
   notes = '';
   /**
+   * how many characters the model holds once the turn is sent again: the agent sets it, counting a kept conversation's
+   * tokens (#480)
+   */
+  held: () => number = () => 0;
+  /**
    * `pages`: how many a search gives at a time, documents (`width`) and findings or questions (`searchPage`), as the
-   * agent's limits set them; `chars`: the most characters a page of findings or questions may hold (agent.ts
-   * `pageChars`)
+   * agent's limits set them; `chars`: the most characters a page of findings or questions may hold (half of
+   * `limit`, so that a page asked for by number is cut the same each time); `limit`: the characters a turn's prompt
+   * may hold before the conversation is compacted
    */
   constructor(
     readonly kit: AgentKit,
     readonly question: AgentQuestion,
     readonly progress: Run,
-    readonly pages: { width: number; searchPage: number; chars: number },
+    readonly pages: { width: number; searchPage: number; chars: number; limit: number },
   ) {
     if (kit.talk) this.keepOpened(question.thread?.opened ?? []);
   }
@@ -137,6 +143,14 @@ export class AgentRun {
   /** the documents listed to the main session: those opened, less the quiet ones */
   shown(): Sent[] {
     return this.opened.filter((s) => !this.quiet.has(s));
+  }
+
+  /**
+   * the most characters one tool result may add to the turn's prompt: half of what is left of the room before the
+   * conversation is compacted, so earlier results and the next one together stay within it (#480)
+   */
+  room(): number {
+    return (this.pages.limit - this.held()) / 2;
   }
 
   /** a new step, shown as being worked on */
