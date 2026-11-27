@@ -43,6 +43,10 @@ export async function checkPastedList(page, say, w) {
   const box = await page.waitForSelector('#il-paste', { timeout: 5000 }).then(() => true, () => false);
   if (!box) return say(`the dialog has a paste box (${w})`, false);
   const offAtFirst = await page.isDisabled('#il-paste-next');
+  // spaces and line breaks alone are not a list: Next stays off
+  await page.fill('#il-paste', '  \n \n');
+  const offForSpaces = await page.isDisabled('#il-paste-next');
+  await page.fill('#il-paste', '');
   await page.focus('#il-paste');
   await pasteText(page, LIST_TEXT);
   const typed = {
@@ -51,8 +55,8 @@ export async function checkPastedList(page, say, w) {
     attaches: await page.evaluate(() => window.__attaches),
     onAfter: !(await page.isDisabled('#il-paste-next')),
   };
-  say(`a paste fills the box and reads nothing until Next (${w})`, typed.offAtFirst && typed.line === '3 lines'
-    && typed.attaches === 0 && typed.onAfter, JSON.stringify(typed));
+  say(`a paste fills the box and reads nothing until Next (${w})`, typed.offAtFirst && offForSpaces
+    && typed.line === '3 lines' && typed.attaches === 0 && typed.onAfter, JSON.stringify(typed));
   await reopen(page);
   const keptPaste = await page.inputValue('#il-paste');
   say(`closing keeps what was pasted in the box (${w})`, keptPaste === LIST_TEXT, JSON.stringify(keptPaste));
