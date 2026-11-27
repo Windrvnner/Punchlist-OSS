@@ -8,6 +8,7 @@ import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, type Layer } from '../domain/checklist';
 import { keptImport, keepImport } from './keptImports';
 import type { Asked, Review } from './checklistImport';
+import type { ChecklistText } from './listRead';
 
 /** Every choice and check mark, kept beside the list */
 export interface ChecklistChoices {
@@ -33,7 +34,7 @@ export interface ChecklistChoices {
 export interface ChecklistKept {
   paste?: string;
   table?: ImportTable | null;
-  text?: { name: string; lines: string[] } | null;
+  text?: ChecklistText | null;
   reads?: Map<number, LineRead> | null;
   review?: Review | null;
   choices?: ChecklistChoices;

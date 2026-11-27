@@ -7,6 +7,11 @@ import { memRepo, refuse, quota, type MemRepo } from '../adapters/memRepo';
 import type { Repository } from '../../src/ports';
 import { Finding, WORKSTREAMS } from '../../src/domain/model';
 import { memoContent } from '../../src/domain/memo';
+import { memoDocument } from '../../src/domain/memoDoc';
+import { libreOfficeConverter } from '../../src/backend/convert';
+import { libreOfficeSheets } from '../../src/backend/spreadsheets';
+import { hasOffice, soffice } from './officePrerequisites';
+import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { scaleMemoInput } from '../fixtures/memoScale';
 import type { DocRecord } from '../../src/backend/documents';
 import type { Folder } from '../../src/backend/logRepository';
@@ -1221,19 +1226,9 @@ describe('deal memo model replies', () => {
       name: '201 words in two paragraphs',
       paragraphs: [`${'covenant '.repeat(99)}threshold. [1]`, `${'distribution '.repeat(100)}test. [2]`],
     },
-    { name: 'one 100,000-character token', paragraphs: ['', '  ', `${'x'.repeat(100_000)} [1]`] },
-    { name: '202 words separated by citation markers', paragraphs: ['Ratio.[1]Term '.repeat(101)] },
-    {
-      name: 'oversized text joined when invalid citations are removed',
-      paragraphs: [`${Array(15).fill('x'.repeat(200)).join(' [999]')} The draft sets the ratio. [1]`],
-    },
     {
       name: 'oversized text joined when export drops control characters',
       paragraphs: [`${Array(15).fill('x'.repeat(199)).join('\u000b')} The draft sets the ratio. [1]`],
-    },
-    {
-      name: 'oversized text containing zero-width separators',
-      paragraphs: [`${Array(15).fill('x'.repeat(199)).join('\ufeff')} The draft sets the ratio. [1]`],
     },
     {
       name: '201 words after removing a finding ID',
@@ -1310,21 +1305,59 @@ describe('deal memo model replies', () => {
     });
   });
 
-  it('uses the findings’ own cited words after every key risk write-up exceeds the limits', async () => {
+  it('keeps the last deal memo key risk write-up as given when every reply is over the limit (#806)', async () => {
+    const longest = overlong[0].paragraphs;   // three paragraphs: none is cut when it is kept
     const standIn = await setupMemoReplies([distributionRisk], (call, attempt) =>
-      citedRiskReply(call, overlong[attempt - 1].paragraphs));
+      citedRiskReply(call, attempt < 3 ? overlong[1].paragraphs : longest));
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard', 'standard', 'thorough']);
+    expect(memo.risks![0].body).toEqual(longest);
+  });
+
+  it.skipIf(!hasOffice)('never keeps a write-up with characters the memo file cannot hold, so the export works (#806)',
+    async () => {
+      const unwritable = [`${creditWords} \uffff [1]`, `${termWords} \u0001 [2]`];
+      const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, unwritable));
+      const memo = val(await standIn.ai.memo!('d1'));
+      expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard', 'standard', 'thorough']);
+      expect(memo.risks![0]).toEqual(distributionRisk);
+      const content = memoContent({
+        ...scaleMemoInput, deal: memoDeal, findings: memoFindings,
+        groups: memo.risks, ratings: memo.ratings, summary: memo.summary,
+      });
+      const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-memo-ai-lo-'));
+      const exported = await libreOfficeSheets(libreOfficeConverter({ soffice, profile })).document!(
+        memoDocument(content, 'AI'));
+      expect(exported.ok).toBe(true);
+    }, 120_000);
+
+  it('sends a long deal memo key risk write-up back to shorten and uses the shorter reply (#806)', async () => {
+    const short = [`${creditWords} [1]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call, attempt) =>
+      citedRiskReply(call, attempt === 1 ? overlong[1].paragraphs : short));
+    const memo = val(await standIn.ai.memo!('d1'));
+    const writes = standIn.calls.filter(memoWrite);
+    expect(writes.map(({ model }) => model)).toEqual(['standard', 'standard']);
+    expect(writes[1].prompt).toContain('shorten it to fit');
+    expect(memo.risks![0].body).toEqual(short);
+  });
+
+  it('keeps a key risk write-up of one very long unbroken word without sending it back (#806)', async () => {
+    const token = [`${'x'.repeat(6_000)} [1]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, token));
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(standIn.calls.filter(memoWrite)).toHaveLength(1);
+    expect(memo.risks![0].body).toEqual(token);
+  });
+
+  it.each([
+    ['empty', []],
+    ['advising', [`${creditWords} The lenders should ask for a waiver. [1]`]],
+  ])('falls back to the findings\' own words when the write-up is %s (#806)', async (_name, paragraphs) => {
+    const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, paragraphs));
     const memo = val(await standIn.ai.memo!('d1'));
     expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard', 'standard', 'thorough']);
     expect(memo.risks![0]).toEqual(distributionRisk);
-    const content = memoContent({
-      ...scaleMemoInput, deal: memoDeal, findings: memoFindings,
-      groups: memo.risks, ratings: memo.ratings, summary: memo.summary,
-    });
-    expect(content.risks[0].paras).toEqual([
-      [{ text: 'The draft uses a 1.25x ratio.', refs: [1] }],
-      [{ text: 'The draft uses a six-month period.', refs: [2] }],
-    ]);
-    expect(content.refs.slice(0, 2)).toEqual(['Credit Agreement, p. 14', 'Term sheet (signed), p. 3']);
   });
 
   it('keeps the edge spaces and tabs of the paragraphs a key risk write-up comes back with', async () => {
@@ -1479,6 +1512,21 @@ describe('the first pass', () => {
     expect(s.calls.length).toBe(2); expect(sentNames(s.calls[0])).not.toContain('ENV-2024-0043.pdf'); expect(sentNames(s.calls[1])).toEqual(['ENV-2024-0043.pdf', 'Interconnection facilities study.pdf', 'Scan 7.pdf']); expect(s.calls[1].prompt).toContain('vdr/05 Permits/ENV-2024-0043.pdf (6 pages)');   // judged against what is relevant to it, not the whole room
     expect(s.trace).toEqual([{ dealId: 'd1', reason: 'Every consent is in place and unconditional: the permits themselves', docs: [P1.docId, P2.docId] }, { dealId: 'd1', reason: 'The link to the network is contracted: interconnection facilities study', docs: [OFFER.docId] }]);
     expect(r.written.length).toBe(1); expect((await storedFindings(s.repo))[0].sources.map((x) => [x.doc, x.loc])).toEqual([['ENV-2024-0043.pdf', 'p. 4'], ['Scan 7.pdf', 'p. 1']]); expect(r.gaps).toEqual([{ title: 'The link to the network is contracted' }]);                // the offer was read and does not settle it: there is no document behind the item
+  });
+
+  it('a quote the model gives for a place cited twice is stored exactly as given, edge spaces included', async () => {
+    const quote = '  Lock-up Ratio means 1.25:1\n';
+    const one = { broad: [{ id: 'x1', text: 'The lock-up ratio is agreed' }], product: [], sector: [] };
+    const sources = (c: Call) => [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, FA), page: 14, quote }];
+    const body = ['It is set at 1.25x. [1] And again. [2]'];
+    const finding = (c: Call) => ({
+      result: 'finding', title: 'The lock-up ratio is open', workstream: 'Legal', body, next: '', sources: sources(c),
+    });
+    const answer = (c: Call) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...finding(c) })) });
+    const s = setup(answer, undefined, { checklist: () => one });
+    await deal(s.repo);
+    val(await s.ai.firstPass('d1'));
+    expect((await storedFindings(s.repo))[0].sources.map((x) => x.quote)).toEqual([quote]);
   });
 
   it('an item a blackline alone supports is never settled; with its clean draft cited too, it is', async () => {

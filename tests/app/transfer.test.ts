@@ -125,7 +125,7 @@ describe('export and import through the ports', () => {
     await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: prepareImport(t.value.rows, suggestMapping(t.value.columns)).rows });
     const added = dealQuestions(store.get(), dealId).filter((q) => q.text !== 'One');
     expect(added.map((q) => q.askedBy)).toEqual(['Lender A ', 'Lender A']);
-    expect(new Set(added.map((q) => q.workstream))).toEqual(new Set(['Tax']));
+    expect(added.map((q) => q.workstream)).toEqual([' Tax', 'Tax']);   // kept as the file writes it
   });
 
   async function oneQuestion() {
