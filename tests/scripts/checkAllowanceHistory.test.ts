@@ -183,7 +183,8 @@ describe('allowance history', () => {
     expect(repo.run().status).toBe(0);
   });
 
-  it.each([['a list', []], ['no list', {}]])('rejects a new line listed under a decision (main has %s)', (_, onMain) => {
+  const mainBaselines: [string, unknown][] = [['a list', []], ['no list', {}]];
+  it.each(mainBaselines)('rejects a new line listed under a decision (main has %s)', (_, onMain) => {
     const repo = repository({ [baselineFile]: onMain, [verifiedFile]: ['A decision.'] });
     repo.write(screen, 'store.services.ai\nrows.filter(keep).slice(0, 3)');
     const decided = { kind: 'list', line: 'rows.filter(keep).slice(0, 3)', issue: undefined, decision: 'A decision.' };

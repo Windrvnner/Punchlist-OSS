@@ -101,7 +101,8 @@ function reportProblems(args) {
 function main() {
   const args = process.argv.slice(2);
   try {
-    const problems = args.includes('--files') ? unrunTestFiles(trackedTestFiles(), vitestRunFiles()) : reportProblems(args);
+    const unrun = () => unrunTestFiles(trackedTestFiles(), vitestRunFiles());
+    const problems = args.includes('--files') ? unrun() : reportProblems(args);
     for (const problem of problems) console.error(problem);
     if (problems.length) process.exitCode = 1;
   } catch (error) {
