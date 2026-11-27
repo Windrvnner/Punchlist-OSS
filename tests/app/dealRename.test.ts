@@ -289,3 +289,32 @@ it('restores the entry draft over the landed name after typing on a reopened pag
   await reopened.submit('blur');
   expect(deal().name).toBe('Project Southridge Reserve');
 });
+
+it('keeps a name typed while its save is in flight, in the same box and after the page reopens', async () => {
+  const { field, header, deal } = await fixture();
+  const gate = holdRecoveryWrite(app, writesDeal);
+  field.typed(raw);
+  const saving = field.submit('enter');
+  await gate.entered;
+  field.typed('North  Ridge');
+  gate.release();
+  await saving;
+  expect(deal().name).toBe(stored);
+  expect(field.editing).toBe(true);
+  expect(field.text).toBe('North  Ridge');
+  field.dispose();
+  const reopened = header();
+  expect(reopened.kept?.text).toBe('North  Ridge');
+  reopened.open();
+  expect(reopened.text).toBe('North  Ridge');
+});
+
+it('asks for a choice when a rename meets any conflict, not only a changed name', async () => {
+  const { field } = await fixture();
+  const conflict = { kind: 'conflict', message: 'This record has two versions. Choose one.' } as const;
+  vi.spyOn(app.store, 'dispatch').mockResolvedValue({ ok: false, error: conflict } as never);
+  field.typed(raw);
+  await field.submit('enter');
+  expect(field.changedElsewhere).toBe(true);
+  expect(field.kept?.text).toBe(raw);
+});
