@@ -1397,14 +1397,14 @@
     "kind": "list",
     "line": "const lastWhole = rows.filter(isWhole).pop();",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1400
   },
   {
     "file": "src/ui/pastList.tsx",
     "kind": "list",
     "line": "if (rows.every(isWhole)) return;",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1400
   },
   {
     "file": "src/ui/pastList.tsx",
@@ -1418,14 +1418,14 @@
     "kind": "timer",
     "line": "const timer = window.setTimeout(() => void draw(), drawn.current ? 120 : 0);",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1407
   },
   {
     "file": "src/ui/pickList.tsx",
     "kind": "limit",
     "line": "const searching = names.length >= SEARCH_FROM;",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1401
   },
   {
     "file": "src/ui/pickList.tsx",
@@ -1558,7 +1558,7 @@
     "kind": "limit",
     "line": "const before = (c: string) => changed.filter((k) => (COLUMN[k] && shown(COLUMN[k]) ? COLUMN[k] : 'q') === c && was[k] !== undefined).map((k) => { const v = was[k].replace(/\\s+/g, ' ').trim(); return v.length > 80 ? `${v.slice(0, 79)}…` : v || '(blank)'; });",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1396
   },
   {
     "file": "src/ui/qa.tsx",
@@ -1579,7 +1579,7 @@
     "kind": "limit",
     "line": "{named.length > 0 && <p class=\"ddtext\" id=\"ui-kept\">{count(named.length, 'question changed', 'questions changed')} since and {named.length === 1 ? 'stays as it is' : 'stay as they are'}: {named.slice(0, LISTED).map((n) => `Q${n}`).join(', ')}{named.length > LISTED ? ` and ${(named.length - LISTED).toLocaleString('en-US')} more` : ''}.</p>}",
     "count": 2,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1396
   },
   {
     "file": "src/ui/qa.tsx",
@@ -1607,21 +1607,21 @@
     "kind": "list",
     "line": "const at = sel?.id ?? (cursor && list.some((r) => r.id === cursor) ? cursor : list[0]?.id ?? null);",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1396
   },
   {
     "file": "src/ui/qa.tsx",
     "kind": "list",
     "line": "const before = (c: string) => changed.filter((k) => (COLUMN[k] && shown(COLUMN[k]) ? COLUMN[k] : 'q') === c && was[k] !== undefined).map((k) => { const v = was[k].replace(/\\s+/g, ' ').trim(); return v.length > 80 ? `${v.slice(0, 79)}…` : v || '(blank)'; });",
     "count": 2,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1396
   },
   {
     "file": "src/ui/qa.tsx",
     "kind": "list",
     "line": "const can = options.filter((o) => !o.off).map((o) => o.v);",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1396
   },
   {
     "file": "src/ui/qa.tsx",
@@ -1656,14 +1656,14 @@
     "kind": "list",
     "line": "const names = (c: string) => changed.filter((k) => (COLUMN[k] && shown(COLUMN[k]) ? COLUMN[k] : 'q') === c).map((k) => FIELD_NAME[k] ?? k).join(', ');",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1396
   },
   {
     "file": "src/ui/qa.tsx",
     "kind": "list",
     "line": "const off = (x: string) => !!options.find((o) => o.v === x)?.off;",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1396
   },
   {
     "file": "src/ui/qa.tsx",
@@ -1719,7 +1719,7 @@
     "kind": "list",
     "line": "{named.length > 0 && <p class=\"ddtext\" id=\"ui-kept\">{count(named.length, 'question changed', 'questions changed')} since and {named.length === 1 ? 'stays as it is' : 'stay as they are'}: {named.slice(0, LISTED).map((n) => `Q${n}`).join(', ')}{named.length > LISTED ? ` and ${(named.length - LISTED).toLocaleString('en-US')} more` : ''}.</p>}",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1396
   },
   {
     "file": "src/ui/qa.tsx",
@@ -1733,7 +1733,7 @@
     "kind": "pattern",
     "line": "const before = (c: string) => changed.filter((k) => (COLUMN[k] && shown(COLUMN[k]) ? COLUMN[k] : 'q') === c && was[k] !== undefined).map((k) => { const v = was[k].replace(/\\s+/g, ' ').trim(); return v.length > 80 ? `${v.slice(0, 79)}…` : v || '(blank)'; });",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1396
   },
   {
     "file": "src/ui/qa.tsx",
@@ -1747,7 +1747,7 @@
     "kind": "timer",
     "line": "useEffect(() => { const t = setTimeout(() => dispatchEvent(new Event('qa:fit')), 300); return () => clearTimeout(t); }, [tuck]);",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1407
   },
   {
     "file": "src/ui/qaImportForm.tsx",
@@ -1768,7 +1768,7 @@
     "kind": "list",
     "line": "const shown = IMPORT_FIELDS.filter(([field]) => field !== 'n' && mapping[field] != null);",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1402
   },
   {
     "file": "src/ui/qaImportForm.tsx",
@@ -1782,7 +1782,7 @@
     "kind": "list",
     "line": "return `${unread.slice(0, UNREAD_NAMED).join(' · ')}${more > 0 ? ` · and ${more} more` : ''}`;",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1402
   },
   {
     "file": "src/ui/qaLogNotice.ts",
@@ -1866,14 +1866,14 @@
     "kind": "timer",
     "line": "openTimer.current = window.setTimeout(() => setOpen(true), 180);",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1407
   },
   {
     "file": "src/ui/queueStrip.tsx",
     "kind": "timer",
     "line": "return window.setTimeout(() => {",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1407
   },
   {
     "file": "src/ui/ref.tsx",
@@ -1887,14 +1887,14 @@
     "kind": "limit",
     "line": "const names = deals.length > 4 ? `${deals.slice(0, 3).join(', ')} and ${deals.length - 3} more` : deals.join(', ');",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1403
   },
   {
     "file": "src/ui/relink.tsx",
     "kind": "list",
     "line": "const names = deals.length > 4 ? `${deals.slice(0, 3).join(', ')} and ${deals.length - 3} more` : deals.join(', ');",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1403
   },
   {
     "file": "src/ui/research.tsx",
@@ -1929,7 +1929,7 @@
     "kind": "timer",
     "line": "useEffect(() => { if (!working) return; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, [working]);",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1407
   },
   {
     "file": "src/ui/resolve.tsx",
@@ -1957,7 +1957,7 @@
     "kind": "list",
     "line": "const resp = 'response' in kept; const others = (Object.keys(kept) as ImportField[]).filter((k) => k !== 'response');",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1404
   },
   {
     "file": "src/ui/search.tsx",
@@ -1985,14 +1985,14 @@
     "kind": "list",
     "line": "const first = items.findIndex((item) => 'hit' in item && item.hit.kind === kind);",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1405
   },
   {
     "file": "src/ui/search.tsx",
     "kind": "list",
     "line": "const firstHit = (items: Item[]) => Math.max(0, items.findIndex((it) => 'hit' in it));",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1405
   },
   {
     "file": "src/ui/search.tsx",
@@ -2013,7 +2013,7 @@
     "kind": "list",
     "line": "const index = expansion ? expandedRow(items, expansion) : items.findIndex((item) => itemKey(item) === selection);",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1405
   },
   {
     "file": "src/ui/search.tsx",
@@ -2209,7 +2209,7 @@
     "kind": "timer",
     "line": "timer = window.setTimeout(() => {",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1407
   },
   {
     "file": "src/ui/titleStyle.ts",
@@ -2237,7 +2237,7 @@
     "kind": "list",
     "line": "change({ askedBy: on ? [...filter.askedBy, firm] : filter.askedBy.filter((x) => x !== firm) });",
     "count": 1,
-    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+    "issue": 1406
   },
   {
     "file": "src/ui/transfer.tsx",
