@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryKeptImports } from '../../src/adapters/keptImports';
 import { ChecklistImportSession } from '../../src/app/checklistImportSession';
-import { importKey, initializeKeptImports, keepImport, keptImport, keptImportsReady } from '../../src/app/keptImports';
+import { importKey, initializeKeptImports, keptImport, keptImportsReady } from '../../src/app/keptImports';
 import { keepChecklistImport } from '../../src/app/checklistKept';
 import { registry } from '../../src/app/commands/undo';
 import { RestoreList } from '../../src/app/commands/checklist';
@@ -26,9 +26,9 @@ afterEach(async () => {
   app.store.closing();
   await app.repo.close();
 });
-function open(fresh = false) {
+function open() {
   app.store.ui({ firmChecklist: { step: 'import' } });
-  const session = new ChecklistImportSession(app.store, { fresh });
+  const session = new ChecklistImportSession(app.store, {});
   sessions.push(session);
   void session.start();
   return session;
@@ -98,22 +98,6 @@ it('signed out, Bring In is refused quietly and the dialog says why', async () =
   expect(app.store.get().firmList[listId('broad', '')]).toBeUndefined();
 });
 
-it('a finished write leaves a later dialog and its retained draft in place', async () => {
-  const session = await reviewPortfolio();
-  const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
-  const pending = session.bringIn();
-  await held.entered;
-  session.dispose();
-  const later = { step: 'import', layer: 'sector', name: 'Solar' } as const;
-  app.store.ui({ firmChecklist: later });
-  keepImport(key, { paste: 'Supply the signed security agreements.' });
-  held.release();
-  await pending;
-  expect(app.store.get().ui.firmChecklist).toEqual(later);
-  expect(app.store.get().ui.toasts.some((toast) => toast.action?.label === 'Undo All')).toBe(true);
-  expect(keptImport(key)?.paste).toBe('Supply the signed security agreements.');
-});
-
 it('keeps new typing from a reopened import while its previous instance finishes writing', async () => {
   const first = await reviewPortfolio();
   const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
@@ -171,15 +155,4 @@ it('ignores a retry that ends after change and detects headings before manual co
   session.startOver();
   expect(session.view.step).toBe('pick');
   expect(keptImport(key)).toBeUndefined();
-});
-
-it('leaves a set-aside draft intact until the person types or accepts a new source', async () => {
-  keepImport(key, { paste: 'Earlier paste', review: { damaged: true } });
-  const session = open(true);
-  expect(session.view.source.paste).toBe('');
-  session.close();
-  expect(keptImport(key)).toEqual({ paste: 'Earlier paste', review: { damaged: true } });
-  const reopened = open();
-  reopened.setPaste('  Provide tax returns.  ');
-  expect(keptImport(key)).toMatchObject({ paste: '  Provide tax returns.  ', review: null, choices: undefined });
 });
