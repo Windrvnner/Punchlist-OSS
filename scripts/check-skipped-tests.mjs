@@ -55,9 +55,12 @@ function readReport(reportPath) {
   throw new Error(`No Vitest report at ${reportPath}`);
 }
 
+// Every shape of test file Vitest could run (its default include is *.{test,spec}, ours only .test).
+export const isTestFile = (file) => /^tests\/.*\.test\.[mc]?[jt]sx?$/.test(file);
+
 function trackedTestFiles() {
   const tracked = execFileSync('git', ['ls-files', '-z', 'tests'], { encoding: 'utf8' }).split('\0');
-  return tracked.filter((file) => /^tests\/.*\.test\.tsx?$/.test(file));
+  return tracked.filter(isTestFile);
 }
 
 function reportProblems(args) {

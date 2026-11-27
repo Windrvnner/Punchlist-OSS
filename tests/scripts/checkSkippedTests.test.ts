@@ -99,10 +99,11 @@ describe('the command', () => {
   };
 
   it.each([
-    ['is missing', path.join(gateRoot, 'none.json')],
-    ['is not JSON', write('not json')],
-    ['has no test results', write('{}')],
-  ])('fails when the report %s', (_, reportPath) => {
+    ['is missing', null],
+    ['is not JSON', 'not json'],
+    ['has no test results', '{}'],
+  ])('fails when the report %s', (_, content) => {
+    const reportPath = content === null ? path.join(gateRoot, 'none.json') : write(content);
     const result = run(reportPath);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`No Vitest report at ${reportPath}`);
