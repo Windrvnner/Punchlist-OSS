@@ -34,7 +34,7 @@ import { AccountRow } from './connection';
 import { ReadOnlyContext, SignedOutContext } from './editField';
 import { SERVICE } from '../control';
 import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
-import { isReading, routeFromHash, dealHash, dealTwinLabels } from '../app/state';
+import { isReading, dealUiOnRouteChange, routeFromHash, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
 import { openNewDeal } from '../app/dealFolders';
 
@@ -47,15 +47,9 @@ function Shell() {
   useEffect(() => {
     const apply = () => {
       const route = routeFromHash(location.hash); const was = store.get().ui.route;
-      const deal = (r: State['ui']['route']) => ('dealId' in r && r.dealId ? r.dealId : null);
-      // list filters and the selected question belong to one deal: moving to another deal starts clean
-      const fresh = deal(route) !== deal(was) ? {
-        findingFilter: { status: 'open' as const, workstream: '', reviewed: '' as const },
-        qaFilter: { status: 'open' as const, workstream: '', text: '' },
-        checklistFilter: 'all' as const, selectedQuestion: null, selectedChecklist: null,
-      } : {};
+      const navigation = dealUiOnRouteChange(was, route, takeNavPatch());
       store.ui({ route, doc: null, docAside: null, side: null, queueSearch: '', dialog: null,
-        searchFocus: null, ...fresh, ...takeNavPatch() });
+        searchFocus: null, ...navigation });
       // the link or button that was pressed is gone with the old page: focus goes to what opened the document being closed, else to the new page, not to nowhere
       const backTo = takeFocusAfter();
       requestAnimationFrame(() => { const back = backTo.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean); if (back) back.focus(); else if (!document.activeElement || document.activeElement === document.body) document.getElementById('view')?.focus({ preventScroll: true }); });

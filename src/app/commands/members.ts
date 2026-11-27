@@ -6,10 +6,9 @@ import { z } from 'zod';
 import { define } from '../command';
 import { DealId, Member, firstMember, memberId } from '../../domain/model';
 import { ok, fail, notFound, rejected } from '../../domain/result';
-import { dealLabel, type State } from '../state';
+import { dealLabel } from '../state';
 
-/** Is this deal in the list of the person using the app? */
-export const isMine = (s: Pick<State, 'members' | 'user'>, dealId: string): boolean => !!s.user && s.members[memberId(dealId, s.user.name)]?.on === true;
+export { isMine } from '../dealUi';
 
 export { firstMember };
 

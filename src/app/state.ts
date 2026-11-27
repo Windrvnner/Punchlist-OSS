@@ -218,6 +218,9 @@ export interface State {
   ui: UiState;
 }
 
+export { dealUiOnRouteChange, isMine, myDeals, pickNames, DEAL_UI_DEFAULTS } from './dealUi';
+import { freshDealUi } from './dealUi';
+
 export const initialState = (can = capabilities()): State => ({
   can,
   boot: { stage: 'session' },
@@ -265,15 +268,11 @@ export const initialState = (can = capabilities()): State => ({
     firmChecklist: null,
     palette: false,
     dialog: null,
-    selectedQuestion: null,
+    ...freshDealUi(),
     searchFocus: null,
-    selectedChecklist: null,
-    qaFilter: { status: 'open', workstream: '', text: '' },
     toasts: [],
     newDeal: null,
     deleteDeal: null,
-    findingFilter: { status: 'open', workstream: '', reviewed: '' },
-    checklistFilter: 'all',
     reassessing: [],
     indexStalled: [],
     indexWaiting: {},

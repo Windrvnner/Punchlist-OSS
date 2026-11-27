@@ -10,7 +10,7 @@ import { type State, type UiState, dealQuestions, dealFindings, dealHash, dealTw
 import { conversationDocs, docIndex } from './conversations';
 import { docKey } from '../domain/model';
 import type { Item } from '../domain/checklist';
-import { isMine } from './commands/members';
+import { myDeals } from './state';
 
 export type HitKind = 'deal' | 'finding' | 'item' | 'question' | 'document';
 // The deal, its disambiguator and the place within the deal (for example, Q7 or p. 4).
@@ -118,7 +118,7 @@ function gather(s: State, query: string, itemsShown: number): { hits: Hit[]; ite
   const has = (...parts: (string | number)[]) => { const t = fold(parts.join(' ')); return t.includes(l) || (lq.length >= 3 && squash(t).includes(lq)); };
   const twinOf = dealTwinLabels(Object.values(s.deals));
   const itemsOf = itemsByDeal(s.items);
-  for (const d of Object.values(s.deals).filter((x) => isMine(s, x.id))) {   // the person's own deals: others are joined through Add deal
+  for (const d of myDeals(s)) {   // the person's own deals: others are joined through Add deal
     // a deal that shares its name says on its second line only what differs, as the sidebar does; the hover gives both
     if (!l || has(d.name, d.target, d.counterparty, d.product, d.sector, d.technology)) {
       const focus = twinOf(d, 'focus');
@@ -189,8 +189,7 @@ export function searchGroups(s: State, query: string, expanded: readonly HitKind
 
 /** #491: Search waits only for the unvisited or loading deals in My Deals. */
 export function ownDealsLoading(state: Pick<State, 'deals' | 'dealLoad' | 'members' | 'user'>): boolean {
-  return Object.keys(state.deals).some((id) =>
-    isMine(state, id) && (state.dealLoad[id] === 'loading' || state.dealLoad[id] === undefined));
+  return myDeals(state).some(({ id }) => state.dealLoad[id] === 'loading' || state.dealLoad[id] === undefined);
 }
 
 /**
@@ -198,7 +197,7 @@ export function ownDealsLoading(state: Pick<State, 'deals' | 'dealLoad' | 'membe
  * own has its check's items read too, once, so they can be found as well.
  */
 export async function loadAllForSearch(store: Store) {
-  const mine = Object.keys(store.get().deals).filter((id) => isMine(store.get(), id));
+  const mine = myDeals(store.get()).map((deal) => deal.id);
   await Promise.all(mine.map((id) => store.loadDeal(id, { gaps: false })));
   const s = store.get(); const withItems = new Set(Object.values(s.items).map((it) => it.dealId));
   await Promise.all(mine.filter((id) => s.deals[id] && s.checklists[id] === undefined && !withItems.has(id)).map((id) => store.refreshChecklist(id)));

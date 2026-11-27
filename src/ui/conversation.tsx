@@ -3,7 +3,7 @@
 import type { RefObject } from 'preact';
 import { useSlashCommands } from './slashMenu';
 import { SERVICE } from '../control';
-import { isMine } from '../app/commands/members';
+import { myDeals } from '../app/state';
 import { ReadOnlyContext } from './editField';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore, lastInput } from './hooks';
@@ -293,8 +293,7 @@ function placeholderFor(state: State, scope: Scope, deal: Deal | null | undefine
   if (scope.kind === 'question') return `Follow up on Q${state.questions[scope.questionId]?.n ?? ''}…`;
   if (scope.kind === 'finding') return 'Follow up on this finding…';
   if (deal) return askAbout(deal.name);
-  const myDeals = Object.values(state.deals).filter((other) => isMine(state, other.id));
-  return askAcross(myDeals.map((other) => other.name));
+  return askAcross(myDeals(state).map((other) => other.name));
 }
 
 /** The form's id and look: the ask box on Home or on a deal's pages, or the composer under a conversation. */

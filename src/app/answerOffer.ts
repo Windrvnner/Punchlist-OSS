@@ -3,7 +3,7 @@
  * Unresolved preview, or logging a question it drafted. The model only proposes; code checks the proposal against the
  * deals and the conversation, and nothing runs until a person presses the button.
  */
-import { isMine } from './commands/members';
+import { myDeals } from './state';
 import type { Scope } from './conversations';
 import { DEAL_PAGES, pageHash, type Landing, type State } from './state';
 import type { Store } from './store';
@@ -29,7 +29,7 @@ const nonBlank = (text: unknown): text is string => typeof text === 'string' && 
 /** The page the model offers: the one of the person's own deals it names, or else the conversation's own deal. */
 function pageOffer(state: State, scope: Scope, raw: RawOffer): AnswerOffer | undefined {
   if (!isPage(raw.page)) return undefined;
-  const own = Object.values(state.deals).filter((deal) => isMine(state, deal.id));
+  const own = myDeals(state);
   const named = typeof raw.deal === 'string' ? dealByName(own, raw.deal) : undefined;
   const dealId = named?.id ?? (raw.deal === undefined && scope.kind !== 'all' ? scope.dealId : undefined);
   return dealId && state.deals[dealId] ? { kind: 'page', dealId, page: raw.page } : undefined;

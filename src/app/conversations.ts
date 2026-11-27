@@ -4,7 +4,7 @@
  * message it was requested for, so navigating, retrying or deleting mid-flight
  * cannot misplace it.
  */
-import { isMine } from './commands/members';
+import { myDeals } from './state';
 import { carriedThread } from './threads';
 import { checkedOffer } from './answerOffer';
 import type { Store } from './store';
@@ -291,7 +291,7 @@ async function answer(store: Store, scope: Scope, messageId: string, text: strin
   const r = await ai.answer({
     dealId: scope.kind === 'all' ? undefined : scope.dealId,
     // asked across deals, only the person's own deals are searched
-    ...(scope.kind === 'all' ? { dealIds: Object.keys(store.get().deals).filter((id) => isMine(store.get(), id)) } : {}),
+    ...(scope.kind === 'all' ? { dealIds: myDeals(store.get()).map((deal) => deal.id) } : {}),
     // and the files the person attached on Home, kept with their own conversations
     ...(scope.kind === 'all' && store.get().user ? { files: ownFilesId(store.get().user!.name) } : {}),
     findingId: scope.kind === 'finding' ? scope.findingId : undefined,
