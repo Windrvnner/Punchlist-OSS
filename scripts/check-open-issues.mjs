@@ -61,10 +61,16 @@ function isRateLimit({ status, headers }) {
 
 const isTransient = (response) => response.status >= 500 || isRateLimit(response);
 
+// A retry-after header is a number of seconds or an HTTP date (RFC 9110, section 10.2.3).
+function retryAfterMs(value) {
+  if (/^\d+$/.test(value.trim())) return Number(value) * 1000;
+  return Math.max(0, new Date(value).getTime() - Date.now());
+}
+
 // How long GitHub asks to wait: retry-after seconds; else, with no requests left, until x-ratelimit-reset (epoch
 // seconds); else 2 seconds. GitHub sends the rate-limit headers with every answer, so only an empty limit counts.
 function retryDelayMs({ headers }) {
-  if (headers.has('retry-after')) return Number(headers.get('retry-after')) * 1000;
+  if (headers.has('retry-after')) return retryAfterMs(headers.get('retry-after'));
   if (!noRequestsLeft(headers) || !headers.has('x-ratelimit-reset')) return retryWaitMs;
   return Math.max(0, Number(headers.get('x-ratelimit-reset')) * 1000 - Date.now());
 }

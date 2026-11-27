@@ -138,6 +138,14 @@ describe('issues named by the allowances', () => {
     expect((await waitsFor(502, spare)).waits).toEqual([2000, 2000]);
   });
 
+  it('reads a retry-after header given as an HTTP date', async () => {
+    const at = new Date(Date.now() + 20_000).toUTCString();
+    const { waits } = await waitsFor(429, { 'retry-after': at });
+    expect(waits).toHaveLength(2);
+    for (const ms of waits) expect(ms).toBeGreaterThan(15_000);
+    for (const ms of waits) expect(ms).toBeLessThanOrEqual(20_000);
+  });
+
   it('retries a server error or rate limit and passes once GitHub answers', async () => {
     const statuses = [502, 429, 200, 200];
     const requested: URL[] = [];
