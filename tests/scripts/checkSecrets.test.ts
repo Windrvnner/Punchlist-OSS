@@ -13,7 +13,9 @@ const fake = { anthropic: 'sk-' + 'ant-' + 'a1B2'.repeat(6), openaiProject: 'sk-
 function repo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'secrets-'));
   const git = (...a: string[]) => execFileSync('git', a, { cwd: dir });
-  git('init', '-q', '-b', 'main'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 't');
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 't@example.com');
+  git('config', 'user.name', 't');
   git('commit', '-q', '--allow-empty', '-m', 'start');
   const check = (...a: string[]) => spawnSync('node', [script, ...a], { cwd: dir, encoding: 'utf8' });
   return { dir, git, check, write: (f: string, t: string) => fs.writeFileSync(path.join(dir, f), t) };
@@ -85,7 +87,11 @@ describe('the secrets check over a branch', () => {
     r.write('a.ts', 'main\n');
     commitAll(r, 'main');
     r.git('checkout', '-q', 'feature');
-    try { r.git('merge', '-q', 'main'); } catch { /* conflict, resolved below */ }
+    try {
+      r.git('merge', '-q', 'main');
+    } catch {
+      // the conflict is resolved by hand below
+    }
     r.write('a.ts', `const k = '${fake.anthropic}';\n`);
     commitAll(r, 'merge');
     r.write('a.ts', 'const k = process.env.KEY;\n');
@@ -105,6 +111,19 @@ describe('the secrets check over a branch', () => {
     const out = r.check('--all');
     expect(out.status).toBe(1);
     expect(out.stderr).toContain('.env');
+  });
+  it('says only that history could not be read when git fails, never what it printed', () => {
+    const r = repo();
+    r.git('checkout', '-q', '-b', 'feature');
+    r.write('a.ts', `const k = '${fake.anthropic}';\n`);
+    commitAll(r, 'add');
+    const blob = r.git('rev-parse', 'HEAD:a.ts').toString().trim();
+    fs.rmSync(path.join(r.dir, '.git/objects', blob.slice(0, 2), blob.slice(2)), { force: true });
+    const out = r.check('--all');
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('the branch history could not be read to check');
+    expect(out.stderr).not.toContain(fake.anthropic);
+    expect(out.stderr).not.toContain('Command failed');
   });
   it('allows a .env.example file added on a branch', () => {
     const r = repo();

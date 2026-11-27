@@ -2,14 +2,16 @@
 // staged (the content git will commit, not the file on disk, which may differ), and by CI on every tracked file and on
 // everything the branch's commits add, even what a later commit removed. Prints file names and short commit ids only,
 // never what matched.
-import { execFileSync } from 'node:child_process';
+import { git, gitBytes } from './allowance.mjs';
 import fs from 'node:fs';
 import { addedFiles, addedText, branchRange } from './branch-commits.mjs';
 
 const all = process.argv.includes('--all');
-const git = (...args) => execFileSync('git', args, { maxBuffer: 512 * 1024 * 1024 });
-const files = (all ? git('ls-files', '-z') : git('diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'))
-  .toString()
+const cwd = process.cwd();
+const listFiles = all
+  ? ['ls-files', '-z']
+  : ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'];
+const files = git(cwd, ...listFiles)
   .split('\0')
   .filter(Boolean);
 
@@ -30,25 +32,37 @@ const PRIVATE_KEY = /-----BEGIN ([A-Z]+ )*PRIVATE KEY( BLOCK)?-----/;
 let own = '';
 try { own = /^PUNCHLIST_AI_KEY=(.+)$/m.exec(fs.readFileSync('.env', 'utf8'))?.[1].trim() ?? ''; } catch { /* no .env here (CI) */ }
 
-const isEnvFile = (name) => /(^|\/)\.env($|\.)/.test(name) && !name.endsWith('.env.example');
+const isEnvFile = (name) => {
+  return /(^|\/)\.env($|\.)/.test(name) && !name.endsWith('.env.example');
+};
 const looksLikeSecret = (text) => KEY.test(text) || PRIVATE_KEY.test(text) || (own.length >= 16 && text.includes(own));
 
 const bad = [];
 for (const f of files) {
   if (isEnvFile(f)) { bad.push(`${f} (an env file)`); continue; }
   let text;
-  try { text = (all ? fs.readFileSync(f) : git('show', `:${f}`)).toString('latin1'); }
+  try { text = (all ? fs.readFileSync(f) : gitBytes(cwd, 'show', `:${f}`)).toString('latin1'); }
   catch { bad.push(`${f} (could not be read to check)`); continue; }
   if (looksLikeSecret(text)) bad.push(`${f} (looks like an API key or token)`);
 }
 // A secret a branch commit added is in the history even when a later commit removed it.
-const range = all ? branchRange() : null;
-if (range) {
+function historyProblems() {
+  const range = all ? branchRange() : null;
+  if (!range) return [];
+  const problems = [];
   for (const { sha, file } of addedFiles(range)) {
-    if (isEnvFile(file)) bad.push(`${file} (an env file, added in ${sha.slice(0, 8)})`);
+    if (isEnvFile(file)) problems.push(`${file} (an env file, added in ${sha.slice(0, 8)})`);
   }
   for (const { sha, file, text } of addedText(range)) {
-    if (looksLikeSecret(text)) bad.push(`${file} (looks like an API key or token, added in ${sha.slice(0, 8)})`);
+    if (looksLikeSecret(text)) problems.push(`${file} (looks like an API key or token, added in ${sha.slice(0, 8)})`);
   }
+  return problems;
+}
+try {
+  bad.push(...historyProblems());
+} catch (error) {
+  // A failed git command carries its own output, which may hold the secret, so only our own messages are printed.
+  const ours = error instanceof Error && error.stderr === undefined;
+  bad.push(ours ? error.message : 'the branch history could not be read to check');
 }
 if (bad.length) { console.error(`Refused: secrets must stay in .env, which git ignores.\n  ${bad.join('\n  ')}`); process.exit(1); }

@@ -9,15 +9,36 @@ export function branchRange(cwd = process.cwd()) {
   return `${base}..HEAD`;
 }
 
-// One chunk of `git log` output for each commit; a binary file read as text may hold a NUL, so a chunk that does not
-// start with a commit id continues the one before it.
+// Starts each commit in `git log` output. A binary file read as text could hold a NUL, so a chunk counts as a commit
+// only when the marker is followed by a full commit id and a newline.
+const COMMIT_MARK = '\0COMMIT\0';
+const FORMAT = '--format=%x00COMMIT%x00%H';
+
 function commitChunks(log) {
   const chunks = [];
-  for (const piece of log.split('\0').slice(1)) {
+  for (const piece of log.split(COMMIT_MARK).slice(1)) {
     if (/^[0-9a-f]{40}\n/.test(piece) || chunks.length === 0) chunks.push(piece);
-    else chunks[chunks.length - 1] += `\0${piece}`;
+    else chunks[chunks.length - 1] += `${COMMIT_MARK}${piece}`;
   }
   return chunks;
+}
+
+const ESCAPES = { t: '\t', n: '\n', '"': '"', '\\': '\\' };
+
+// A file name as git prints it: plain, or in double quotes with C escapes (quote, tab, newline, octal bytes).
+function unquote(name) {
+  if (!name.startsWith('"')) return name;
+  const bytes = [];
+  const body = name.slice(1, -1);
+  for (let at = 0; at < body.length; at += 1) {
+    const escaped = body[at] === '\\';
+    const octal = escaped && /^[0-7]{3}/.exec(body.slice(at + 1));
+    if (octal) bytes.push(Number.parseInt(octal[0], 8));
+    else bytes.push(...Buffer.from(escaped ? ESCAPES[body[at + 1]] : body[at]));
+    if (octal) at += 3;
+    else if (escaped) at += 1;
+  }
+  return Buffer.from(bytes).toString('utf8');
 }
 
 // The text each file of one commit adds. A hunk header has one '@' more than the commit has parents, and a line counts
@@ -30,8 +51,8 @@ function addedByFile(chunk) {
     const hunk = /^(@{2,}) /.exec(row);
     if (hunk) columns = hunk[1].length - 1;
     else if (row.startsWith('diff ')) columns = 0;
-    const header = columns === 0 && /^\+\+\+ b\/(.*)$/.exec(row);
-    if (header) file = header[1];
+    const header = columns === 0 && /^\+\+\+ (b\/[^\t]*|"b\/.*")\t?$/.exec(row);
+    if (header) file = unquote(header[1]).replace(/^b\//, '');
     else if (columns > 0 && !hunk && row.slice(0, columns) === '+'.repeat(columns)) {
       if (!files.has(file)) files.set(file, []);
       files.get(file).push(row.slice(columns));
@@ -42,7 +63,7 @@ function addedByFile(chunk) {
 
 // One item for each commit and file in the range: the lines it adds, joined with newlines.
 export function addedText(range, cwd = process.cwd()) {
-  const log = git(cwd, 'log', '-p', '--cc', '--text', '--no-color', '--no-ext-diff', '--format=%x00%H', range);
+  const log = git(cwd, 'log', '-p', '--cc', '--text', '--no-color', '--no-ext-diff', FORMAT, range);
   const added = [];
   for (const chunk of commitChunks(log)) {
     const sha = chunk.slice(0, 40);
@@ -51,11 +72,19 @@ export function addedText(range, cwd = process.cwd()) {
   return added;
 }
 
-// The files each commit in the range adds, including those a later commit deletes.
+// A name-status row that gives a file a name: added, copied or renamed (the new name is last). A merge row has one
+// letter for each parent, and counts only when every parent lacks the file.
+function newName(row) {
+  const [status, ...names] = row.split('\t');
+  const letters = status.replace(/\d+/g, '');
+  return letters !== '' && /^[ACR]+$/.test(letters) ? unquote(names[names.length - 1]) : null;
+}
+
+// The files each commit in the range gives a name, including those a later commit deletes or renames away.
 export function addedFiles(range, cwd = process.cwd()) {
-  const log = git(cwd, '-c', 'core.quotepath=off', 'log', '--diff-filter=A', '--name-only', '--format=%x00%H', range);
+  const log = git(cwd, 'log', '--cc', '-M', '-C', '--name-status', FORMAT, range);
   return commitChunks(log).flatMap((chunk) => {
-    const [sha, ...names] = chunk.split('\n');
-    return names.filter(Boolean).map((file) => ({ sha, file }));
+    const [sha, ...rows] = chunk.split('\n');
+    return rows.map(newName).filter((file) => file !== null).map((file) => ({ sha, file }));
   });
 }

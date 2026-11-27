@@ -79,6 +79,53 @@ describe('the branch commits', () => {
     expect(addedFiles(branchRange(dir), dir).map((item: { file: string }) => item.file)).toEqual(['.env']);
   });
 
+  it('lists a file a rename gives a new name even when a later commit deletes it', () => {
+    const { dir, git, commit } = repo();
+    commit('secrets.txt', 'line one\nline two\nline three\nline four\n');
+    git('checkout', '-q', '-b', 'feature');
+    git('mv', 'secrets.txt', '.env');
+    git('commit', '-q', '-m', 'rename');
+    git('rm', '-q', '-f', '.env');
+    git('commit', '-q', '-m', 'remove');
+    expect(addedFiles(branchRange(dir), dir).map((item: { file: string }) => item.file)).toEqual(['.env']);
+  });
+
+  it('lists a file a merge resolution adds', () => {
+    const { dir, git, commit } = repo();
+    git('checkout', '-q', '-b', 'feature');
+    commit('a.txt', 'feature\n');
+    git('checkout', '-q', 'main');
+    commit('b.txt', 'main\n');
+    git('checkout', '-q', 'feature');
+    git('merge', '-q', '--no-commit', '--no-ff', 'main');
+    writeFileSync(path.join(dir, '.env'), 'X=1\n');
+    git('add', '-f', '.env');
+    git('commit', '-q', '-m', 'merge');
+    const files = addedFiles(branchRange(dir), dir).map((item: { file: string }) => item.file);
+    expect(files).toContain('.env');
+    expect(files).not.toContain('b.txt');
+  });
+
+  it('is not fooled by binary content that looks like a commit boundary', () => {
+    const { dir, git, commit } = repo();
+    git('checkout', '-q', '-b', 'feature');
+    const fakeId = '0123456789abcdef0123456789abcdef01234567';
+    commit('blob.bin', `before\0${fakeId}\nafter\n`);
+    const added = addedText(branchRange(dir), dir);
+    expect(added).toHaveLength(1);
+    expect(added[0].sha).toBe(git('rev-parse', 'HEAD').trim());
+    expect(added[0].text).toContain(fakeId);
+  });
+
+  it('reads a file name that git quotes', () => {
+    const { dir, git, commit } = repo();
+    git('checkout', '-q', '-b', 'feature');
+    commit('say "hi"\tnow.txt', 'one\n');
+    const range = branchRange(dir);
+    expect(addedText(range, dir).map((item: { file: string }) => item.file)).toEqual(['say "hi"\tnow.txt']);
+    expect(addedFiles(range, dir).map((item: { file: string }) => item.file)).toEqual(['say "hi"\tnow.txt']);
+  });
+
   it('returns null on main', () => {
     expect(branchRange(repo().dir)).toBeNull();
   });
