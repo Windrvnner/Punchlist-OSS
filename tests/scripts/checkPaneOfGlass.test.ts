@@ -1,29 +1,27 @@
 // @vitest-environment node
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import {
   copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+// @ts-expect-error the script is plain JavaScript
+import { slashPath } from '../../scripts/pane-of-glass-matches.mjs';
 
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
 const baselineFile = 'scripts/pane-of-glass-baseline.json';
 const directories: string[] = [];
-type Kind = 'import' | 'storage' | 'network' | 'services' | 'repo' | 'pattern';
-type Baseline = Record<string, Partial<Record<Kind, number>>>;
-
-function git(dir: string, ...args: string[]) {
-  const identity = ['-c', 'user.name=test', '-c', 'user.email=test@example.com'];
-  return execFileSync('git', [...identity, ...args], { cwd: dir, encoding: 'utf8' });
-}
+type Entry = { file: string; kind: string; line: string; count: number; issue?: number; decision?: string };
 
 function check(cwd: string, ...args: string[]) {
   return spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
 }
 
-function fixture(baseline: Baseline = {}) {
+const listed = (file: string, kind: string, line: string, count = 1): Entry =>
+  ({ file, kind, line, count, issue: 7 });
+
+function fixture(allowance: Entry[] = []) {
   const dir = mkdtempSync(path.join(tmpdir(), 'pane-of-glass-'));
   directories.push(dir);
   function write(file: string, source: string) {
@@ -31,10 +29,12 @@ function fixture(baseline: Baseline = {}) {
     mkdirSync(path.dirname(destination), { recursive: true });
     writeFileSync(destination, source);
   }
-  const setBaseline = (counts: Baseline) => write(baselineFile, JSON.stringify(counts));
-  setBaseline(baseline);
+  const setAllowance = (entries: Entry[]) => write(baselineFile, JSON.stringify(entries));
+  setAllowance(allowance);
+  write('scripts/verified-decisions.json', '[]');
+  write('docs/decisions.md', '- A decision.\n');
   const baselineText = () => readFileSync(path.join(dir, baselineFile), 'utf8');
-  return { dir, write, setBaseline, baselineText, run: (...args: string[]) => check(dir, ...args) };
+  return { dir, write, setAllowance, baselineText, run: (...args: string[]) => check(dir, ...args) };
 }
 
 afterEach(() => {
@@ -86,7 +86,7 @@ describe('UI dependency checks', () => {
       for (const [index, source] of snippets.entries()) {
         const file = `src/ui/nested/${kind}-${index}.ts`;
         repo.write(file, `\n${source}`);
-        expected.push(`${file} ${kind} (lines 2)`);
+        expected.push(`${file} ${kind} "${source}"`);
       }
     }
     const result = repo.run();
@@ -103,7 +103,7 @@ describe('UI dependency checks', () => {
     repo.write(file, [`const moduleName = '${name}'`, 'export const loadPath = () => import(moduleName)'].join('\n'));
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} import (lines 2): 1 exceeds`);
+    expect(result.stderr).toContain(`${file} import "export const loadPath = () => import(moduleName)": 1 not listed`);
   });
 
   it('refuses every computed module path and every import.meta read but env', () => {
@@ -131,7 +131,9 @@ describe('UI dependency checks', () => {
     repo.write(file, lines.join('\n'));
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} import (lines 2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16): 13 exceeds`);
+    const flagged = [2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16];
+    for (const number of flagged) expect(result.stderr).toContain(`import "${lines[number - 1]}": 1 not listed`);
+    for (const number of [1, 3, 12]) expect(result.stderr).not.toContain(`import "${lines[number - 1]}"`);
   });
 
   it('allows modules named with a plain string', () => {
@@ -167,9 +169,13 @@ describe('UI dependency checks', () => {
     repo.write(file, lines.join('\n'));
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} services (lines 1, 3, 6, 7, 10): 5 exceeds`);
-    expect(result.stderr).toContain(`${file} storage (lines 2, 4, 8, 9): 4 exceeds`);
-    expect(result.stderr).toContain(`${file} repo (lines 5, 7): 2 exceeds`);
+    const flagged = { services: [1, 3, 6, 7, 10], storage: [2, 4, 8, 9], repo: [5, 7] };
+    for (const [kind, numbers] of Object.entries(flagged)) {
+      for (const number of numbers) {
+        expect(result.stderr).toContain(`${file} ${kind} "${lines[number - 1]}": 1 not listed`);
+      }
+    }
+    expect(result.stderr).not.toContain('"const title = store[(\'title\' as const)]"');
   });
 
   it('resolves a relative layer name from the importing file', () => {
@@ -180,13 +186,13 @@ describe('UI dependency checks', () => {
     repo.write('src/ui/page.ts', "import '../backend/x'");
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('src/ui/page.ts import (lines 1)');
+    expect(result.stderr).toContain('src/ui/page.ts import "import \'../backend/x\'": 1 not listed');
     expect(result.stderr).not.toContain('topBar.ts');
   });
 
   it('ignores test files, comments and literal text and checks expressions in templates and JSX', () => {
-    // The regex literal below is itself a pattern match, which the baseline allows.
-    const repo = fixture({ 'src/ui/view.tsx': { pattern: 1 } });
+    // The regex literal below is itself a pattern match, which the allowance lists.
+    const repo = fixture([listed('src/ui/view.tsx', 'pattern', 'const pattern = /localStorage/')]);
     const examples = "import '../backend/table'; localStorage.getItem(key); store.services.repo.read()";
     const page = 'src/ui/view.tsx';
     const clean = [
@@ -205,90 +211,111 @@ describe('UI dependency checks', () => {
     repo.write(page, clean);
     expect(repo.run().status).toBe(0);
     repo.write(page, clean + '\nconst value = <b>{`${store.services}`}</b>');
-    expect(repo.run().stderr).toContain(`${page} services (lines 10)`);
+    expect(repo.run().stderr).toContain(`${page} services "${'const value = <b>{`${store.services}`}</b>'}"`);
   });
 });
 
-describe('the remaining UI exceptions', () => {
+describe('the line-by-line allowance', () => {
   const file = 'src/ui/checklist.ts';
   const oldFile = 'src/ui/old.ts';
+  const serviceLine = 'store.services.ai';
 
-  it('lowers counts in sorted order and removes the entries for deleted files', () => {
-    const repo = fixture({ [oldFile]: { storage: 2 }, [file]: { services: 2, repo: 1 } });
-    repo.write(file, 'store.services.repo.list()');
+  it('passes when every match is listed and tells how the allowance is kept', () => {
+    const repo = fixture([listed(file, 'services', serviceLine)]);
+    repo.write(file, serviceLine);
+    const result = repo.run();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Issues named in the allowances are checked as open by CI');
+    expect(result.stdout).toContain('scripts/check-open-issues.mjs');
+  });
+
+  it('refuses a new timer in a screen', () => {
+    const repo = fixture();
+    repo.write('src/ui/toast.tsx', 'export const hide = () => setTimeout(close, 3000)');
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} services (lines 1): lower the baseline`);
-    expect(result.stderr).toContain(`${oldFile} storage (no matching lines): lower the baseline`);
+    expect(result.stderr).toContain('src/ui/toast.tsx timer "export const hide = () => setTimeout(close, 3000)"');
+  });
+
+  it('refuses a touched line on a listed multi-kind line', () => {
+    const before = 'const shown = rows.slice(0, 3).length > 3';
+    const repo = fixture([listed(file, 'list', before), listed(file, 'limit', before)]);
+    repo.write(file, before);
+    expect(repo.run().status).toBe(0);
+    const after = 'const shown = rows.slice(0, 4).length > 3';
+    repo.write(file, after);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} list "${after}": 1 not listed`);
+    expect(result.stderr).toContain(`${file} limit "${after}": 1 not listed`);
+  });
+
+  it('writes / in entries for files read with \\ separators', () => {
+    expect(slashPath('src\\ui\\nested', 'view.tsx')).toBe('src/ui/nested/view.tsx');
+    expect(slashPath('src/ui', 'view.tsx')).toBe('src/ui/view.tsx');
+  });
+
+  it('lists the cannot-see items and the stated limit when it fails', () => {
+    const repo = fixture();
+    repo.write(file, serviceLine);
+    const { stderr } = repo.run();
+    expect(stderr).toContain('Rules written as plain if logic on state are not visible to this check');
+    expect(stderr).toContain('Math.min');
+    expect(stderr).toContain('requestAnimationFrame');
+    expect(stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
+  });
+
+  it('refuses a stale entry and a missing decision, without changing the file', () => {
+    const repo = fixture([listed(oldFile, 'storage', 'localStorage.clear()')]);
+    repo.write(file, serviceLine);
+    const before = repo.baselineText();
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${oldFile} storage "localStorage.clear()": no match: remove this entry`);
+    expect(result.stderr).toContain(`${file} services "${serviceLine}": 1 not listed`);
+    expect(repo.baselineText()).toBe(before);
+  });
+
+  it('--list prints the unlisted groups as entries without an issue and exits 1', () => {
+    const repo = fixture();
+    repo.write(file, `${serviceLine}\n${serviceLine}`);
+    const result = repo.run('--list');
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual([{ file, kind: 'services', line: serviceLine, count: 2 }]);
+  });
+
+  it('--lower lowers a count to its matches', () => {
+    const repo = fixture([listed(file, 'services', serviceLine, 3)]);
+    repo.write(file, `${serviceLine}\n${serviceLine}`);
+    expect(repo.run().stderr).toContain('lower the count to 2');
     expect(repo.run('--lower').status).toBe(0);
-    const expected = { [file]: { repo: 1, services: 1 } };
-    expect(repo.baselineText()).toBe(JSON.stringify(expected, null, 2) + '\n');
+    expect(JSON.parse(repo.baselineText())).toEqual([listed(file, 'services', serviceLine, 2)]);
     expect(repo.run().status).toBe(0);
   });
 
-  it('refuses to raise a count even when another entry could be lowered', () => {
-    const repo = fixture({ [oldFile]: { storage: 1 }, [file]: { services: 1 } });
-    repo.write(file, 'store.services.ai\nstore.services.ids');
-    const before = repo.baselineText();
-    for (const result of [repo.run(), repo.run('--lower')]) {
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain(`${file} services (lines 1, 2): 2 exceeds the baseline of 1`);
-      expect(repo.baselineText()).toBe(before);
-    }
+  it('--lower removes an entry whose line was fixed', () => {
+    const repo = fixture([listed(oldFile, 'storage', 'localStorage.clear()'), listed(file, 'services', serviceLine)]);
+    repo.write(file, serviceLine);
+    expect(repo.run().status).toBe(1);
+    expect(repo.run('--lower').status).toBe(0);
+    expect(JSON.parse(repo.baselineText())).toEqual([listed(file, 'services', serviceLine)]);
+    expect(repo.run().status).toBe(0);
   });
 
-  it.each([true, false])('rejects a manual increase when main has a baseline (%s)', (hasBaseline) => {
-    const repo = fixture({ [file]: { services: 1 } });
-    repo.write(file, 'store.services.ai');
-    git(repo.dir, 'init', '-q', '-b', 'main');
-    git(repo.dir, 'add', 'src');
-    if (hasBaseline) git(repo.dir, 'add', baselineFile);
-    git(repo.dir, 'commit', '-qm', 'Record existing UI');
-    repo.write(file, 'store.services.ai\nstore.services.ids');
-    repo.setBaseline({ [file]: { services: 2 } });
-    const result = repo.run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} services (lines 1, 2): the baseline cannot rise`);
-    expect(result.stderr).toContain('above the committed count of 1');
-  });
-
-  it('requires main to verify a committed increase in a shallow single-branch clone', () => {
-    const repo = fixture({ [file]: { services: 1 } });
-    repo.write(file, 'store.services.ai');
-    git(repo.dir, 'init', '-q', '-b', 'main');
-    git(repo.dir, 'add', 'src', baselineFile);
-    git(repo.dir, 'commit', '-qm', 'Record existing UI');
-    git(repo.dir, 'switch', '-qc', 'topic');
-    repo.write(file, 'store.services.ai\nstore.services.ids');
-    repo.setBaseline({ [file]: { services: 2 } });
-    git(repo.dir, 'commit', '-qam', 'Raise the allowance with the source count');
-
-    const clone = path.join(repo.dir, 'shallow');
-    git(repo.dir, 'clone', '-q', '--depth=1', '--single-branch', pathToFileURL(repo.dir).href, clone);
-    const fetch = ['fetch', '--unshallow', 'origin', '+refs/heads/main:refs/remotes/origin/main'];
-    const missing = check(clone);
-    expect(missing.status).toBe(1);
-    expect(missing.stderr).toContain(['git', ...fetch].join(' '));
-
-    git(clone, ...fetch);
-    const result = check(clone);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('the baseline cannot rise above the committed count of 1');
-  });
-
-  it('names the missing reference when a repository has no committed baseline or main', () => {
+  it('--lower never adds an entry', () => {
     const repo = fixture();
-    repo.write(file, 'export const title = "Checklist"');
-    git(repo.dir, 'init', '-q', '-b', 'topic');
-    const result = repo.run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('git fetch origin +refs/heads/main:refs/remotes/origin/main');
+    repo.write(file, serviceLine);
+    const before = repo.baselineText();
+    expect(repo.run('--lower').status).toBe(1);
+    expect(repo.baselineText()).toBe(before);
   });
 
-  it('passes the committed baseline on the repository sources', () => {
+  it('passes the committed allowance on the repository sources', () => {
     const repo = fixture();
     cpSync('src/ui', path.join(repo.dir, 'src/ui'), { recursive: true });
-    copyFileSync(baselineFile, path.join(repo.dir, baselineFile));
+    for (const name of [baselineFile, 'scripts/verified-decisions.json', 'docs/decisions.md']) {
+      copyFileSync(name, path.join(repo.dir, name));
+    }
     const result = repo.run();
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);

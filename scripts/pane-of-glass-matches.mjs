@@ -147,3 +147,8 @@ function matchingLines(offsets, source) {
   }
   return lines;
 }
+
+// A path joined with `/`, even when the directory was read with `\` separators, so entries read the same everywhere.
+export function slashPath(directory, name) {
+  return `${directory.replaceAll('\\', '/')}/${name}`;
+}
