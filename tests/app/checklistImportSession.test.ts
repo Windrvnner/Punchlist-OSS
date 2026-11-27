@@ -88,6 +88,16 @@ it('brings in the restored review, holds the draft until the write, and offers U
   await vi.waitFor(() => expect(app.store.get().firmList[listId('broad', '')]).toBeUndefined());
 });
 
+it('signed out, Bring In is refused quietly and the dialog says why', async () => {
+  const session = await reviewPortfolio();
+  const signedOut = { ...app.store.get(), signin: { out: true } };
+  (app.store as unknown as { set: (state: unknown) => void }).set(signedOut);
+  await session.bringIn();
+  expect(session.view.work).toEqual({ busy: '', error: `Couldn’t import: ${app.store.readOnly()}` });
+  expect(app.store.get().ui.toasts).toEqual([]);
+  expect(app.store.get().firmList[listId('broad', '')]).toBeUndefined();
+});
+
 it('a finished write leaves a later dialog and its retained draft in place', async () => {
   const session = await reviewPortfolio();
   const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));

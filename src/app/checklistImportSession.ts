@@ -124,8 +124,7 @@ export class ChecklistImportSession {
   start() {
     let before = this.store.get();
     this.stopWatching = this.store.subscribe((state) => {
-      const changed = before.firmList !== state.firmList || before.conflicts !== state.conflicts
-        || before.signin !== state.signin;
+      const changed = before.firmList !== state.firmList || before.conflicts !== state.conflicts;
       before = state;
       if (changed) this.notify();
     });
@@ -207,7 +206,7 @@ export class ChecklistImportSession {
       && (step === 'read' || step === 'columns');
     const { counts } = this.selection(this.review, remove, useReword);
     const wording = this.review && checklistWordingChoices(this.review, remove, useReword, importing);
-    const whyBringIn = target.split ? `${target.splitSays}. Choose one first` : this.store.readOnly() ?? undefined;
+    const whyBringIn = target.split ? `${target.splitSays}. Choose one first` : undefined;
     const canBringIn = this.live && !this.busy && !whyBringIn && target.named && !!counts.items && step === 'review';
     const listReview = {
       review: this.review, counts, askSame, askReword, remove, useReword, wording,
