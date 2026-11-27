@@ -1,6 +1,6 @@
 import { cleanName, EditDeal, withProject } from './commands/deals';
 import type { FieldDraft } from './fieldDrafts';
-import { FieldSave, type FieldSaveOutcome } from './fieldSave';
+import { FieldSave, type FieldSaveOutcome, fieldSaveOutcome } from './fieldSave';
 import { hasTexts, keptDrafts } from './keptText';
 import { pendingSave, sendSave } from './saveOut';
 import type { Store } from './store';
@@ -96,7 +96,7 @@ export class DealRename extends FieldSave {
   private async write(name: string, sent: FieldDraft): Promise<Landed> {
     const commit = (value: string, over: string) =>
       this.store.dispatch(EditDeal, { dealId: this.id, name: value }, { quiet: true, over });
-    const outcome = await this.send(name, sent.base, commit, 'record');
+    const outcome = fieldSaveOutcome(await commit(name, sent.base), 'record');
     const deal = this.store.get().deals[this.id];
     const current = this.kept;
     const related = deal && current && sameBase(current, sent);

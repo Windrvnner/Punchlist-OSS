@@ -15,7 +15,7 @@ export type FieldSaveOutcome =
   | { kind: 'refused'; reason: string }
   | { kind: 'failed'; unreachable: boolean; reason: string };
 
-function fieldSaveOutcome(result: FieldCommitResult, conflicts: 'field' | 'record'): FieldSaveOutcome {
+export function fieldSaveOutcome(result: FieldCommitResult, conflicts: 'field' | 'record'): FieldSaveOutcome {
   if (result.ok) return { kind: 'saved', written: !result.value?.unchanged };
   const { error } = result;
   if (error?.kind === 'conflict' && (conflicts === 'record' || isChangedElsewhere(error))) {
@@ -75,10 +75,6 @@ export class FieldSave {
     if (this.keep === undefined) return;
     if (draft) unsavedFields.set(this.keep, draft);
     else unsavedFields.delete(this.keep);
-  }
-
-  protected async send(text: string, over: string, commit: FieldCommit, conflicts: 'field' | 'record') {
-    return fieldSaveOutcome(await commit(text, over), conflicts);
   }
 }
 
@@ -257,7 +253,7 @@ export class EditFieldSave extends FieldSave {
     const again = this.resending;
     this.resending = false;
     const over = this.base;
-    const outcome = await this.send(text, over, commit, 'field');
+    const outcome = fieldSaveOutcome(await commit(text, over), 'field');
     this.saving--;
     this.handleOutcome(text, over, outcome, commit, again);
     return outcome;
