@@ -38,8 +38,6 @@ jobs:
       - run: node scripts/check-open-issues.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
-      # every tracked test file must match the include list in scripts/vitest-files.mjs
-      - run: node scripts/check-skipped-tests.mjs --files
 
   # the unit, backend and end-to-end tests, in three groups at once
   unit:

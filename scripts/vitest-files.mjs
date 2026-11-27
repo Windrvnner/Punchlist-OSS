@@ -13,10 +13,12 @@ export const testInclude = [
 // The AI check against a real model service runs only when someone runs npm run ai:check -- <backend> themselves;
 // never in npm test or check:all. The live tests on Claude make paid calls: only npm run e2e:live (PUNCHLIST_LIVE=1)
 // runs them, never a plain run.
+export const isLive = (env) => env.PUNCHLIST_LIVE === '1';
+export const isAiCheck = (env) => ['claude', 'north', 'openai'].includes(env.PUNCHLIST_AI_CHECK ?? '');
+
 export function liveExclude(env) {
-  const aiCheck = ['claude', 'north', 'openai'].includes(env.PUNCHLIST_AI_CHECK ?? '');
   return [
-    ...(aiCheck ? [] : ['tests/e2e/ai-check-live.test.ts']),
-    ...(env.PUNCHLIST_LIVE === '1' ? [] : ['tests/e2e/live*.test.ts']),
+    ...(isAiCheck(env) ? [] : ['tests/e2e/ai-check-live.test.ts']),
+    ...(isLive(env) ? [] : ['tests/e2e/live*.test.ts']),
   ];
 }

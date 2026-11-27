@@ -3,15 +3,20 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // @ts-expect-error the scripts are plain JavaScript
-import { skippedMatches, skippedProblems, unrunTestFiles } from '../../scripts/check-skipped-tests.mjs';
+import { isTestFile, skippedMatches, skippedProblems, unrunTestFiles } from '../../scripts/check-skipped-tests.mjs';
+import { isAiCheck, isLive, liveExclude } from '../../scripts/vitest-files.mjs';
 // @ts-expect-error the script is plain JavaScript
 import { vitestResults } from '../../scripts/gate-compare.mjs';
 
 const script = path.resolve('scripts/check-skipped-tests.mjs');
-mkdirSync(path.resolve('out/gate'), { recursive: true });
-const gateRoot = mkdtempSync(path.resolve('out/gate/test-'));
+// the report fixtures live under out/gate/, made when the tests run
+let gateRoot = '';
+beforeAll(() => {
+  mkdirSync(path.resolve('out/gate'), { recursive: true });
+  gateRoot = mkdtempSync(path.resolve('out/gate/test-'));
+});
 afterAll(() => rmSync(gateRoot, { recursive: true, force: true }));
 
 const file = 'tests/app/a.test.ts';
@@ -58,6 +63,13 @@ describe('test files Vitest never runs', () => {
     expect(problems).toEqual(['tests/ui/a.test.ts is never run by Vitest']);
   });
 
+  it('refuses a test file of any shape Vitest could run, outside the include list', () => {
+    const problems = unrunTestFiles(['tests/ui/a.test.mjs', 'tests/ui/b.test.jsx', 'tests/ui/c.test.cts']);
+    expect(problems).toHaveLength(3);
+    expect(['a.test.mjs', 'b.test.tsx', 'c.test.cjs'].every((name) => isTestFile(`tests/x/${name}`))).toBe(true);
+    expect(isTestFile('tests/desktop/smoke.spec.mjs')).toBe(false);
+  });
+
   it('does not count the live tests the config leaves out', () => {
     const files = ['tests/e2e/live-agent.test.ts', 'tests/e2e/ai-check-live.test.ts', 'tests/e2e/split.test.ts'];
     expect(unrunTestFiles(files)).toEqual([]);
@@ -67,6 +79,14 @@ describe('test files Vitest never runs', () => {
     const tracked = spawnSync('node', [script, '--files'], { encoding: 'utf8' });
     expect(tracked.stderr).toBe('');
     expect(tracked.status).toBe(0);
+  });
+});
+
+describe('the live switches', () => {
+  it('reads the live run and the AI check from the environment', () => {
+    expect([isLive({}), isLive({ PUNCHLIST_LIVE: '1' })]).toEqual([false, true]);
+    expect([isAiCheck({}), isAiCheck({ PUNCHLIST_AI_CHECK: 'north' })]).toEqual([false, true]);
+    expect(liveExclude({ PUNCHLIST_LIVE: '1', PUNCHLIST_AI_CHECK: 'openai' })).toEqual([]);
   });
 });
 
@@ -87,6 +107,17 @@ describe('the command', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`No Vitest report at ${reportPath}`);
   });
+
+  it.each([[undefined], ['/tmp/elsewhere'], ['out/gate']])(
+    'fails with no path when PUNCHLIST_GATE_DIR is %s, as it is outside out/gate/',
+    (dir) => {
+      const env = { ...process.env, PUNCHLIST_GATE_DIR: dir };
+      if (dir === undefined) delete env.PUNCHLIST_GATE_DIR;
+      const result = spawnSync('node', [script], { encoding: 'utf8', env });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('No Vitest report at');
+    },
+  );
 
   it('fails on an unlisted skip and passes a run without one', () => {
     const skipped = run(write(JSON.stringify(report(['skipped']))));
