@@ -12,6 +12,7 @@ import type { ResearchStep } from '../ports';
 import type { DocRecord } from './documents';
 import { batchAsk, noun, oneLine, quoted } from './agentPrompts';
 import { docsUnusable } from './recordIds';
+import { withFewerChanges, type ChangeShare } from './limits';
 
 /** batches of a folder review read at the same time */
 const AT_ONCE = 3;
@@ -249,18 +250,13 @@ class FolderPass {
    * awaited here and nowhere deeper, so that batches read side by side interleave as they always have.
    */
   private async readBatch(index: number): Promise<void> {
-    const { kit } = this.run;
     const reading = this.startBatch(index);
     try {
-      const { files, listing, got } = await kit.send(reading.sent, this.fast, this.run.spansDeals);
-      if (!got.length) return this.notRead(reading, 'they could not be opened on this PC', 'could not be opened');
-      const prompt = this.ask(reading, listing);
-      // a reply citing a document the batch was not given is asked again (#1162)
-      const unusable = docsUnusable(got, this.run.spansDeals, BATCH_KEYS, kit.where);
-      const ask = { kind: 'folder', model: this.fast, system: kit.rules, files, prompt, unusable };
-      const reply = await kit.askJson(ask, BATCH_KEYS, '{"text": "…", "sources": […]}');
-      if (!reply) return this.notRead(reading, 'the reply on them could not be read', 'could not be read');
-      this.keep(reading, got, reply);
+      // a batch refused as too long lists fewer tracked changes, while it lists any, before it is not read (#1381)
+      const read = await withFewerChanges((share) => this.askBatch(reading, share));
+      if (!read) return this.notRead(reading, 'they could not be opened on this PC', 'could not be opened');
+      if (!read.reply) return this.notRead(reading, 'the reply on them could not be read', 'could not be read');
+      this.keep(reading, read.got, read.reply);
     } catch (e) {
       const code = codeOf(e);
       if (code === 'unreachable') throw e;
@@ -269,6 +265,20 @@ class FolderPass {
         : 'they could not be read';
       this.notRead(reading, why, 'could not be read');
     }
+  }
+
+  /** a batch's documents sent and the fast model's reply on them; null when none of them could be opened on this PC */
+  private async askBatch(reading: BatchReading, share: ChangeShare) {
+    const { kit } = this.run;
+    const { files, listing, got } = await kit.send(reading.sent, this.run.spansDeals, share);
+    if (!got.length) {
+      return null;
+    }
+    const prompt = this.ask(reading, listing);
+    // a reply citing a document the batch was not given is asked again (#1162)
+    const unusable = docsUnusable(got, this.run.spansDeals, BATCH_KEYS, kit.where);
+    const ask = { kind: 'folder', model: this.fast, system: kit.rules, files, prompt, unusable };
+    return { got, reply: await kit.askJson(ask, BATCH_KEYS, '{"text": "…", "sources": […]}') };
   }
 
   /** a batch's step, and its documents opened to be listed to the model */

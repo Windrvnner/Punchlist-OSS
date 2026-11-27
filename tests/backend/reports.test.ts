@@ -20,7 +20,7 @@ import type { DocRecord } from '../../src/backend/documents';
 import type { Sent, Cited } from '../../src/backend/agent';
 import type { Unusable } from '../../src/backend/agentKit';
 import { paths } from './fixtures/relecloudRoom';
-import { setup, deal, val, itemsIn, OK, Mem, type Call } from './reviewKit';
+import { setup, deal, val, itemsIn, OK, Mem, clauseChanges, wasLines, type Call } from './reviewKit';
 import { fromStoreName } from '../../src/backend/storeKeeper';
 import type { Finding } from '../../src/domain/model';
 
@@ -872,6 +872,40 @@ describe('third-party reports in the app’s checks', () => {
     val(await s.ai.checkAll({ dealId: 'd1' }));
     await s.ai.settled();
     expect(s.reportCalls.length).toBe(before);
+  });
+
+  it('a report draft refused as too long for its tracked changes is read with fewer of them listed, and raises '
+    + 'every issue (#1381)', async () => {
+    const shared = new Mem();
+    // the newest IE draft, read as a report by its path, and the tax opinion, looked at first
+    const tax = { ...room().find((r) => r.name === 'Tax Opinion.pdf')!, tracked: 1_000 };
+    const marked = [...recs().map((r) => (r.docId.endsWith('f02') ? { ...r, tracked: 1_000 } : r)), tax];
+    const looks = (c: Call) => (c.prompt.includes('Read the first pages') ? { report: true } : script(c));
+    const s = setupReports(script, { d1: marked },
+      { shared, installId: 'pc1', checklist, reports: looks, changes: clauseChanges(1_000) });
+    await deal(s.repo);
+    const orig = s.svc.complete.bind(s.svc);
+    let refused = 0;
+    s.svc.complete = async (input) => {
+      if (wasLines(input.prompt).length > 300) {
+        if (/is a report by an outside advisor|Read the first pages/.test(input.prompt)) refused++;
+        throw Object.assign(new Error('too long'), { code: 'toolong' });
+      }
+      return orig(input);
+    };
+    val(await s.ai.firstPass('d1'));
+    await s.ai.settled();
+    const marks = ['Independent Engineer Report.pdf', 'Tax Opinion.pdf'];
+    const answered = s.reportCalls.filter((c) => c.files.length && marks.includes(fromStoreName(c.files[0].name)!.name))
+      .map((c) => wasLines(c.prompt).length);
+    const looked = s.reportCalls.filter((c) => c.prompt.includes('Read the first pages'));
+    expect(refused).toBe(6);                                    // 1,000 then 500 changes, for each of three calls
+    expect(answered).toEqual([250, 250, 250]);
+    expect(looked.map((c) => fromStoreName(c.files[0].name)!.name)).toEqual(['Tax Opinion.pdf']);
+    const titles = val(await s.repo.list('finding', 'd1')).map((l) => (l.envelope.data as Finding).title);
+    expect(titles).toEqual(expect.arrayContaining([
+      ...ISSUES['Independent Engineer Report.pdf'], ...ISSUES['Tax Opinion.pdf'],
+    ]));
   });
 
   it('a second PC on the deal reads no report again and raises nothing again', async () => {

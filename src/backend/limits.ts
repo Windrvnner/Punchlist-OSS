@@ -68,3 +68,29 @@ export function limitsOf(model?: { maxTokens?: number | null; contextLength?: nu
   return { output, input: Math.max(1, input) };
 }
 const positive = (n: number | null | undefined) => (typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined);
+
+/**
+ * How much of each draft's tracked-change list a request lists: all of it at first, then half for each refusal as too
+ * long, the rest counted, until none is listed, before any document is left out (#1381). `listed` is how many passages
+ * the last request listed. A request with other documents is a new one, with a share of its own (`withFewerChanges`);
+ * one that sends fewer, because a document could not be opened on this PC, keeps its share.
+ */
+export type ChangeShare = { halvings: number; listed: number };
+export const allChanges = (): ChangeShare => ({ halvings: 0, listed: 0 });
+/**
+ * `run` again with half as many changes listed after each refusal as too long, while the last request listed any: the
+ * one way every request with a draft meets that refusal before a document is left out (#1381)
+ */
+export async function withFewerChanges<T>(run: (share: ChangeShare) => Promise<T>): Promise<T> {
+  const share = allChanges();
+  for (;;) {
+    try {
+      return await run(share);
+    } catch (e) {
+      if (!isTooLong(e) || !share.listed) {
+        throw e;
+      }
+      share.halvings++;
+    }
+  }
+}

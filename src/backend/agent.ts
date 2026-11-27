@@ -61,7 +61,7 @@ import type { ModelThread, Research } from '../ports';
 import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
 import { strings, prose, list as listOf } from './lenient';
-import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY } from './limits';
+import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY, withFewerChanges, type ChangeShare } from './limits';
 import { control, SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
 import type { Cited, Run, Sent } from './agentKit';
@@ -206,20 +206,38 @@ class Answering {
 
   /** one turn of the main session: the answer when it gives one, else null once its tool has been used */
   private async turn(turnNumber: number): Promise<Result<Answered> | null> {
-    const { kit, question, run } = this;
+    const { run } = this;
     // stopped by the person: answered now, from what was found
     const last = turnNumber === this.limits.turns || this.stopped;
     if (this.stopped && !run.steps.some((x) => x.text === 'Stopped')) {
       run.steps.push({ kind: 'stop', text: 'Stopped', result: 'answered from what was found', done: true });
     }
-    const { files, listing, got } = await kit.send(run.whole, question.model, run.spansDeals);
+    // a turn refused as too long lists fewer tracked changes, while it lists any (#1381)
+    const reply = await withFewerChanges((share) => this.reply(turnNumber, last, share));
+    if (!reply) {
+      return fail({ kind: 'failed', message: UNREAD_REPLY });
+    }
+    const tool = typeof reply.tool === 'string' ? reply.tool.trim().toLowerCase() : '';
+    if (strings(reply.notes).length) run.notes = strings(reply.notes).join(' ');
+    if (!tool || (last && !strings(reply.text).length)) return this.answered(reply, last);
+    run.done.push(await this.useTool(tool, reply));
+    return null;
+  }
+
+  /**
+   * the main session's reply to this turn, with the documents read so far and their tracked changes as `share`
+   * leaves them
+   */
+  private async reply(turnNumber: number, last: boolean, share: ChangeShare): Promise<Record<string, unknown> | null> {
+    const { kit, question, run } = this;
+    const { files, listing, got } = await kit.send(run.whole, run.spansDeals, share);
     // a document that cannot be opened on this PC was not read
     if (got.length < run.whole.length) run.whole = got;
     const turn = this.turnOf(turnNumber, last, files, listing);
     this.turnNow = turn;
-    const reply = kit.talk
-      ? await this.conversation.ask(turn)
-      : await kit.askJson(
+    return kit.talk
+      ? this.conversation.ask(turn)
+      : kit.askJson(
         {
           kind: 'answer', model: question.model, system: turn.system, prompt: turn.full(true), files,
           unusable: turn.unusable,
@@ -227,12 +245,6 @@ class Answering {
         turn.keys,
         turn.shape,
       );
-    if (!reply) return fail({ kind: 'failed', message: UNREAD_REPLY });
-    const tool = typeof reply.tool === 'string' ? reply.tool.trim().toLowerCase() : '';
-    if (strings(reply.notes).length) run.notes = strings(reply.notes).join(' ');
-    if (!tool || (last && !strings(reply.text).length)) return this.answered(reply, last);
-    run.done.push(await this.useTool(tool, reply));
-    return null;
   }
 
   /** the pieces of this turn's prompt */

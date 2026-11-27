@@ -7,6 +7,7 @@ import type { Cited } from './agent';
 import type { Source } from '../domain/model';
 import { list as listOf, readJson, isObject, strings, tagNumber, prose, PARAGRAPH_SEAM } from './lenient';
 import { unknownIds } from './recordIds';
+import { withFewerChanges } from './limits';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
   isCut, yes,
@@ -254,11 +255,21 @@ const notReport = (reply: Record<string, unknown>) => 'report' in reply && !yes(
 export async function read(
   k: ReportKit, rec: DocRecord, before: ReadLine | undefined, last: boolean,
 ): Promise<ReadLine | 'not' | 'lost' | null> {
-  const s = await k.send(rec, k.models.standard);
-  if (!s) return 'lost';                       // cannot be sent from this PC: left for one that can, not a try
-  const r = new ReportRead(k, rec, s, before);
   const known = await k.findings();
-  const got = await ask(r, known);
+  // refused as too long, it is sent again with fewer of its tracked changes listed, while any are (#1381)
+  const sentAndAsked = await withFewerChanges(async (share) => {
+    const s = await k.send(rec, share);
+    if (!s) {
+      return null;
+    }
+    const r = new ReportRead(k, rec, s, before);
+    return { r, got: await ask(r, known) };
+  });
+  // cannot be sent from this PC: left for one that can, not a try
+  if (!sentAndAsked) {
+    return 'lost';
+  }
+  const { r, got } = sentAndAsked;
   if (!got.reply) return null;
   if (notReport(got.reply)) return 'not';
   r.heard(got.reply);
