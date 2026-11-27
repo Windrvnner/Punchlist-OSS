@@ -25,8 +25,21 @@ describe('the vendor name scan', () => {
   it('refuses a vendor name written in src/backend', () => {
     const source = `export const label = '${'Cla' + 'ude'} Haiku';`;
     const found = groupMatches(vendorMatchesIn('src/backend/x.ts', source));
-    expect(found).toEqual([{ file: 'src/backend/x.ts', kind: 'vendor', line: source, count: 1, lines: [1] }]);
+    expect(found).toEqual([{ file: 'src/backend/x.ts', kind: 'vendor', line: source, count: 2, lines: [1, 1] }]);
     const problems: string[] = allowanceProblems(found, [], { decisions: [], verified: [] });
-    expect(problems).toEqual([expect.stringContaining('1 not listed')]);
+    expect(problems).toEqual([expect.stringContaining('2 not listed')]);
+  });
+
+  it('records each occurrence at its own line, deep in a multi-line template too', () => {
+    const vendor = 'Cla' + 'ude';
+    const source = ['export const text = `', 'plain', `ask ${vendor} or ${vendor}`, `and ${vendor}`, '`;'].join('\n');
+    const matches = vendorMatchesIn('src/app/x.ts', source);
+    expect(matches.map((match) => [match.number, match.line])).toEqual([
+      [3, `ask ${vendor} or ${vendor}`], [3, `ask ${vendor} or ${vendor}`], [4, `and ${vendor}`],
+    ]);
+  });
+
+  it('fails on a source that does not parse, rather than reading none of it', () => {
+    expect(() => vendorMatchesIn('src/app/x.ts', 'export const = ;')).toThrow(/x\.ts/);
   });
 });

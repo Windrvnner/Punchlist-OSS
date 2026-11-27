@@ -34,7 +34,7 @@ const TYPES: Record<number, string> = { 400: 'invalid_request_error', 401: 'auth
 export const jwt = (payload: Record<string, unknown>) => [{ alg: 'RS256', typ: 'JWT' }, payload].map((p) => Buffer.from(JSON.stringify(p)).toString('base64url')).join('.') + '.c2ln';
 
 /** the model list the stand-in serves, in place of its default */
-type ModelNames = { name: string; display_name: string }[];
+type ModelNames = { name: string; display_name?: string }[];
 
 interface StandInOptions {
   ssoToken?: string | (() => string);

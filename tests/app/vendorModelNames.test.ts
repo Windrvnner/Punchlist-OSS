@@ -11,13 +11,12 @@ import { fakeApi } from '../backend/claudeStandIn';
 import { northStandIn } from '../backend/northStandIn';
 import { fakeServer } from '../backend/openaiStandIn';
 import { srcSources, vendorMatchesIn, VENDOR, type VendorMatch } from './vendorNamesKit';
-import {
-  allowanceProblems, decisionEntries, groupMatches, unlistedMatches,
 // @ts-expect-error the script is plain JavaScript
-} from '../../scripts/allowance.mjs';
+import { allowanceProblems, decisionEntries, groupMatches, keyOf, unlistedMatches } from '../../scripts/allowance.mjs';
 
 type Names = { models: { id: string; name: string }[] };
-const vendorTiers = { fast: 'gpt-fast', standard: 'gpt-standard', thorough: 'gpt-thorough' };
+// One vendor-named id for every tier, so each pass-through route shows one name.
+const vendorTiers = { fast: 'gpt-model', standard: 'gpt-model', thorough: 'gpt-model' };
 
 /** The names the model list shows, as `model name` matches in the connector's source file. */
 function modelNameMatches(file: string, listed: Names): VendorMatch[] {
@@ -46,10 +45,10 @@ async function openAiNames(): Promise<VendorMatch[]> {
 
 async function northNames(): Promise<VendorMatch[]> {
   const found: VendorMatch[] = [];
+  // the second model has no display name, so its name is the id (`display_name || name`)
+  const models = [{ name: 'gpt-model', display_name: 'GPT Model' }, { name: 'gpt-plain' }];
   for (const olderNorth of [false, true]) {
-    const north = await northStandIn({
-      models: Object.values(vendorTiers).map((name) => ({ name, display_name: name.toUpperCase() })),
-    });
+    const north = await northStandIn({ models });
     if (olderNorth) north.faults.push({ path: '/v2/models', status: 404 });
     const token = tokenHolder({ waitMs: 2000, token: 'good-token' });
     const service = northService({
@@ -61,10 +60,20 @@ async function northNames(): Promise<VendorMatch[]> {
   return found;
 }
 
+/** One match per connector file and name, however many times the test asked for it. */
+let modelNames: Promise<VendorMatch[]> | undefined;
+function shownModelNames(): Promise<VendorMatch[]> {
+  modelNames ??= Promise.all([claudeNames(), openAiNames(), northNames()]).then((each) => {
+    const all = each.flat();
+    return all.filter((one, at) => all.findIndex((other) => keyOf(other) === keyOf(one)) === at);
+  });
+  return modelNames;
+}
+
 describe('vendor names in src and in the shown model list', () => {
   it('is listed in scripts/vendor-names-allowance.json, every match and every entry', async () => {
     const strings = srcSources().flatMap((file) => vendorMatchesIn(file, readFileSync(file, 'utf8')));
-    const names = [...await claudeNames(), ...await openAiNames(), ...await northNames()];
+    const names = await shownModelNames();
     const found = groupMatches([...strings, ...names]);
     const allowance = JSON.parse(readFileSync('scripts/vendor-names-allowance.json', 'utf8'));
     const options = {
@@ -79,12 +88,17 @@ describe('vendor names in src and in the shown model list', () => {
     expect(allowanceProblems(found, allowance, options), message).toEqual([]);
   });
 
-  it('records the names each connector shows, including a pass-through of the service\'s own', async () => {
-    const lines = (matches: VendorMatch[]) => matches.map((match) => match.line);
-    expect(lines(await claudeNames())).toContain('claude-custom');
-    expect(lines(await openAiNames())).toEqual(['gpt-fast', 'gpt-standard', 'gpt-thorough']);
-    expect(lines(await northNames())).toEqual([
-      'GPT-FAST', 'GPT-STANDARD', 'GPT-THOROUGH', 'gpt-fast', 'gpt-standard', 'gpt-thorough',
+  it('shows exactly these names, one for each route a connector passes through', async () => {
+    const shown = (await shownModelNames()).map((match) => `${match.file} ${match.line}`);
+    expect(shown.sort()).toEqual([
+      'src/backend/claude.ts Claude Haiku 5.5',
+      'src/backend/claude.ts Claude Opus 5.5',
+      'src/backend/claude.ts Claude Sonnet 5.5',
+      'src/backend/claude.ts claude-custom',
+      'src/backend/north.ts GPT Model',
+      'src/backend/north.ts gpt-model',
+      'src/backend/north.ts gpt-plain',
+      'src/backend/openai.ts gpt-model',
     ]);
   });
 });
