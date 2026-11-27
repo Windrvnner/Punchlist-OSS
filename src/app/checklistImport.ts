@@ -483,9 +483,9 @@ export function checklistShelf(state: State) {
 }
 
 export async function submitChecklist(
-  store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string,
+  store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string, instance?: symbol,
 ) {
-  const hold = holdChecklistSubmission(importKey);
+  const hold = holdChecklistSubmission(importKey, instance);
   if (!hold) return fail({ kind: 'rejected', message: 'This import is still running' });
   try {
     const name = target.layer === 'broad' ? '' : target.name;

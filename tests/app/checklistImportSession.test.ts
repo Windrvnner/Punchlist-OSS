@@ -104,6 +104,29 @@ it('a finished write leaves a later dialog and its retained draft in place', asy
   expect(keptImport(key)?.paste).toBe('Supply the signed security agreements.');
 });
 
+it('keeps new typing from a reopened import while its previous instance finishes writing', async () => {
+  const first = await reviewPortfolio();
+  const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
+  const write = first.bringIn();
+  await held.entered;
+  first.dispose();
+  const second = open();
+  second.change();
+  second.setPaste('  Obtain the signed lender consent.  ');
+  try {
+    expect(keptImport(key)?.paste).toBe('  Obtain the signed lender consent.  ');
+  } finally {
+    held.release();
+    await write;
+  }
+  expect(app.store.get().ui.firmChecklist?.step).toBe('import');
+  expect(app.store.get().ui.toasts.some((toast) => toast.action?.label === 'Undo All')).toBe(true);
+  second.close();
+  const reopened = open();
+  reopened.change();
+  expect(reopened.view.source.paste).toBe('  Obtain the signed lender consent.  ');
+});
+
 it('ignores a retry that ends after change and detects headings before manual column selection', async () => {
   app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
   const session = open();

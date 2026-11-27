@@ -71,6 +71,7 @@ function readPreview(
 /** A single import, from its original file or paste through the reviewed list and its Undo All. */
 export class ChecklistImportSession {
   private readonly key: string;
+  private readonly instance = Symbol();
   private setAside: boolean;
   private paste: string;
   private text: ChecklistText | null;
@@ -141,7 +142,8 @@ export class ChecklistImportSession {
   private keep() {
     if (!this.live) return;
     const { paste, table, text, reads, review, choices } = this;
-    this.setAside = keepChecklistImport(this.key, { paste, table, text, reads, review, choices }, this.setAside);
+    const draft = { paste, table, text, reads, review, choices };
+    this.setAside = keepChecklistImport(this.key, draft, this.setAside, this.instance);
     this.notify();
   }
 
@@ -449,7 +451,7 @@ export class ChecklistImportSession {
     const dialog = this.store.get().ui.firmChecklist;
     this.activity('importing');
     try {
-      const result = await submitChecklist(this.store, this.key, target, selection.items, file);
+      const result = await submitChecklist(this.store, this.key, target, selection.items, file, this.instance);
       if (!result.ok) return this.activity('', `Couldn’t import: ${result.error.message}`);
       this.busy = '';
       if (this.live && this.store.get().ui.firmChecklist === dialog) this.back();

@@ -10,12 +10,12 @@ import { dropImport, keptImport, keepImport } from './keptImports';
 import type { Asked, Review } from './checklistImport';
 import { clearedHeading, type ChecklistText } from './listRead';
 
-const submitting = new Set<string>();
+const submitting = new Map<string, symbol | undefined>();
 
 /** Each way into the checklist import holds its own draft during the write (#931). */
-export function holdChecklistSubmission(key: string) {
+export function holdChecklistSubmission(key: string, instance?: symbol) {
   if (submitting.has(key)) return null;
-  submitting.add(key);
+  submitting.set(key, instance);
   const kept = keptImport(key);
   return {
     written: () => {
@@ -121,8 +121,11 @@ export function readKeptChecklist(key: string, fresh: boolean): { left: Checklis
  * Writes the import as it is now. A list read in its place is written over whole. Before a list is read only the
  * paste box is kept, as typed. Returns whether a kept import that was not shown is still set aside (#381).
  */
-export function keepChecklistImport(key: string, now: ChecklistKept & { paste: string }, setAside: boolean): boolean {
-  if (submitting.has(key)) return setAside;
+export function keepChecklistImport(
+  key: string, now: ChecklistKept & { paste: string }, setAside: boolean, instance?: symbol,
+): boolean {
+  // A second opening may edit the same draft while its predecessor writes. Only the submitting form is held (#1200).
+  if (submitting.has(key) && (!instance || submitting.get(key) === instance)) return setAside;
   const { paste, table, text } = now;
   if (!table && !text) return keepPasteAlone(key, paste, setAside);
   keepImport(key, { ...now });
