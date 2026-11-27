@@ -171,62 +171,54 @@ function useDealRename(dealId: string) {
   const input = useRef<HTMLInputElement>(null);
   const [, redraw] = useState(0);
   const render = () => redraw((version) => version + 1);
-  const [field] = useState(() => new DealRename(store, dealId, {
-    render,
-    focus: () => input.current?.focus(),
-    close: () => {
-      render();
-      // Return to ⋯ unless clicking away already moved focus to another control.
-      const active = document.activeElement;
-      if (!active || active === document.body || active === input.current) {
-        document.getElementById('deal-more')?.focus();
-      }
-    },
-  }));
+  // focus goes back to ⋯ unless a click moved it
+  const close = () => {
+    render();
+    const active = document.activeElement;
+    if (!active || active === document.body || active === input.current) document.getElementById('deal-more')?.focus();
+  };
+  const [field] = useState(() => new DealRename(store, dealId, { render, close, focus: () => input.current?.focus() }));
   useLayoutEffect(() => () => field.dispose(), [field]);
   return { field, input };
 }
 
+/** The deal's name, which Rename turns into a field in place. */
 function DealName({ deal: d, field, input }: { deal: Deal } & ReturnType<typeof useDealRename>) {
-  const overflow = () => {
-    const box = input.current;
-    if (box) box.classList.toggle('over', box.scrollWidth > box.clientWidth + 1);
-  };
+  // a name longer than the field fades out at its edges instead of being cut through a letter
+  const over = () => input.current?.classList.toggle('over', input.current.scrollWidth > input.current.clientWidth + 1);
   useLayoutEffect(() => {
-    if (field.editing) {
-      input.current?.focus();
-      input.current?.select();
-      overflow();
-    }
+    if (!field.editing) return;
+    input.current?.focus();
+    input.current?.select();
+    over();
   }, [field.editing]);
-  if (!field.editing) {
-    const [head, tail] = recoveredParts(d.name);
-    return <>{tail ? <RecoveredTitle name={d.name} head={head} tail={tail} />
-      : <h1 class="ttl left" title={d.name} dir={nameDir(d.name)}>{d.name}</h1>}
-      {field.kept && <button type="button" class="linkb keptname" id="deal-name-kept" title={field.kept.text}
-        onClick={() => field.open()}>Rename not saved</button>}</>;
-  }
-  const keyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
+  const [head, tail] = recoveredParts(d.name);
+  if (!field.editing) return <>{tail ? <RecoveredTitle name={d.name} head={head} tail={tail} />
+    : <h1 class="ttl left" title={d.name} dir={nameDir(d.name)}>{d.name}</h1>}
+    {field.kept && <button type="button" class="linkb keptname" id="deal-name-kept" title={field.kept.text}
+      onClick={() => field.open()}>Rename not saved</button>}</>;
+  const keyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
       void field.submit('enter');
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
       field.escape();
     }
   };
+  const typed = (box: HTMLInputElement) => {
+    box.maxLength = dealNameRoom(box.value);
+    field.typed(box.value);
+    over();
+  };
+  const keepFocus = (e: MouseEvent) => e.preventDefault();
   return <h1 class="ttl left renaming"><input class="rename" id="deal-name" ref={input} aria-label="Deal name"
-    maxLength={dealNameRoom(field.text)} defaultValue={field.text} onKeyDown={keyDown}
-    onInput={({ currentTarget }) => {
-      currentTarget.maxLength = dealNameRoom(currentTarget.value);
-      field.typed(currentTarget.value);
-      overflow();
-    }} onBlur={() => void field.submit('blur')} />
+    maxLength={dealNameRoom(field.text)} defaultValue={field.text} onInput={(e) => typed(e.currentTarget)}
+    onBlur={() => void field.submit('blur')} onKeyDown={keyDown} />
     {field.changedElsewhere && <span class="efstate ext" id="deal-name-moved">Changed elsewhere · <button type="button"
-      onMouseDown={(event) => event.preventDefault()} onClick={() => void field.submit('mine')}>Keep Mine</button>
-      {' '}<button type="button" onMouseDown={(event) => event.preventDefault()}
-        onClick={() => field.takeTheirs()}>Take Theirs</button></span>}</h1>;
+      onMouseDown={keepFocus} onClick={() => void field.submit('mine')}>Keep Mine</button> <button type="button"
+      onMouseDown={keepFocus} onClick={() => field.takeTheirs()}>Take Theirs</button></span>}</h1>;
 }
 
 /**
