@@ -101,11 +101,19 @@ Each CI job passes its own scope, so an entry that no longer matches is reported
 A skipped-test entry with `root: true` is for a skip that happens only when the tests run as root: it excuses a
 skip, and is reported when it no longer matches, only in a run as root (CI never runs as root).
 `node scripts/check-skipped-tests.mjs --files` fails on a test file that Vitest never runs.
-The pane-of-glass check cannot see plain `if` logic on state; `Math.min` and `Math.max`; `.flatMap`, `.at`, and
-`.includes`; `Intl` and `toLocale...String`; `requestAnimationFrame`; a limit given by a named constant (including
-changing its value); a swap between identical trimmed lines; edits inside a loop body; or references that are not called
-(`const f = Date.now`, `rows.sort` passed as a value).
-Review covers them.
+The timer, list, loop, limit, date, and pattern kinds catch only these forms:
+any reference to `setTimeout`, `setInterval`, or `requestIdleCallback`;
+a call of a list method named in `scripts/pane-of-glass-rules.mjs` (such as `.sort`, `.filter`, `.slice`, `.forEach`,
+`.reverse`, or `.indexOf`) or of `Object.groupBy` or `Map.groupBy`;
+a `for`, `while`, or `do` loop;
+a comparison of a `.length` or `.size` read with anything but 0, an assignment to `.length`, and a numeric
+`maxLength`, `minLength`, `min`, or `max` attribute;
+`Date.parse`, `Date.UTC`, `Date.now`, and `new Date` with arguments;
+and a regex literal or a `RegExp` call.
+Any other method, property, or construct is review's job, for example `.split`, `.trim`, `.startsWith`, `.pop`,
+`.shift`, a method name held in a variable, `Function.prototype.call`, destructured `length` or `Date.parse`,
+`performance.now`, `queueMicrotask`, plain `if` logic on state, references that are not called
+(`const f = Date.now`, `rows.sort` passed as a value), and named constants.
 
 The GitHub Actions workflow also builds the Windows installer when it is started by hand.
 

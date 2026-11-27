@@ -1,9 +1,8 @@
 // Keep "The frontend is a pane of glass" in CLAUDE.md true: every access the check finds in a screen is listed line
 // by line in scripts/pane-of-glass-baseline.json, with the issue that removes it.
 //
-// What this check cannot see: plain `if` logic on state; Math.min and Math.max; .flatMap, .at and .includes; Intl and
-// toLocale...String; requestAnimationFrame; a limit given by a named constant (including changing its value); a swap
-// between identical trimmed lines; edits inside a loop body. Review covers them.
+// It catches only the syntax forms that scripts/pane-of-glass-rules.mjs and pane-of-glass-matches.mjs list. Any other
+// method, property or construct is review's job (docs/development.md).
 //
 // `--lower` lowers each entry's count to its matches and removes unmatched entries; it never adds an entry.
 // `--list` prints the groups not yet listed, as entries without an issue or decision.
@@ -16,11 +15,10 @@ const baselinePath = 'scripts/pane-of-glass-baseline.json';
 const read = (file) => readFileSync(file, 'utf8');
 const openIssuesNotice = 'Issues named in the allowances are checked as open by CI (scripts/check-open-issues.mjs).';
 const limits = [
-  'Rules written as plain if logic on state are not visible to this check; review covers them.',
-  'Also not visible: Math.min and Math.max; .flatMap, .at and .includes; Intl and toLocale...String;',
-  'requestAnimationFrame; a limit given by a named constant (including changing its value); a swap between',
-  'identical trimmed lines; edits inside a loop body; references that are not called (`const f = Date.now`,',
-  '`rows.sort` passed as a value).',
+  'Only the syntax forms listed in docs/development.md are caught. Any other method, property or construct is',
+  "review's job: for example .split, .trim, .startsWith, .pop, .shift, a method name held in a variable,",
+  'Function.prototype.call, destructured length or Date.parse, performance.now, queueMicrotask, plain if logic on',
+  'state, references that are not called, and named constants.',
   'See "The frontend is a pane of glass" in CLAUDE.md.',
   openIssuesNotice,
 ];

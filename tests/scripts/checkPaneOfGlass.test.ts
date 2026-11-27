@@ -253,13 +253,12 @@ describe('the line-by-line allowance', () => {
     expect(slashPath('src/ui', 'view.tsx')).toBe('src/ui/view.tsx');
   });
 
-  it('lists the cannot-see items and the stated limit when it fails', () => {
+  it('states that only the listed forms are caught when it fails', () => {
     const repo = fixture();
     repo.write(file, serviceLine);
     const { stderr } = repo.run();
-    expect(stderr).toContain('Rules written as plain if logic on state are not visible to this check');
-    expect(stderr).toContain('Math.min');
-    expect(stderr).toContain('requestAnimationFrame');
+    expect(stderr).toContain('Only the syntax forms listed in docs/development.md are caught');
+    expect(stderr).toContain("review's job");
     expect(stderr).toContain('references that are not called');
     expect(stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
   });
