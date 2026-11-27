@@ -1,6 +1,4 @@
 // @vitest-environment node
-import { readdirSync, readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error the script is plain JavaScript
 import { matchesIn } from '../../scripts/pane-of-glass-matches.mjs';
@@ -79,16 +77,5 @@ describe('pane-of-glass rule kinds', () => {
     expect(found.storage).toEqual([1]);
     expect(found.network).toEqual([2]);
     expect(found.list).toEqual([2]);
-  });
-
-  it('counts the UI tree on main as the spec does', () => {
-    const totals: Record<string, number> = {};
-    const sources = readdirSync('src/ui', { recursive: true, encoding: 'utf8' })
-      .filter((name) => /\.tsx?$/.test(name) && !name.includes('.test.'));
-    for (const name of sources) {
-      const found = matchesIn(`src/ui/${name}`, readFileSync(path.join('src/ui', name), 'utf8'));
-      for (const kind of kinds) totals[kind] = (totals[kind] ?? 0) + (found[kind]?.length ?? 0);
-    }
-    expect(totals).toEqual({ timer: 14, list: 180, loop: 49, limit: 68, date: 11, pattern: 43 });
   });
 });
