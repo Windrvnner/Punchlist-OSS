@@ -25,13 +25,29 @@ describe('pane-of-glass rule kinds', () => {
     ['while (more()) next();', 'loop'],
     ['const tooLong = name.length <= 32;', 'limit'],
     ['const input = <input maxLength={80} />;', 'limit'],
-    ['const input = <input min="1" max={9} />;', 'limit'],
+    ['const input = <input max={9} />;', 'limit'],
     ['const over = x.length > LISTED;', 'limit'],
     ['Date.parse(s);', 'date'],
     ['new Date(value);', 'date'],
     ['/^\\d{4}-\\d{2}-\\d{2}$/.test(v);', 'pattern'],
     ['new RegExp(s);', 'pattern'],
     ['RegExp(s);', 'pattern'],
+    ['window["setTimeout"](save, 500);', 'timer'],
+    ['const { "setTimeout": wait } = window;', 'timer'],
+    ['if (typeof setTimeout === "function") run();', 'timer'],
+    ['rows["filter"](keep);', 'list'],
+    ['Date["now"]();', 'date'],
+    ['globalThis.Date.now();', 'date'],
+    ['new window.Date(value);', 'date'],
+    ['window.RegExp(s);', 'pattern'],
+    ['new window.RegExp(s);', 'pattern'],
+    ['const more = i < rows.length - 1;', 'limit'],
+    ['const more = rows.length + 1 >= i;', 'limit'],
+    ['const input = <input maxlength={80} />;', 'limit'],
+    ['const input = <input minlength="3" />;', 'limit'],
+    ['const input = <input max={-1} />;', 'limit'],
+    ['const input = <input min="1" />;', 'limit'],
+    ['async function f() { for await (const x of xs) use(x); }', 'loop'],
   ])('records %s as %s on line 1', (source, kind) => {
     expect(newKinds(source)[kind]).toEqual([1]);
   });
@@ -41,6 +57,10 @@ describe('pane-of-glass rule kinds', () => {
     'const input = <input maxLength={limit} />;',
     'new Date();',
     'let fade: ReturnType<typeof setTimeout>;',
+    'type T = typeof window.setTimeout;',
+    'window[name](save);',
+    'const more = i < rows.length * 2;',
+    'const input = <input min="abc" />;',
     '// setTimeout(save, 500) rows.filter(a)\nconst name = "setTimeout";',
   ])('records nothing for %s', (source) => {
     expect(newKinds(source)).toEqual({});
@@ -65,6 +85,6 @@ describe('pane-of-glass rule kinds', () => {
       const found = matchesIn(`src/ui/${name}`, readFileSync(path.join('src/ui', name), 'utf8'));
       for (const kind of kinds) totals[kind] = (totals[kind] ?? 0) + (found[kind]?.length ?? 0);
     }
-    expect(totals).toEqual({ timer: 14, list: 180, loop: 49, limit: 57, date: 11, pattern: 43 });
+    expect(totals).toEqual({ timer: 14, list: 180, loop: 49, limit: 68, date: 11, pattern: 43 });
   });
 });

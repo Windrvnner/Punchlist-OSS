@@ -2,7 +2,7 @@
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
 import { ruleChecks } from './pane-of-glass-rules.mjs';
-import { literalText, unwrapped } from './pane-of-glass-syntax.mjs';
+import { literalText, propertyNames, stringValues, unwrapped } from './pane-of-glass-syntax.mjs';
 
 // Persistence and network access belong in src/app and src/backend: browser storage, cookies, the Cache API, and
 // the browser's own ways to reach a server (a model service among them).
@@ -14,44 +14,11 @@ const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
 const requireNames = new Set(['require', 'createRequire']);
 const externalModule = /^(?:node:|(?:electron|fs|path)(?:\/|$))/;
 
-function concatenate(left, right) {
-  return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
-}
-
-function templateValues(node) {
-  let values = [node.quasis[0].value.cooked];
-  for (const [index, expression] of node.expressions.entries()) {
-    const tail = node.quasis[index + 1].value.cooked;
-    values = concatenate(values, stringValues(expression)).map((value) => value + tail);
-  }
-  return values;
-}
-
-// Only inspect syntax. A placeholder preserves the known parts of a string around a runtime value.
-function stringValues(expression) {
-  if (!expression) return [];
-  const node = unwrapped(expression);
-  const text = literalText(node);
-  if (text !== null) return [text];
-  if (node.type === 'TemplateLiteral') return templateValues(node);
-  if (node.type === 'BinaryExpression' && node.operator === '+') {
-    return concatenate(stringValues(node.left), stringValues(node.right));
-  }
-  if (node.type === 'ConditionalExpression') return [...stringValues(node.consequent), ...stringValues(node.alternate)];
-  if (node.type === 'LogicalExpression') return [...stringValues(node.left), ...stringValues(node.right)];
-  return ['*'];
-}
-
 function forbiddenModule(file, name) {
   if (externalModule.test(name)) return true;
   if (!name.startsWith('.')) return layerPath.test(name.replace(/^\/?src\//, ''));
   const target = posix.join(posix.dirname(file), name);
   return target.startsWith('src/') && layerPath.test(target.slice('src/'.length));
-}
-
-function propertyNames(key, computed) {
-  if (!computed && (key.type === 'Identifier' || key.type === 'JSXIdentifier')) return [key.name];
-  return stringValues(key);
 }
 
 // Decision: a UI module names what it loads with a plain string, so the check never has to work out a path (#848).
