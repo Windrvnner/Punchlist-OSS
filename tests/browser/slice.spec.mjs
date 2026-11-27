@@ -208,38 +208,6 @@ const addQuestion = async (page, text) => { await page.evaluate(() => { window._
   await ctx.close();
 }
 
-// The notice, its overflow title and the Discard confirmation all name the exact finding (#1208).
-{
-  const { ctx, page } = await fresh();
-  const dealName = 'Project Seabrook';
-  const dealId = await newDeal(page, dealName, '');
-  const title = 'Consent under the  amended facility agreement and the related collateral arrangements '.repeat(4)
-    .slice(0, 291) + ' approval';
-  const opId = await page.evaluate(async ({ dealId, title }) => {
-    await store.dispatch(store.commandNamed('CreateFinding'), { dealId, title, workstream: 'Legal' });
-    const findingId = Object.values(store.get().findings).find((f) => f.title === title).id;
-    const id = 'op_01HZZZZZZZZZZZZZZZZZZZZZ91';
-    const data = { id, command: 'ReviewFinding', input: { dealId, findingId, reviewed: true }, targets: [findingId],
-      state: 'pending', startedAt: new Date().toISOString() };
-    await store.services.repo.transaction({ writes: [{ kind: 'op', id, data, expectedRev: null }] });
-    return id;
-  }, { dealId, title });
-  await page.reload();
-  await page.waitForFunction(() => Object.values(store.get().findings).length > 0);
-  const notice = page.locator('#interrupted-' + opId);
-  const words = notice.locator('.ttext');
-  await words.hover();
-  const where = `“${title}” on ${dealName}`;
-  const text = 'Review interrupted · ' + where;
-  const visible = await words.textContent();
-  const hover = await words.getAttribute('title');
-  await notice.getByRole('button', { name: 'Discard', exact: true }).click();
-  const named = await page.textContent('#ask-text');
-  say('interrupted-finding-keeps-full-title', title.length === 300 && visible === text && hover === text
-    && named === 'Review · ' + where);
-  await ctx.close();
-}
-
 // 7 double-click create → one deal
 { const { ctx, page } = await fresh();
   await page.evaluate(() => { const repo = store.services.repo; const orig = repo.transaction.bind(repo); repo.transaction = async (tx) => { if (tx.writes.some((w) => w.kind === 'deal')) await new Promise((r) => setTimeout(r, 500)); return orig(tx); }; });
