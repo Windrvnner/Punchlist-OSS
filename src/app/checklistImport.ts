@@ -14,7 +14,6 @@ import { alphabetical } from '../domain/order';
 import type { AiService } from '../ports';
 import type { Capabilities } from './capabilities';
 import { holdChecklistSubmission } from './checklistKept';
-import { dropImport, keptImport } from './keptImports';
 import type { checklistRequests } from './listRead';
 import { ok, fail, type Result } from '../domain/result';
 import { Undo } from './commands/undo';
@@ -486,25 +485,16 @@ export function checklistShelf(state: State) {
 export async function submitChecklist(
   store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string,
 ) {
-  const release = holdChecklistSubmission(importKey);
-  if (!release) return fail({ kind: 'rejected', message: 'This import is still running' });
+  const hold = holdChecklistSubmission(importKey);
+  if (!hold) return fail({ kind: 'rejected', message: 'This import is still running' });
   try {
-    const kept = keptImport(importKey);
     const name = target.layer === 'broad' ? '' : target.name;
     // The draft stays kept until the list is written, so a reload or a failure mid-write loses nothing (#931).
     // Kept after a write, it is offered again; bringing in the same list again writes nothing.
     const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' });
-    if (result.ok && kept && keptUnchanged(kept, keptImport(importKey))) dropImport(importKey);
+    if (result.ok) hold.written();
     return result;
   } finally {
-    release();
+    hold.release();
   }
-}
-
-/** Whether the kept draft is as it was: one written while the list was brought in is newer, and stays (#931). */
-function keptUnchanged(before: Readonly<Record<string, unknown>>, now: Readonly<Record<string, unknown>> | undefined) {
-  if (!now) return false;
-  const parts = Object.keys(before);
-  const same = (part: string) => part in now && Object.is(before[part], now[part]);
-  return parts.length === Object.keys(now).length && parts.every(same);
 }

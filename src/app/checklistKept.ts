@@ -6,7 +6,7 @@ import type { ImportTable } from './transfer';
 import type { ListReading } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, type Layer } from '../domain/checklist';
-import { keptImport, keepImport } from './keptImports';
+import { dropImport, keptImport, keepImport } from './keptImports';
 import type { Asked, Review } from './checklistImport';
 import { clearedHeading, type ChecklistText } from './listRead';
 
@@ -16,7 +16,13 @@ const submitting = new Set<string>();
 export function holdChecklistSubmission(key: string) {
   if (submitting.has(key)) return null;
   submitting.add(key);
-  return () => submitting.delete(key);
+  const kept = keptImport(key);
+  return {
+    written: () => {
+      if (kept && keptUnchanged(kept, keptImport(key))) dropImport(key);
+    },
+    release: () => submitting.delete(key),
+  };
 }
 
 /** Every choice and check mark, kept beside the list */
@@ -136,4 +142,12 @@ function keepPasteAlone(key: string, paste: string, setAside: boolean): boolean 
   }
   if (paste.trim() || keptImport(key)?.paste) keepImport(key, { paste });
   return false;
+}
+
+/** Whether the kept draft is as it was: one written while the list was brought in is newer, and stays (#931). */
+function keptUnchanged(before: Readonly<Record<string, unknown>>, now: Readonly<Record<string, unknown>> | undefined) {
+  if (!now) return false;
+  const parts = Object.keys(before);
+  const same = (part: string) => part in now && Object.is(before[part], now[part]);
+  return parts.length === Object.keys(now).length && parts.every(same);
 }
