@@ -97,7 +97,7 @@ export function checkLine(state: State, dealId: string) {
   return kind && { kind, warn, deep, rest, shared, unchecked };
 }
 
-/** What takes the line, in order: a running check, a failed one, a left-out part, a spot check that disagreed. */
+/** What takes the line, in order: a running check, a failed one, a left-out part, a spot check that disagreed, unchecked items. */
 const lineKind = (check: State['checks'][string] | undefined, running: boolean, deep: boolean, unchecked: number) =>
   running ? 'running' as const : check?.failedAt ? 'failed' as const : check?.left ? 'left' as const
     : deep ? 'deep' as const : unchecked ? 'unchecked' as const : null;
