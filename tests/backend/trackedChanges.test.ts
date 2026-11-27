@@ -197,7 +197,7 @@ describe('a draft whose request is refused as too long later in a run', () => {
 });
 
 describe('a draft beside a document that cannot be opened on this PC', () => {
-  it("an answer's read keeps halving the changes once it sends fewer documents, with no request refused again", async () => {
+  it("an answer's read that sends fewer documents keeps its halving: no request is refused again", async () => {
     const wanted = async (_d: string, ids: string[]) => [DRAFT, FA].filter((r) => ids.includes(r.docId))
       .map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) }));
     const s = setup(() => ({ text: 'The ratio is 1.20x.', sources: [] }), { d1: [DRAFT, FA, TS] },
