@@ -31,7 +31,7 @@
     "file": "src/ui/app.tsx",
     "kind": "list",
     "line": "const t = [...st.toasts].reverse().find((x) => x.action?.opId);",
-    "count": 1,
+    "count": 2,
     "issue": 1280
   },
   {
@@ -460,6 +460,13 @@
     "line": "const now = (text: string) => text.replace(/^Searched /, 'Searching ').replace(/^Reviewed /, 'Reviewing ').replace(/^Listed /, 'Listing ');",
     "count": 3,
     "issue": 1376
+  },
+  {
+    "file": "src/ui/resolve.tsx",
+    "kind": "list",
+    "line": "const at = Math.max(0, queue.indexOf(questionId));",
+    "count": 1,
+    "issue": 1385
   },
   {
     "file": "src/ui/search.tsx",
