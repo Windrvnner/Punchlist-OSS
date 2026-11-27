@@ -1,0 +1,41 @@
+name: Batch
+description: A group of fixes worked together, each as its own pull request.
+type: Feature
+labels: [build list, batch, "status: to decide"]
+body:
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: The problem the batch solves and the decisions that apply to it.
+    validations:
+      required: true
+  - type: textarea
+    id: fixes
+    attributes:
+      label: Fixes
+      description: "One line per fix: `- #N summary`. No checkboxes. Attach each fix as a sub-issue of this batch."
+      placeholder: "- #N summary"
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How the batch is worked
+      description: The rules for this batch, such as order, review and merge steps.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: The definition of done, with separate criteria for each goal.
+    validations:
+      required: true
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      description: The label is set to To decide; change it when this says otherwise.
+      options: [To decide, To design, Decided, Building, On hold, Later]
+      default: 0

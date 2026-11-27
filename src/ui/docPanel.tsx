@@ -9,7 +9,7 @@ import { CachedMark } from './cached';
 import { DocName } from './docName';
 import { DocMenu } from './docMenu';
 import { useDrafts, draftDate, DraftsButton, DraftsMenu } from './drafts';
-import { newerThan } from '../app/citations';
+import { newerThan, pageOf } from '../app/citations';
 import { closeDocument } from './nav';
 import { loadPage, pageKeyFor, type DocRef } from '../app/conversations';
 import type { PageState } from '../app/state';
@@ -22,10 +22,7 @@ type PanelRef = RefObject<HTMLElement | null>;
 type SheetView = Extract<PageView, { kind: 'sheet' }>;
 
 /** The page a citation's place names, from its first place */
-function pageNo(loc: string) {
-  const match = /p\.\s*(\d+)/.exec(loc.split(' · ')[0]);
-  return match ? +match[1] : null;
-}
+const pageNo = (loc: string) => pageOf(loc.split(' · ')[0]);
 
 const docBody = (panel: PanelRef) => panel.current?.querySelector<HTMLElement>('.docbody');
 

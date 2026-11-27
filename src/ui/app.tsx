@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { dealRows, interruptedOperations, isInterrupted, railDealGroups } from '../app/dealView';
-import { commandLabel } from '../app/commandLabels';
+import { dealRows, dismissInterrupted, interruptedView, railDealGroups } from '../app/dealView';
+import { commandLabel, commandPlace } from '../app/commandLabels';
 import { undoFromNotice } from '../app/undoNotice';
 import { StoreContext, useAppState, useStore, lastInput, nameDir } from './hooks';
 import { Icon } from './icons';
@@ -34,22 +34,9 @@ import { AccountRow } from './connection';
 import { ReadOnlyContext, SignedOutContext } from './editField';
 import { SERVICE } from '../control';
 import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
-import { isReading, dealHash, dealTwinLabels } from '../app/state';
+import { isReading, dealUiOnRouteChange, routeFromHash, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
 import { openNewDeal } from '../app/dealFolders';
-
-function routeFromHash(): State['ui']['route'] {
-  const h = (location.hash || '#deals').slice(1);
-  const fm = /^finding-(d_[0-9A-Z]{26})-(f_[0-9A-Z]{26})$/.exec(h);
-  if (fm) return { name: 'finding', dealId: fm[1], findingId: fm[2] };
-  const qm = /^q-(d_[0-9A-Z]{26})-(q_[0-9A-Z]{26})$/.exec(h);
-  if (qm) return { name: 'question', dealId: qm[1], questionId: qm[2] };
-  const cm = /^chat(?:-(d_[0-9A-Z]{26}))?(?:-(c[0-9a-z]{4,24}))?$/.exec(h);
-  if (cm) return { name: 'chat', ...(cm[1] ? { dealId: cm[1] } : {}), ...(cm[2] ? { conv: cm[2] } : {}) };
-  const m = /^(overview|deal|checklist|qa)-(d_[0-9A-Z]{26})$/.exec(h);
-  if (m) return { name: m[1] as 'overview' | 'deal' | 'checklist' | 'qa', dealId: m[2] };
-  return { name: 'home' };
-}
 
 export function App({ store }: { store: Store }) {
   return <StoreContext.Provider value={store}><Shell /></StoreContext.Provider>;
@@ -59,16 +46,10 @@ function Shell() {
   const store = useStore(); const s = useAppState();
   useEffect(() => {
     const apply = () => {
-      const route = routeFromHash(); const was = store.get().ui.route;
-      const deal = (r: State['ui']['route']) => ('dealId' in r && r.dealId ? r.dealId : null);
-      // list filters and the selected question belong to one deal: moving to another deal starts clean
-      const fresh = deal(route) !== deal(was) ? {
-        findingFilter: { status: 'open' as const, workstream: '', reviewed: '' as const },
-        qaFilter: { status: 'open' as const, workstream: '', text: '' },
-        checklistFilter: 'all' as const, selectedQuestion: null, selectedChecklist: null,
-      } : {};
+      const route = routeFromHash(location.hash); const was = store.get().ui.route;
+      const navigation = dealUiOnRouteChange(was, route, takeNavPatch());
       store.ui({ route, doc: null, docAside: null, side: null, queueSearch: '', dialog: null,
-        searchFocus: null, ...fresh, ...takeNavPatch() });
+        searchFocus: null, ...navigation });
       // the link or button that was pressed is gone with the old page: focus goes to what opened the document being closed, else to the new page, not to nowhere
       const backTo = takeFocusAfter();
       requestAnimationFrame(() => { const back = backTo.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean); if (back) back.focus(); else if (!document.activeElement || document.activeElement === document.body) document.getElementById('view')?.focus({ preventScroll: true }); });
@@ -385,16 +366,6 @@ export function Notices() {
   );
 }
 
-/** Where an interrupted action was: the question or finding and its deal, so Retry says what it would write. */
-function opPlace(s: State, input: unknown): string {
-  const i = (input ?? {}) as { dealId?: unknown; questionId?: unknown; findingId?: unknown };
-  const d = typeof i.dealId === 'string' ? s.deals[i.dealId] : undefined;
-  const q = typeof i.questionId === 'string' ? s.questions[i.questionId] : undefined;
-  const f = typeof i.findingId === 'string' ? s.findings[i.findingId] : undefined;
-  const what = q ? `Q${q.n}` : f ? `“${f.title.length > 48 ? f.title.slice(0, 47).trimEnd() + '…' : f.title}”` : '';
-  return [what, d?.name].filter(Boolean).join(' on ');
-}
-
 /** Offline: says so until the connection is back, with Retry Now; ✕ hides it until the next time. */
 function NetBar() {
   const store = useStore();
@@ -408,32 +379,26 @@ function NetBar() {
   );
 }
 
-const INTERRUPTED_ROWS = 3;
-
 /** Hidden and overflowed actions stay counted, and Show starts the next group with the first hidden action (#565). */
 function InterruptedBar() {
   const s = useAppState();
   const [first, setFirst] = useState<string>();
   const [dismissed, setDismissed] = useState<string[]>([]);
   const bar = useRef<HTMLDivElement>(null);
-  const ops = interruptedOperations(s);
-  const start = Math.max(0, ops.findIndex((op) => op.id === first));
-  const ordered = [...ops.slice(start), ...ops.slice(0, start)];
-  const showing = ordered.filter((op) => !dismissed.includes(op.id)).slice(0, INTERRUPTED_ROWS);
-  const hidden = ordered.filter((op) => !showing.includes(op));
+  const { showing, hidden } = interruptedView(s, first, dismissed);
   const show = () => {
     setFirst(hidden[0].id);
     setDismissed([]);
     requestAnimationFrame(() => bar.current?.querySelector<HTMLElement>('.intop .tundo')?.focus());
   };
   const hide = (id: string) => {
-    setDismissed([...dismissed.filter((key) => isInterrupted(s.ops[key])), id]);
+    setDismissed((current) => dismissInterrupted(s, current, id));
   };
-  if (!ops.length) return null;
+  if (!showing.length && !hidden.length) return null;
   return (
     <div class="intbar" role="status" ref={bar}>
       {showing.map((op) => (
-        <Interrupted key={op.id} id={op.id} what={commandLabel(op.command, op.input)} where={opPlace(s, op.input)}
+        <Interrupted key={op.id} id={op.id} what={commandLabel(op.command, op.input)} where={commandPlace(s, op.input)}
           onHide={() => hide(op.id)} />))}
       {hidden.length > 0 && (
         <Notice glyph="warn" actions={[{ label: 'Show', run: show }]}>

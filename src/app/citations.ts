@@ -3,9 +3,12 @@
  * a cited phrase's pop and a finding's list of sources, the source chips under an answer, a finding or a question,
  * and whether an attached file can be added to a finding's sources. The screens only show what these return.
  */
+import { pageOf } from '../domain/cite';
 import { docKey, type Finding, type Source } from '../domain/model';
 import type { DocRef } from './conversations';
 import type { DraftRef } from '../ports';
+
+export { pageOf };
 
 /** Up to this many documents a pop lists them all; beyond it, with somewhere to send the rest, it lists POP_SHOWN. */
 export const POP_ALL = 4;
@@ -70,10 +73,7 @@ export interface MenuGroup { key: string; ref: DocRef; items: MenuItem[]; pages:
 export interface MenuSection { key: string; title: string; groups: MenuGroup[] }
 
 /** A place's page number, for ordering; a place with none ("cl. 7.2", "Ops!F12") goes last. */
-const pageNo = (loc: string) => {
-  const match = /p\.\s*(\d+)/.exec(loc);
-  return match ? +match[1] : Number.MAX_SAFE_INTEGER;
-};
+const pageNo = (loc: string) => pageOf(loc) ?? Number.MAX_SAFE_INTEGER;
 /** What cited it, as a heading: the question that was asked, or the finding / draft / response. */
 const heading = (x: DocRef) => x.ask ?? x.from.replace(/^From /, '').replace(/^./, (c) => c.toUpperCase());
 

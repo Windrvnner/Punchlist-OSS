@@ -38,3 +38,19 @@ export function isInterrupted(op: Operation | undefined) {
 export function interruptedOperations(state: Pick<State, 'ops'>) {
   return Object.values(state.ops).filter(isInterrupted);
 }
+
+const INTERRUPTED_ROWS = 3;
+
+/** Show rotates from the first hidden action. Dismissed actions also count toward the overflow. */
+export function interruptedView(state: Pick<State, 'ops'>, first: string | undefined, dismissed: string[]) {
+  const ops = interruptedOperations(state);
+  const start = Math.max(0, ops.findIndex((op) => op.id === first));
+  const ordered = [...ops.slice(start), ...ops.slice(0, start)];
+  const showing = ordered.filter((op) => !dismissed.includes(op.id)).slice(0, INTERRUPTED_ROWS);
+  const hidden = ordered.filter((op) => !showing.includes(op));
+  return { showing, hidden };
+}
+
+export function dismissInterrupted(state: Pick<State, 'ops'>, dismissed: string[], id: string) {
+  return [...dismissed.filter((key) => isInterrupted(state.ops[key])), id];
+}

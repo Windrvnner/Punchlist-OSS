@@ -40,6 +40,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Search keeps the highlighted result when more records arrive, while that result is still listed (#501).
 - A deal's pages are Overview, Findings, Checklist, and Q&A; **Settings** → **Deals Open On** picks which page opens first (Overview by default). No new tabs are added.
 - The deal header holds Deal status and one ⋯ menu with **Check Again** (showing "Last checked [date]"), **Deal Memo…**, **Rename**, and, set apart, **Delete Deal…**.
+- **Rename** saves the deal name only on Enter or leaving the box, with an edit field's save outcome; a name typed
+  while its save is out stays kept, and Enter or leaving the box then sends it once the save lands (#1204).
 - The counterparty sits alone at the top right of every deal page. Structure, Sector, and Technology appear on Overview only.
 - Overview shows Findings, Checklist, and Q&A side by side. Each has a heading with "N in all" and one bar in up to three parts (open in red, in progress in the accent color, and done in gray), each part named on a leader line. Below them are Gaps in the Documents and Documents. There is no AI summary and there are no big numbers.
 - Each heading and figure on Overview opens its page filtered to what it counts. The open part of the Checklist bar is "to resolve" (flagged items, gaps, and "finding deleted"); "not settled" is shown separately. Words that don't fit move to the part's hover text.
@@ -402,6 +404,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   `src/app` (#953, #997).
 - A held field that receives composing input without a compositionstart stays held: its text shows Not saved until
   typing that is not composing in the focused field, Retry, or Take Theirs (#997).
+- A batch issue follows the Batch template: each fix is a sub-issue of the batch, listed as a plain bullet with no
+  checkbox (#1238).
 
 ## Deal screen
 
