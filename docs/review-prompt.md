@@ -34,8 +34,9 @@ verdict, and no criteria in your own words.
 > - Privacy: screens name no vendor (the service name and AI label come from the control file), and nothing names a
 >   person, firm, or deployment. Never read `.env` or `~/.config/`, and run the live model tests only when asked for.
 > - Pane of glass: anything the diff adds to `src/ui` beyond showing state, sending commands, and calling `src/app`
->   functions. When the addition serves a workflow, check that the workflow runs from a test with no component
->   rendered.
+>   functions. The check lists screen rules line by line; review still covers plain `if` logic on state and the other
+>   things it cannot see (docs/development.md). When the addition serves a workflow, check that the workflow runs from
+>   a test with no component rendered.
 > - Scope: name everything the diff does that the issue didn't ask for, at the top of the review.
 > - Simplicity: list every score, threshold, fallback, text normalization or guess the diff adds, with the decision
 >   that asks for it, and say what the simplest version of the stated need would be. `npm run check` lists the added

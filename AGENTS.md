@@ -56,7 +56,9 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   backend, adapters, desktop, or shell. Formatting a value for display, and screen-only state such as focus, an open
   menu, or scroll position, stay in `src/ui`. New or changed UI code that breaks this is a review blocker.
   `npm run check` fails on forbidden UI imports, service or repository access, browser storage, cookies, the Cache
-  API, and network calls (`scripts/check-pane-of-glass.mjs`).
+  API, and network calls, and on timers, list work, loops, length limits, dates, and patterns in screens. Each one is
+  listed line by line in `scripts/pane-of-glass-baseline.json` with an open issue or a verified decision
+  (`scripts/check-pane-of-glass.mjs`). Review still covers what the check cannot see (docs/development.md).
 - **Readable code.** Every change must be easy for a person to review on GitHub. New or changed code that breaks the rules below is a review blocker, just like lost work or a crash. Code that a pull request did not touch never is.
   - Put one statement on each line, and keep lines to 120 characters at most, comments included.
   - Keep new functions to about 60 lines and files to about 500. Don't grow a function that is already past that limit; add a named helper instead.

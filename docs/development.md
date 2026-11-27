@@ -60,16 +60,38 @@ Store with stand-in ports. Run the test in Node without a window.
 npx vitest run tests/app/coreWorkflows.test.ts --environment node --no-file-parallelism
 ```
 
-The static checks scan tracked files for secrets and attribution, and commit messages for attribution. Attribution
-includes a role credited with a decision and an email address other than an example or no-reply one.
+The static checks scan tracked files for secrets and attribution.
+They also scan the text each branch commit adds, and its commit message, so a secret or attribution added and then
+removed in the same branch still fails.
+On `main` itself history is not re-scanned; the pull-request run is the gate.
+Attribution includes a role credited with a decision and an email address other than an example or no-reply one.
 The readability script also lists added `src/` lines that name a guess (overlap, fuzzy, fallback, repair and the like).
 After readability hints, `scripts/check-pane-of-glass.mjs` checks UI imports, service and repository access,
-browser storage, cookies, the Cache API, and network calls. The committed `scripts/pane-of-glass-baseline.json` is
-`{}`, so any match fails. A UI `import()` or `require()` call must name its module with a plain string, `require` is
+browser storage, cookies, the Cache API, network calls, timers, list work, loops, length limits, dates, and patterns.
+A UI `import()` or `require()` call must name its module with a plain string, `require` is
 used only in such a call, and UI code reads `import.meta` only as `import.meta.env`; anything else counts as an import.
-The guard compares the baseline with the branch point on `main` and refuses increases. On a branch with existing
-entries, use `node scripts/check-pane-of-glass.mjs --lower` and commit the lower baseline when removing an access.
+Every match is listed line by line in `scripts/pane-of-glass-baseline.json`, a JSON array of allowances.
+The vendor-name test over all of `src` and the model list the app shows, and the skipped-test gate, use the same format
+in `scripts/vendor-names-allowance.json` and `scripts/skipped-tests-allowance.json`.
+An allowance is `{ file, kind, line, count, issue }` or `{ file, kind, line, count, decision }`.
+`line` is the trimmed text of the matching line, and `count` is how many times it matches in that file.
+Exactly one of `issue` (an open issue number) or `decision` (a line of `docs/decisions.md` that is on
+`scripts/verified-decisions.json`) is set.
+Skipped-test entries also carry `platform` and `reason`.
+`node scripts/check-pane-of-glass.mjs --list` prints the matches not yet listed, and `--lower` lowers each count to
+its matches and removes entries that no longer match; neither adds an issue or decision.
+`node scripts/check-allowance-history.mjs` compares each allowance file with `main`.
+An entry can only be kept, lowered, or removed, and a `decision` must be on `main`'s copy of
+`scripts/verified-decisions.json`, so a decision verified in a pull request cannot be used in that same pull request.
+`node scripts/check-open-issues.mjs` runs in CI only and fails when an issue named in an allowance is not open.
 If the checkout lacks the history needed for comparison, the diagnostic gives the Git command to fetch it.
+`node scripts/check-skipped-tests.mjs <vitest.json>` fails on a skipped test that is not listed.
+Each CI job passes its own scope, so an entry that no longer matches is reported only by the job that could see it.
+`node scripts/check-skipped-tests.mjs --files` fails on a test file that Vitest never runs.
+The pane-of-glass check cannot see plain `if` logic on state; `Math.min` and `Math.max`; `.flatMap`, `.at`, and
+`.includes`; `Intl` and `toLocale...String`; `requestAnimationFrame`; a limit given by a named constant (including
+changing its value); a swap between identical trimmed lines; or edits inside a loop body.
+Review covers them.
 
 The GitHub Actions workflow also builds the Windows installer when it is started by hand.
 
