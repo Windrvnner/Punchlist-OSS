@@ -13,12 +13,13 @@ export function HeadingRowField({ id, importKey, table, sheet = table.sheet, rea
   onEdit?: () => void;
 }) {
   const [, redraw] = useReducer((value: number) => value + 1, 0);
-  const [draft] = useState(() => new HeadingRowDraft(importKey, table, redraw));
+  const [draft] = useState(() => new HeadingRowDraft(importKey, table, () => redraw(null)));
   useLayoutEffect(() => draft.update(table, sheet, read));
   useLayoutEffect(() => () => draft.dispose(), [draft]);
   const { text, max, headerRow, reason: unused } = draft.view;
   const range = max === undefined ? 'Enter a whole row from 1' : `Enter a whole row from 1 to ${num(max)}`;
-  const reason = unused === 'range' ? range : unused === 'preview' ? `The preview uses row ${num(headerRow)}` : undefined;
+  const preview = `The preview uses row ${num(headerRow)}`;
+  const reason = unused === 'range' ? range : unused === 'preview' ? preview : undefined;
   const pick = (value: string) => {
     onEdit?.();
     void draft.pick(value, read);
