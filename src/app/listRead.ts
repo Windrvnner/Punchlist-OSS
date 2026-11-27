@@ -48,8 +48,9 @@ function pastedCells(line: string): string[] | null {
 }
 
 /**
- * Pasted text as lines. Text copied from a spreadsheet comes with its cells split by tabs: those are written " | ", as a
- * table's rows are given to the model, so a paste from Excel reads as the table it is. A line with no tab stays as written.
+ * Pasted text as lines. Text copied from a spreadsheet comes with its cells split by tabs: those are written " | ", as
+ * a table's rows are given to the model, so a paste from Excel reads as the table it is. A line with no tab stays as
+ * written.
  */
 export const pastedLines = (text: string): string[] =>
   textLines(text).map((line) => pastedCells(line)?.map(cellText).join(' | ') ?? line);
