@@ -1,11 +1,9 @@
 import { cleanName, EditDeal, withProject } from './commands/deals';
 import type { FieldDraft } from './fieldDrafts';
 import { FieldSave, type FieldSaveOutcome, fieldSaveOutcome } from './fieldSave';
-import { hasTexts, keptDrafts } from './keptText';
 import { pendingSave, sendSave } from './saveOut';
 import type { Store } from './store';
 
-const legacyNames = keptDrafts('deal-name', hasTexts('text', 'base'));
 type RenameInput = { render(): void; close(): void; focus(): void };
 type Landed = { sent: FieldDraft; outcome: FieldSaveOutcome; matches: boolean; rebased?: FieldDraft };
 
@@ -24,11 +22,6 @@ export class DealRename extends FieldSave {
     const deal = store.get().deals[id];
     super({ value: deal.name, rev: deal.rev }, key);
     this.key = key;
-    const old = legacyNames.get(id);
-    if (old) {
-      if (!this.kept) this.restore({ ...old, rev: old.base === deal.name ? deal.rev : -1 });
-      if (this.kept?.text === old.text && this.kept.base === old.base) legacyNames.delete(id);
-    }
     void (pendingSave(key) as Promise<Landed> | undefined)?.then((landed) => this.show(landed));
   }
 
