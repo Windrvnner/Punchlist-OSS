@@ -1,8 +1,8 @@
-import { memberId } from '../domain/model';
 import { byName } from '../domain/order';
+import { isMine } from './commands/members';
 import type { State, UiState } from './state';
 
-export const DEAL_UI_DEFAULTS = {
+const DEAL_UI_DEFAULTS = {
   findingFilter: { status: 'open', workstream: '', reviewed: '' },
   qaFilter: { status: 'open', workstream: '', text: '' },
   checklistFilter: 'all', selectedQuestion: null, selectedChecklist: null,
@@ -12,13 +12,9 @@ export const DEAL_UI_DEFAULTS = {
 export const freshDealUi = () => structuredClone(DEAL_UI_DEFAULTS);
 const routeDeal = (route: UiState['route']) => 'dealId' in route ? route.dealId ?? null : null;
 
+// list filters and the selected question belong to one deal: moving to another deal starts clean
 export function dealUiOnRouteChange(was: UiState['route'], route: UiState['route'], explicit: Partial<UiState> = {}) {
   return routeDeal(was) === routeDeal(route) ? explicit : { ...freshDealUi(), ...explicit };
-}
-
-/** Is this deal in the list of the person using the app? */
-export function isMine(state: Pick<State, 'members' | 'user'>, dealId: string) {
-  return !!state.user && state.members[memberId(dealId, state.user.name)]?.on === true;
 }
 
 export function myDeals(state: Pick<State, 'deals' | 'members' | 'user'>) {

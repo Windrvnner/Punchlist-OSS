@@ -219,7 +219,7 @@ export interface State {
   ui: UiState;
 }
 
-export { dealUiOnRouteChange, isMine, myDeals, pickNames, DEAL_UI_DEFAULTS } from './dealUi';
+export { dealUiOnRouteChange, myDeals, pickNames } from './dealUi';
 
 export const initialState = (can = capabilities()): State => ({
   can,
