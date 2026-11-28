@@ -197,7 +197,7 @@ function priorItems(questions: string[], technology: string) {
   }));
 }
 
-async function technologyReview(questions: string[], name: string, compare = false) {
+async function technologyReview(questions: string[], name: string, compare = false, reword = false) {
   app.store.services.ai.readList = async ({ lines }) => ok({
     lines: lines.map((_, index) => ({ n: index + 1, k: 'item' })),
   });
@@ -205,7 +205,7 @@ async function technologyReview(questions: string[], name: string, compare = fal
   const session = open();
   session.setLayer('technology');
   session.setName(name);
-  session.setAskReword(false);
+  session.setAskReword(reword);
   session.setAskSame(compare);
   session.setPaste(questions.join('\n'));
   await session.pasted();
@@ -350,9 +350,12 @@ it('preserves a synced destination addition even without previously approved wor
 
 it.each(['before Import', 'at commit'])('preserves rows when General changes %s (#56)', async (when) => {
   const questions = portfolioQuestions().slice(0, 2_000);
+  const edited = 'Provide the latest independent energy yield report.';
+  app.store.services.ai.reword = async () => ok([{ at: 120, text: edited, why: '' }]);
   const general = questions.slice(0, 120).map((text) => ({ text }));
   const id = await savePriorList('broad', '', general);
-  const session = await technologyReview(questions, 'Wind', true);
+  const session = await technologyReview(questions, 'Wind', true, true);
+  session.flipReword(120);
   expect(session.view.listReview.review?.pairs).toHaveLength(120);
   for (let index = 0; index < 120; index++) session.flipRemove(index);
   const changed = [{ text: 'Confirm all lender notice periods and deliverables.' }, ...general.slice(1)];
@@ -378,6 +381,38 @@ it.each(['before Import', 'at commit'])('preserves rows when General changes %s 
   session.backToList();
   await session.next();
   expect(session.view.listReview.review?.pairs).toHaveLength(119);
+  expect(session.view.listReview.remove.size).toBe(119);
+  expect(session.view.listReview.useReword.has(120)).toBe(true);
   await session.bringIn();
+  expect(app.store.get().firmList[wind].items[0]?.text).toBe(questions[0]);
+  expect(app.store.get().firmList[wind].items[1]?.text).toBe(edited);
+});
+
+it('checks duplicate removals against the General items held in both versions (#56)', async () => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const general = questions.slice(0, 120).map((text) => ({ text }));
+  const id = await savePriorList('broad', '', general);
+  const session = await technologyReview(questions, 'Wind', true);
+  for (let index = 0; index < 120; index++) session.flipRemove(index);
+  const before = app.store.get().firmList[id];
+  const changed = { ...before, items: general.slice(1) };
+  expect(app.repo.peer.edit('firmList', id, changed, { ...ELSEWHERE, at: '2026-11-20T10:00:00.000Z' }))
+    .toBe('conflict');
+  await app.store.refreshSync();
+  expect(app.store.get().conflicts[id]?.versions).toHaveLength(2);
+  expect(app.store.get().firmList[id].items[0]?.text).toBe(questions[0]);
+
+  const wind = listId('technology', 'Wind');
+  await session.bringIn();
+  expect(app.store.get().firmList[wind]?.items.length ?? 0).toBe(0);
+  expect(keptImport(key)).toBeDefined();
+  session.backToList();
+  await session.next();
+  const review = session.view.listReview.review;
+  expect(review?.pairs).toHaveLength(119);
+  expect(review?.pairs.some(({ a }) => a === 0)).toBe(false);
+  expect(session.view.listReview.remove.size).toBe(119);
+  await session.bringIn();
+  expect(app.store.get().firmList[wind].items).toHaveLength(1_881);
   expect(app.store.get().firmList[wind].items[0]?.text).toBe(questions[0]);
 });
