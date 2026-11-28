@@ -21,8 +21,8 @@
  * Only the newest draft of a report is read; a blackline, a document in another project's precedents folder and one
  * in a folder this person may not open are not. Reports are read one at a time, so a read is shown what the reads
  * before it raised. A cutoff records the verified issues with the attempt. The next sweep reads the whole file
- * for the remaining issues. Unfinished reads exhaust the existing attempt budget, and Overview lists the reports
- * that are still incomplete (#1212). Work is claimed first, so two PCs seldom pay for
+ * for the remaining issues. Deal progress lists reads still incomplete after the existing attempt budget (#1212).
+ * Work is claimed first, so two PCs seldom pay for
  * the same call; two that start on one report before either claim arrives can both read it, and the second
  * raises again only what it titles differently from the first.
  */
@@ -43,7 +43,10 @@ function addCut(cuts: Map<string, ReportCut>, doc: string, cut: ReportCut) {
   const before = cuts.get(doc);
   const issues = [...(before?.issues ?? []), ...cut.issues];
   const unique = new Map(issues.map((row) => [JSON.stringify(row), row]));
-  cuts.set(doc, { advisor: before?.advisor || cut.advisor, issues: [...unique.values()] });
+  const invalidIssue = cut.invalidIssue && (!before || before.invalidIssue);
+  cuts.set(doc, { advisor: before?.advisor || cut.advisor, issues: [...unique.values()],
+    ...(invalidIssue ? { invalidIssue } : {}),
+  });
 }
 
 /** a sort's reply that names a file by an id it was not shown: a failed reply, asked again (#1162) */

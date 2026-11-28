@@ -62,6 +62,8 @@ export interface ReportCut {
   advisor: string;
   issues: KeptReportIssue[];
   owe?: Owed[];
+  /** An unfinished reply with an invalid issue reference, without a cutoff so far. */
+  invalidIssue?: true;
 }
 
 export const reportTitleKey = (title: string) => title.toLowerCase().replace(/\s+/g, ' ');

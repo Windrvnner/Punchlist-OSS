@@ -52,11 +52,20 @@ export async function knownFindings(repo: Repository, dealId: string): Promise<K
   return [...live, ...gone];
 }
 
-/** a finding a person deleted, by its deletion note */
-async function wasDeleted(repo: Repository, dealId: string, id: string) {
+/** the saved version of a finding a person deleted */
+async function deletedFinding(repo: Repository, dealId: string, id: string) {
   const notes = await repo.list('tombstone', dealId);
-  return notes.ok && notes.value.some((l) => (l.envelope.data as { snapshot?: { id?: unknown } }).snapshot?.id === id);
+  if (!notes.ok) return undefined;
+  return notes.value.map(({ envelope }) => (envelope.data as {
+    snapshot?: { id?: string; reportIssueSignature?: string };
+  }).snapshot).find((snapshot) => snapshot?.id === id);
 }
+
+/** An unsigned legacy finding keeps its ordinal. A signed one must be the issue being written. */
+const sameIssue = (data: unknown, signature: string | undefined) => {
+  const saved = (data as { reportIssueSignature?: string }).reportIssueSignature;
+  return saved === undefined || saved === signature;
+};
 
 /**
  * Write a new finding for an advisor's issue under its fixed id. True when it is there: written now, by another PC, or
@@ -64,8 +73,9 @@ async function wasDeleted(repo: Repository, dealId: string, id: string) {
  */
 export async function raiseFinding(w: FindingWrites, dealId: string, id: string, f: Issue): Promise<boolean> {
   const had = await w.repo.get('finding', id);
-  if (had.ok && had.value) return true;
-  if (await wasDeleted(w.repo, dealId, id)) return true;
+  if (had.ok && had.value) return sameIssue(had.value.envelope.data, f.signature);
+  const deleted = await deletedFinding(w.repo, dealId, id);
+  if (deleted) return sameIssue(deleted, f.signature);
   const now = w.clock();
   const data = {
     id, dealId, rev: 0, createdAt: now, updatedAt: now,
@@ -79,7 +89,7 @@ export async function raiseFinding(w: FindingWrites, dealId: string, id: string,
   const wrote = await w.repo.transaction({ writes: [{ kind: 'finding', id, data, expectedRev: null }], index });
   if (!wrote.ok) {
     const again = await w.repo.get('finding', id);
-    return !!(again.ok && again.value);
+    return !!(again.ok && again.value && sameIssue(again.value.envelope.data, f.signature));
   }
   w.announce?.('finding', id);
   return true;
