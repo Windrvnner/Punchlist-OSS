@@ -292,3 +292,12 @@ it('seeds last-written tracking only for cells the app already holds', () => {
   const held = logHolds(table, map, [question]);
   expect(held[question.id]).toEqual({ text: question.text });
 });
+
+it('tracks imported whitespace as a shared response only if the app already holds it', () => {
+  const question = q(1, 'What is the minimum DSCR covenant?', { response: ' \t ' });
+  const matching = { ...table, rows: [['Q1', question.text, question.response, '']] };
+  expect(logHolds(matching, map, [question])[question.id]?.response).toBe(question.response);
+
+  const plan = logWrite(table, map, [question]);
+  expect(plan).toMatchObject({ steps: [], taken: {}, kept: [1], keptText: { q1: { response: '1.20x' } } });
+});

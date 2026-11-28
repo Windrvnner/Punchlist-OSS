@@ -85,51 +85,62 @@ export function logHolds(table: Pick<ReadTable, 'rows'>, mapping: Mapping, quest
       // A proposed take has yet to reach the app, so this import does not establish a shared value.
       if (field === 'n' || column == null || w.taken[id]?.[field] !== undefined) continue;
       const cell = String(rows[i][column] ?? '');
-      if (cell.trim() && value === cell) now[field] = value;
+      if (hasCellValue(field, cell) && value === cell) now[field] = value;
     }
     out[id] = now;
   }
   return out;
 }
 
+// A Response can contain only spaces, tabs or a workbook control character (#1392).
+function hasCellValue(field: string, value: string): boolean {
+  return field === 'response' ? value !== '' : !!value.trim();
+}
+
+function sameCellText(field: string, first: string, second: string): boolean {
+  // A stored Response, including a lone control character, is different from an empty cell.
+  if (field === 'response' && (first === '' || second === '')) return first === second;
+  return sameText(first, second);
+}
+
 // Status and priority can be written in the log's own case.
 function sameField(field: ImportField, first: string, second: string): boolean {
   return field === 'status' || field === 'priority'
     ? first.toLowerCase() === second.toLowerCase()
-    : sameText(first, second);
+    : sameCellText(field, first, second);
 }
 
 function logSaysSame(field: ImportField, log: string, read: string, app: string): boolean {
   // Leave a date the import could not settle (11/02 either way) as the log writes it.
   if ((field === 'received' || field === 'responded') && !read && log.trim()) return true;
-  return sameField(field, read, app) || sameText(log, app);
+  return sameField(field, read, app) || sameCellText(field, log, app);
 }
 
 function hasLogEdit(field: ImportField, log: string, sent: string | undefined): boolean {
   // A tracked response can be withdrawn or changed to whitespace in the log (#1392).
-  return !!log.trim() || (field === 'response' && sent !== undefined && log !== sent);
+  return hasCellValue(field, log) || (field === 'response' && sent !== undefined && sent !== '');
 }
 
 function logStillHoldsSent(field: ImportField, log: string, sent: string, read: string | undefined): boolean {
-  return sameText(log, sent) || (!!read && sameField(field, read, sent));
+  return sameCellText(field, log, sent) || (!!read && sameField(field, read, sent));
 }
 
 // A first response comes from the log exactly as written, including spaces and tabs (#1392).
-function isFirstLogResponse(field: ImportField, app: string, log: string): boolean {
-  return field === 'response' && log !== '' && log !== app;
+function isFirstLogResponse(field: ImportField, log: string): boolean {
+  return field === 'response' && hasCellValue(field, log);
 }
 
 function logCellAction(
   field: ImportField, app: string, log: string, sent: string | undefined, read: string | undefined,
 ): 'skip' | 'same' | 'take' | 'keep' | 'write' {
-  if (!app.trim() && sent === undefined) {
-    return isFirstLogResponse(field, app, log) ? 'take' : 'skip';
+  if (!hasCellValue(field, app) && sent === undefined) {
+    return isFirstLogResponse(field, log) ? 'take' : 'skip';
   }
   if (logSaysSame(field, log, read ?? log, app)) return 'same';
 
   const stillSent = sent !== undefined && logStillHoldsSent(field, log, sent, read);
   if (!stillSent && hasLogEdit(field, log, sent)) {
-    const appUnchanged = sent !== undefined && (sameText(app, sent) || sameField(field, app, sent));
+    const appUnchanged = sent !== undefined && (sameCellText(field, app, sent) || sameField(field, app, sent));
     return appUnchanged ? 'take' : 'keep';
   }
   // High on a question that came in with no priority is the app's own default.
@@ -212,5 +223,5 @@ export function holds(q: Question, k: string, value: string): boolean {
   const app = String((q as unknown as Record<string, unknown>)[k] ?? '');
   return k === 'status' || k === 'priority' || k === 'received' || k === 'responded'
     ? app.toLowerCase() === value.trim().toLowerCase()
-    : sameText(app, value);
+    : sameCellText(k, app, value);
 }

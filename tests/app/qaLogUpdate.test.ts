@@ -127,6 +127,43 @@ it('keeps both versions when the log withdraws its first response and the app al
   expect(save).not.toHaveBeenCalled();
 });
 
+it('keeps both first responses when the log contains only spaces and a tab', async () => {
+  const { store, dealId, save, table, questions, response } = await fixture(1);
+  const logResponse = ' \t ';
+  table.rows[0][2] = logResponse;
+  expect(await updateQaLog(store, dealId)).toMatchObject({
+    kind: 'updated', counts: { changed: 0 }, versions: 1,
+  });
+  const state = store.get();
+  const question = state.questions[questions[0].id];
+  expect(question.response).toBe(response);
+  expect(qaKept(state, question)).toEqual({ response: logResponse });
+  expect(save).not.toHaveBeenCalled();
+});
+
+it.each([
+  { edit: '', changed: 1, versions: 0 },
+  { edit: 'The executed agreement is in Financing.', changed: 0, versions: 1 },
+])('recognizes withdrawal of a control-only response with $versions conflicts', async ({ edit, changed, versions }) => {
+  const { store, dealId, save, table, questions, response } = await fixture(2);
+  const questionId = questions[1].id;
+  const firstResponse = '\u000b';
+  table.rows[1][2] = firstResponse;
+  expect(await updateQaLog(store, dealId)).toMatchObject({ kind: 'updated', counts: { changed: 1 } });
+  expect(store.get().questions[questionId].response).toBe(firstResponse);
+
+  table.rows[0][2] = response;
+  table.rows[1][2] = '';
+  save.mockClear();
+  if (edit) expect((await store.dispatch(SetResponse, { dealId, questionId, response: edit })).ok).toBe(true);
+  expect(await updateQaLog(store, dealId)).toMatchObject({ kind: 'updated', counts: { changed }, versions });
+  const state = store.get();
+  expect(state.questions[questionId].response).toBe(edit);
+  expect(qaKept(state, state.questions[questionId])).toEqual(edit ? { response: '' } : {});
+  expect(logOf(store, dealId)?.last?.sent[questionId].response).toBe(edit ? firstResponse : '');
+  expect(save).not.toHaveBeenCalled();
+});
+
 it('retries at 30-second intervals and reports that the third attempt saved', async () => {
   const { store, dealId, save } = await fixture();
   const { announce, dismiss } = trackNotices();
