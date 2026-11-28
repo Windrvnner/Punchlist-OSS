@@ -45,12 +45,12 @@ async function openReview(page, workbook) {
   return { page, finish, next, retry, calls, review, pair, rows, itemCount: rows.length };
 }
 
-async function sheetFile(page, rows, { name = 'Checklist workbook.xlsx', first, second }) {
+async function sheetFile(page, rows, { name = 'Checklist workbook.ods', first, second }) {
   await page.evaluate(({ name, rows, first, second }) => {
     const sheet = (name, item) => ({ name, grid: ['Item', item, ...rows].map((value) => [value]) });
     window.__sheets = { [name]: [sheet('Main', first), sheet('Appendix', second)] };
   }, { name, rows, first, second });
-  const mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const mimeType = 'application/vnd.oasis.opendocument.spreadsheet';
   return { name, mimeType, buffer: Buffer.alloc(0) };
 }
 
@@ -168,7 +168,7 @@ async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, sa
   await page.click('#cl-back');
   const first = 'Provide the equipment acceptance certificate for each commissioned substation.';
   const appendix = 'Provide the operating permits for the collection network.';
-  const name = 'Replacement checklist.xlsx';
+  const name = 'Replacement checklist.ods';
   await page.setInputFiles('#cl-file', await sheetFile(page, rows, { name, first, second: appendix }));
   await page.locator('.imprev').getByText(first, { exact: true }).waitFor();
   const sheetError = await sheetErrorWhileWaiting(page, next, name);

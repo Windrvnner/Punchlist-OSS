@@ -7,6 +7,7 @@
  * call is (backend/retry.ts).
  */
 import { decodeText } from '../domain/textEncoding';
+import { isWorkbook } from '../domain/sheets';
 import type { AiService } from '../ports';
 import {
   cellText, fillUnplaced, unplaced, textLines, tableLines, tableRowsAsWritten, tieOut, readingOf, type ListReading,
@@ -34,9 +35,10 @@ export async function readList(
 }
 
 /** The files a list can be brought in from: spreadsheets, documents and plain text. */
-export const LIST_FILES = /\.(xlsx|xlsm|xls|xlsb|ods|csv|docx|docm|doc|odt|rtf|pdf|txt|text|md)$/i;
-export const LIST_ACCEPT = '.xlsx,.xlsm,.xls,.xlsb,.ods,.csv,.docx,.docm,.doc,.odt,.rtf,.pdf,.txt,.text,.md';
-const SHEET = /\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i; const PLAIN = /\.(txt|text|md)$/i;
+const FILE_EXTENSIONS = ['.ods', '.csv', '.docx', '.docm', '.doc', '.odt', '.rtf', '.pdf', '.txt', '.text', '.md'];
+export const LIST_ACCEPT = FILE_EXTENSIONS.join(',');
+const SHEET = /\.(ods|csv)$/;
+const PLAIN = /\.(txt|text|md)$/;
 
 /**
  * A pasted line's cells when a tab splits it: one per tab and one more, each with its own spaces, empty cells at its
@@ -68,13 +70,17 @@ export async function readListFile(
   store: Store,
   file: { name: string; arrayBuffer(): Promise<ArrayBuffer> },
 ): Promise<Result<{ table: ImportTable } | { lines: string[] }>> {
-  if (!LIST_FILES.test(file.name)) return fail({ kind: 'invalid', message: 'Choose a spreadsheet, a Word file, a PDF or a text file' });
+  const name = file.name.toLowerCase();
+  if (!FILE_EXTENSIONS.some((extension) => name.endsWith(extension))) {
+    const message = 'Choose a CSV, OpenDocument spreadsheet, Word document, PDF, or text file';
+    return fail({ kind: 'invalid', message });
+  }
   let bytes: Uint8Array;
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }
-  if (SHEET.test(file.name)) { const t = await readImportBytes(store, file.name, bytes, { headerRow: 1 }); return t.ok ? ok({ table: t.value }) : t; }
+  if (SHEET.test(name)) return readListSpreadsheet(store, file.name, bytes);
   let text: string;
   // by byte-order mark, else UTF-8, else Windows-1252, as a CSV is read (#382)
-  if (PLAIN.test(file.name)) {
+  if (PLAIN.test(name)) {
     try { text = decodeText(bytes); } catch (e) { return fail({ kind: 'invalid', message: (e as Error).message }); }
   } else {
     const sheets = store.services.sheets;
@@ -85,6 +91,15 @@ export async function readListFile(
   }
   const lines = textLines(text.replace(/^\uFEFF/, ''));
   return lines.some((l) => l.trim()) ? ok({ lines }) : fail({ kind: 'invalid', message: 'The file has no text' });
+}
+
+async function readListSpreadsheet(store: Store, name: string, bytes: Uint8Array) {
+  // The shared CSV reader suggests renaming workbook files to .xlsx, which is only useful in Q&A.
+  if (/\.csv$/i.test(name) && isWorkbook(bytes)) {
+    return fail({ kind: 'invalid', message: 'Save this workbook as CSV or paste the checklist' });
+  }
+  const read = await readImportBytes(store, name, bytes, { headerRow: 1 });
+  return read.ok ? ok({ table: read.value }) : read;
 }
 
 type ChecklistFile = Parameters<typeof readListFile>[1];

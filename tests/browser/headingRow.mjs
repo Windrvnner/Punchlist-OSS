@@ -10,7 +10,7 @@ const unused = '.imwhere .efstate.fail';
 
 export async function headingWorkbook(page, prefix, { supplementOnly = false, headingAtSix = false } = {}) {
   const qa = prefix === 'im';
-  const name = qa ? 'Lender Q&A.xlsx' : 'Solar diligence checklist.xlsx';
+  const name = qa ? 'Lender Q&A.xlsx' : 'Solar diligence checklist.ods';
   const headings = qa ? ['#', 'Question', 'Response'] : ['Section', 'Item'];
   const rows = sites.flatMap((site) => items.map((item) => [site, item.replaceAll('’', "'")])).slice(0, 2000)
     .map(([site, item], index) => qa
