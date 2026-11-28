@@ -227,8 +227,14 @@ export const knownUnusable = (known: Known[], keys: string[]) => (text: string) 
 /** The explicit reply that the document is not a report, as the prompt asks. */
 const notReport = (reply: Record<string, unknown>) => reply.report === false && !('issues' in reply);
 
-/** A report that raises no issues gives an empty array (#1212). */
-const isCompleteReportReply = (reply: Record<string, unknown>) => notReport(reply) || Array.isArray(reply.issues);
+/** Keep the existing single-row form. Only an explicit empty list says the report raises no issues (#1212). */
+function reportIssueRows(reply: Record<string, unknown>): Record<string, unknown>[] | null {
+  const issues = reply.issues;
+  if (Array.isArray(issues)) return issues;
+  if (!isObject(issues)) return null;
+  const covered = typeof issues.covered === 'string' && issues.covered !== '';
+  return titleOf(issues) || covered || tagNumber(issues.still, 'E') !== null ? [issues] : null;
+}
 
 /** the report's issues from the model in one call; a reply cut off at the length limit comes back with `cut` */
 async function ask(r: ReportRead, known: Known[]) {
@@ -241,7 +247,7 @@ async function ask(r: ReportRead, known: Known[]) {
   const unusable = async (text: string) => (await cites(text)) || named(text);
   const input = { kind: 'report', split: true, model: k.models.standard, system: k.system, files: r.s.files, prompt,
     unusable };
-  const correction = (reply: Record<string, unknown>) => isCompleteReportReply(reply)
+  const correction = (reply: Record<string, unknown>) => notReport(reply) || reportIssueRows(reply) !== null
     ? undefined
     : 'provide an issues array, empty only if the report raises no issues, or {"report":false} for a non-report';
   try {
@@ -276,10 +282,12 @@ export async function read(
     return 'lost';
   }
   const { r, got } = sentAndAsked;
-  if (!got.reply || !isCompleteReportReply(got.reply)) return null;
+  if (!got.reply) return null;
   if (notReport(got.reply)) return 'not';
+  const issues = reportIssueRows(got.reply);
+  if (!issues) return null;
   r.heard(got.reply);
-  if (!(await r.takeAll(got.reply.issues as Record<string, unknown>[], known))) return null;
+  if (!(await r.takeAll(issues, known))) return null;
   return finish(r, last);
 }
 
