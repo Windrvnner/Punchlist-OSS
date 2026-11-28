@@ -4,6 +4,7 @@ import { cutOff } from '../../src/backend/limits';
 import { stateOf, type ReportLine } from '../../src/backend/reports';
 import type { Repository } from '../../src/ports';
 import { checkLines, deal, doc, Mem, setup, val, type Call } from './reviewKit';
+import { refuse } from '../adapters/memRepo';
 
 const report = doc(832, 'Independent Engineer Report.pdf', { pages: 60 });
 const docId = report.docId;
@@ -93,6 +94,113 @@ it('keeps the complete rows in a 600-issue report across two cutoffs (#1212)', a
     expect(findings.map((finding) => finding.title).sort()).toEqual(rows.map(({ title }) => title).sort());
     expect(s.state().read.get(docId)?.issues).toHaveLength(600);
     expect(s.state().tries('read', docId)).toBe(2);
+  } finally {
+    await s.ai.close();
+  }
+});
+
+it('reopens a checkpoint and preserves same-title issues at separate places (#1212)', async () => {
+  const first = row('the inverter warranty ends before debt maturity', 2);
+  const another = row(first.title, 4);
+  const initial = await reader((_call, attempt) => {
+    if (attempt === 1) cutAfter([first], 1);
+    throw Object.assign(new Error('The service cannot be reached'), { code: 'unreachable' });
+  });
+  try {
+    await initial.sweep();
+    expect(initial.state().tries('read', docId)).toBe(1);
+    expect(initial.state().read.has(docId)).toBe(false);
+    expect(val(await initial.repo.list('finding', 'd1'))).toHaveLength(1);
+    expect(val(await initial.ai.progress('d1')).incompleteReports).toBeUndefined();
+  } finally {
+    await initial.ai.close();
+  }
+  const reopened = await reader(() => JSON.stringify({ issues: [first, another] }), initial);
+  try {
+    await reopened.sweep();
+    expect(reopened.calls).toHaveLength(1);
+    expect(reopened.calls[0].prompt).toContain('remaining issues');
+    expect(reopened.calls[0].prompt).toContain(first.title);
+    const findings = val(await reopened.repo.list('finding', 'd1')).map(({ envelope }) => envelope.data) as {
+      sources: { loc: string }[];
+    }[];
+    expect(findings.flatMap(({ sources }) => sources.map(({ loc }) => loc)).sort()).toEqual(['p. 2', 'p. 4']);
+    expect(reopened.state().read.get(docId)?.issues).toHaveLength(2);
+  } finally {
+    await reopened.ai.close();
+  }
+});
+
+it('rejects a cut prefix that names an unshown document (#1212)', async () => {
+  const valid = row('the substation transformer has no test record', 2);
+  const invalid = row('the maintenance schedule has expired', 3);
+  invalid.sources[0].doc = doc(833, 'Another report.pdf').docId;
+  const s = await reader((_call, attempt) => {
+    if (attempt === 1) cutAfter([valid, invalid], 2);
+    return JSON.stringify({ issues: [valid] });
+  });
+  try {
+    await s.sweep();
+    expect(s.calls).toHaveLength(2);
+    expect(s.calls[1].prompt).toContain('remaining issues');
+    expect(s.calls[1].prompt).not.toContain(valid.title);
+    expect(s.state().read.get(docId)?.issues.map(({ title }) => title)).toEqual([valid.title]);
+  } finally {
+    await s.ai.close();
+  }
+});
+
+it('recovers when the finding write succeeds before the cutoff checkpoint append fails (#1212)', async () => {
+  const issues = [row('the replacement allowance excludes transformers', 2), row('the switchgear is not tested', 4)];
+  const initial = await reader(() => cutAfter(issues, 1));
+  const restore = refuse(initial.shared, (text) => text.includes('"cut":'), () => new Error('Disk full'), 1);
+  try {
+    await initial.sweep();
+    expect(initial.state().tries('read', docId)).toBe(0);
+    expect(val(await initial.repo.list('finding', 'd1'))).toHaveLength(1);
+  } finally {
+    restore();
+    await initial.ai.close();
+  }
+  const resumed = await reader((_call, attempt) => {
+    if (attempt === 1) cutAfter(issues, 2);
+    return '{"issues":[]}';
+  }, initial);
+  try {
+    await resumed.sweep();
+    const findings = val(await resumed.repo.list('finding', 'd1'));
+    expect(findings).toHaveLength(2);
+    expect(resumed.state().read.get(docId)?.issues.map(({ title }) => title)).toEqual(issues.map(({ title }) => title));
+    expect(resumed.state().tries('read', docId)).toBe(1);
+  } finally {
+    await resumed.ai.close();
+  }
+});
+
+it('asks again for a refused write while keeping an independent issue from the same prefix (#1212)', async () => {
+  const first = row('the substation transformer has no test record', 2);
+  const next = row('the maintenance agreement expires during the loan term', 3);
+  const s = await reader((_call, attempt) => {
+    if (attempt === 1) cutAfter([first, next], 2);
+    return JSON.stringify({ issues: [first] });
+  });
+  const transact = s.repo.transaction.bind(s.repo);
+  let refused = false;
+  s.repo.transaction = async (tx) => {
+    const issue = tx.writes.find((write) => write.kind === 'finding')?.data as Row | undefined;
+    if (!refused && issue?.title === first.title) {
+      refused = true;
+      return { ok: false, error: { kind: 'storageFull', message: 'Disk full' } };
+    }
+    return transact(tx);
+  };
+  try {
+    await s.sweep();
+    expect(refused).toBe(true);
+    expect(s.calls[1].prompt).toContain(next.title);
+    expect(s.calls[1].prompt).not.toContain(first.title);
+    const complete = s.state().read.get(docId)?.issues.map(({ title }) => title).sort();
+    expect(complete).toEqual([first.title, next.title].sort());
   } finally {
     await s.ai.close();
   }
