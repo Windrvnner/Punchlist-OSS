@@ -17,7 +17,7 @@ import { editLog, libreOfficeSheets } from './spreadsheets';
 import { decodeText } from '../domain/textEncoding';
 import { saveLog, createLog, sha256, restoreAside, keptEdits, settleKept, type KeptEdit } from './qaLogFolder';
 import { fixedCells } from './xlsxEdit';
-import { mergeKept, type KeptAsk } from '../domain/keptMerge';
+import { mergeKept, type KeptAsk, type KeptTable } from '../domain/keptMerge';
 import { keptLogColumns, logLayoutChanged, resolveLogMapping, selectedUnnamedColumns } from '../domain/qaLogLayout';
 
 const EXT = /^\.(xlsx|xlsm|xls|ods|csv)$/i;
@@ -59,11 +59,57 @@ function keptColumnsForRead(table: SheetTable, opts: ReadOptions): Result<ReadOp
   return ok(opts.kept ? keptLogColumns(mapping.value) : undefined);
 }
 
+/** Formula cells are neither overwritten nor taken for edits. A CSV contains values only. */
+function workbookFormulas(converter: Converter, extension: string, sheet: string) {
+  if (/\.csv$/i.test(extension)) return undefined;
+  const grid = (sheets: Sheet[]) => sheets.find(({ name }) => name === sheet)?.grid ?? [];
+  return async (file: string, values: Sheet[]) => {
+    if (!converter.sheets) throw new Error('no spreadsheet reader');
+    const formulas = grid(await converter.sheets(file, false, true));
+    const shown = grid(values);
+    return (row: number, column: number): string | false => {
+      const value = formulas[row]?.[column] ?? '';
+      return value.startsWith('=') && value !== (shown[row]?.[column] ?? '') ? value : false;
+    };
+  };
+}
+
 /** Keep the retained-edit calculation on the exact bytes whose stamp guards the write (#282). */
-function stageLog(work: string, extension: string, bytes: Uint8Array) {
+async function readKeptLog(
+  work: string, extension: string, bytes: Uint8Array, sheet: string, sheets: (file: string) => Promise<Sheet[]>,
+  formulas: ReturnType<typeof workbookFormulas>,
+) {
   const file = path.join(work, `log${extension}`);
   fs.writeFileSync(file, bytes);
-  return file;
+  const snapshot = await sheets(file);
+  const formula = await formulas?.(file, snapshot);
+  const merged = /\.xlsx$|\.xlsm$/i.test(extension) ? fixedCells(bytes, sheet) : () => false;
+  const fixed = (row: number, column: number) => merged(row, column) || !!formula?.(row, column);
+  return { snapshot, fixed };
+}
+
+/** A kept edit can change the compact indexes by clearing an unnamed column. Follow its sheet position (#282). */
+function currentKeptColumns(cols: { text: number; n?: number; by?: number }, read: KeptTable, current: KeptTable) {
+  const index = (old: number) => current.cols.indexOf(read.cols[old]);
+  return {
+    text: index(cols.text), n: cols.n === undefined ? undefined : index(cols.n),
+    by: cols.by === undefined ? undefined : index(cols.by),
+  };
+}
+
+type KeptOutcome = { left: boolean; clashes: number[]; steps?: true };
+
+/** A file without an outcome either could not be merged or was already merged and only needs filing. */
+function keptFileResults(files: KeptEdit[], outcomes: Map<KeptEdit, KeptOutcome>) {
+  return files.map((file) => {
+    const result = outcomes.get(file);
+    const left = result ? result.left : !/\.kept$/i.test(file.name);
+    return {
+      name: file.name, hash: file.hash, ...(left ? { left: true as const } : {}),
+      ...(result?.clashes.length ? { clashes: result.clashes } : {}),
+      ...(result?.steps ? { steps: true as const } : {}),
+    };
+  });
 }
 
 export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogFiles {
@@ -87,36 +133,22 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
   const bringIn = async (
     file: string, bytes: Uint8Array, folder: string, found: KeptEdit[],
     opts: SheetReadOptions & { sheet: string; headerRow: number }, cols: { text: number; n?: number; by?: number },
-    read: { columns: string[]; cols: number[]; rows: string[][]; lines: number[]; lastRow: number },
+    read: KeptTable,
   ) => {
     const ext = path.extname(file); const steps: SheetEdit[] = []; const clashes = new Set<number>(); let table = read; const files = found.filter((k) => !k.base);
     const ask: (KeptAsk & { file: string })[] = [];                                     // rows the person says where they go
-    // what each file brought in: one not listed here was merged in full, or was never merged at all (left)
-    const done = new Map<KeptEdit, { left: boolean; clashes: number[]; steps?: true }>();
-    const out = () => files.map((k) => { const d = done.get(k); const left = d ? d.left : !/\.kept$/i.test(k.name); return { name: k.name, hash: k.hash, ...(left ? { left: true as const } : {}), ...(d?.clashes.length ? { clashes: d.clashes } : {}), ...(d?.steps ? { steps: true as const } : {}) }; });
-    if (files.length === found.length) return { ...read, kept: { files: out(), steps, clashes: [], ask } };   // nothing to merge: no file need be read
+    const done = new Map<KeptEdit, KeptOutcome>();
+    if (files.length === found.length) {
+      return { ...read, kept: { files: keptFileResults(files, done), steps, clashes: [], ask } };
+    }
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-qalog-kept-'));
     try {
       /** a copy under the log's extension, for the readers (a kept edit's own name ends in .old) */
       const copy = (from: string, name: string, hash?: string) =>
         copyLogFile(from, path.join(work, `${name}${ext}`), hash);
-      // A workbook's formulas too (a CSV has none): a cell of the log that holds one is never written, and one of theirs is
-      // never taken for their change (a "days outstanding" gives another value on the day they saved)
-      const grid = (all: Sheet[]) => all.find((s) => s.name === opts.sheet)?.grid ?? [];
-      const formulas = /\.csv$/i.test(ext) ? null : async (f: string, values: Sheet[]) => {
-        if (!o.convert?.sheets) throw new Error('no spreadsheet reader');
-        const fg = grid(await o.convert.sheets(f, false, true)); const vg = grid(values);
-        /** the formula a cell holds, or false */
-        return (r: number, c: number): string | false => { const t = fg[r]?.[c] ?? ''; return t.startsWith('=') && t !== (vg[r]?.[c] ?? '') ? t : false; };
-      };
-      const logFile = stageLog(work, ext, bytes);
-      let now = await sheets(logFile);
-      const logF = formulas && (await formulas(logFile, now)); const merged = /\.xlsx$|\.xlsm$/i.test(ext) ? fixedCells(bytes, opts.sheet) : () => false;
-      const fixed = (r: number, c: number) => merged(r, c) || (!!logF && !!logF(r, c));
-      // Applying a kept edit can change which unnamed columns appear in the compact table.
-      const position = (index: number | undefined) => (
-        index === undefined ? undefined : table.cols.indexOf(read.cols[index])
-      );
+      const formulas = workbookFormulas(conv, ext, opts.sheet);
+      const { snapshot, fixed } = await readKeptLog(work, ext, bytes, opts.sheet, sheets, formulas);
+      let now = snapshot;
       for (const [i, k] of found.entries()) {
         if (!k.base) continue;
         try {
@@ -126,10 +158,10 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
           const bs = await sheets(bf); const base = tableFrom(bs, opts), kept = tableFrom(ks, opts);
           files.push(k);
           if (!base || !kept || !atLinkedTable(base, opts) || !atLinkedTable(kept, opts)) continue;
-          const ours = (formulas && (await formulas(bf, bs))) || undefined;
-          const theirs = (formulas && (await formulas(kf, ks))) || undefined;
-          const text = position(cols.text) ?? -1;
-          const m = mergeKept(base, kept, table, text, fixed, theirs, position(cols.n), ours, position(cols.by));
+          const ours = await formulas?.(bf, bs);
+          const theirs = await formulas?.(kf, ks);
+          const { text, n, by } = currentKeptColumns(cols, read, table);
+          const m = mergeKept(base, kept, table, text, fixed, theirs, n, ours, by);
           ask.push(...m.ask.map((a) => ({ ...a, file: k.name })));
           if (!m.steps.length && !m.clashes.length) { done.set(k, { left: m.left > 0, clashes: [], ...(m.ask.length ? { steps: true as const } : {}) }); continue; }
           const next = withSteps(now, opts.sheet, m.steps); const t = next && tableFrom(next, opts); if (!next || !t) continue;
@@ -142,7 +174,9 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
       }
     } catch { return { ...read, kept: { files: [], steps: [], clashes: [], ask: [] } }; }   // the log itself could not be read so: next time
     finally { try { fs.rmSync(work, { recursive: true, force: true }); } catch { /* left in the temp folder */ } }
-    return { columns: table.columns, cols: table.cols, rows: table.rows, lines: table.lines, lastRow: table.lastRow, kept: { files: out(), steps, clashes: [...clashes].sort((a, b) => a - b), ask } };
+    const kept = { files: keptFileResults(files, done), steps, clashes: [...clashes].sort((a, b) => a - b), ask };
+    const { columns, cols: positions, rows, lines, lastRow } = table;
+    return { columns, cols: positions, rows, lines, lastRow, kept };
   };
   return {
     async read(at, opts) {
