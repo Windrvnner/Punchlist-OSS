@@ -3,7 +3,8 @@
 // "Phase 10") as a person reads them. At deal scale: 2,000 questions from 30 parties, 40 technology lists.
 // SHOTS=dir also saves screenshots of the lists, dark and light, at 1280x736 and 1024x640.
 import { launchChrome } from './chrome.mjs';
-import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+import { spreadsheetFile } from './headingRow.mjs';
+import fs from 'node:fs'; import path from 'node:path';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const SHOTS = process.env.SHOTS; if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
@@ -155,11 +156,15 @@ for (const [size, scheme] of [[[1280, 736], 'dark'], [[1280, 736], 'light'], [[1
     await page.goto(URL + '#overview-' + id); await page.waitForSelector('#u-menu');   // the finding page's slim rail has no account row
     await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import');
         await shot(page, 'firm-lists', scheme, size);
-    const csv = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'picksort-')), 'List.csv');
-    fs.writeFileSync(csv, ['Area,Requirement,Owner', 'Grid,Interconnection agreement executed,AM', 'Land,Site control in place,PN'].join('\n'));
+    const grid = [['Area', 'Requirement', 'Owner'],
+      ['Grid', 'Interconnection agreement executed', 'AM'], ['Land', 'Site control in place', 'PN']];
+    const file = await spreadsheetFile(page, 'List.ods', [{ name: 'Sheet1', grid }]);
     // the column picks are the fallback when the model cannot read the list: Choose columns from the not-read line
     await page.evaluate(() => { window.__fail = { readList: true }; });
-    await page.click('#fl-import'); await page.setInputFiles('#cl-file', csv); await page.waitForSelector('#cl-bycolumns'); await page.click('#cl-bycolumns'); await page.waitForSelector('[data-clmap="item"]');
+    await page.click('#fl-import');
+    await page.setInputFiles('#cl-file', file);
+    await page.click('#cl-bycolumns');
+    await page.waitForSelector('[data-clmap="item"]');
     await page.evaluate(() => { window.__fail = {}; });
     await page.click('[data-layer=technology]'); await page.waitForSelector('#cl-names', { state: 'attached' });
     const sugg = await page.$$eval('#cl-names option', (o) => o.map((x) => x.value));

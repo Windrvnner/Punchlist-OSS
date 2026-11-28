@@ -1,4 +1,6 @@
 // The checklist review at deal size, with model replies held until the test releases them (#378).
+import { spreadsheetFile } from './headingRow.mjs';
+
 async function openReview(page, workbook) {
   const agreements = ['equipment supply agreement', 'construction contract', 'interconnection agreement', 'site lease',
     'maintenance agreement', 'power purchase agreement', 'credit agreement', 'insurance policy'];
@@ -11,9 +13,10 @@ async function openReview(page, workbook) {
   await page.click('#u-menu');
   await page.click('#s-checklist-open');
   await page.click('#fl-import');
-  await page.setInputFiles('#cl-file', workbook ? await sheetFile(page, rows, workbook) : {
-    name: 'Duplicate retries.csv', mimeType: 'text/csv', buffer: Buffer.from(['Item', ...rows].join('\n')),
-  });
+  const grid = ['Item', ...rows].map((text) => [text]);
+  const file = workbook ? await sheetFile(page, rows, workbook)
+    : await spreadsheetFile(page, 'Duplicate retries.ods', [{ name: 'Sheet1', grid }]);
+  await page.setInputFiles('#cl-file', file);
   const next = page.locator('#cl-next');
   const retry = page.locator('#cl-retry');
   await page.uncheck('#cl-askreword');
@@ -45,13 +48,9 @@ async function openReview(page, workbook) {
   return { page, finish, next, retry, calls, review, pair, rows, itemCount: rows.length };
 }
 
-async function sheetFile(page, rows, { name = 'Checklist workbook.xlsx', first, second }) {
-  await page.evaluate(({ name, rows, first, second }) => {
-    const sheet = (name, item) => ({ name, grid: ['Item', item, ...rows].map((value) => [value]) });
-    window.__sheets = { [name]: [sheet('Main', first), sheet('Appendix', second)] };
-  }, { name, rows, first, second });
-  const mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  return { name, mimeType, buffer: Buffer.alloc(0) };
+async function sheetFile(page, rows, { name = 'Checklist workbook.ods', first, second }) {
+  const sheet = (name, item) => ({ name, grid: ['Item', item, ...rows].map((value) => [value]) });
+  return spreadsheetFile(page, name, [sheet('Main', first), sheet('Appendix', second)]);
 }
 
 const failed = (kind) => ({ ok: false, error: { kind, message: kind } });
@@ -168,7 +167,7 @@ async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, sa
   await page.click('#cl-back');
   const first = 'Provide the equipment acceptance certificate for each commissioned substation.';
   const appendix = 'Provide the operating permits for the collection network.';
-  const name = 'Replacement checklist.xlsx';
+  const name = 'Replacement checklist.ods';
   await page.setInputFiles('#cl-file', await sheetFile(page, rows, { name, first, second: appendix }));
   await page.locator('.imprev').getByText(first, { exact: true }).waitFor();
   const sheetError = await sheetErrorWhileWaiting(page, next, name);
