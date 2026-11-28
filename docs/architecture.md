@@ -203,6 +203,9 @@ A deal's checklist is made up of its own item records, linked to the findings an
 
 - **The master checklist's lists** are one record per list (kind `firmList`, with an `l_` ID derived from its layer and its name's key), so two different lists brought in at the same time never clash. The content of a version is its items, in order. The name as typed, the file, and who brought the list in are bookkeeping fields. While a list is in two versions, deals get only the items that every version holds (`usableFirm`), and bringing the list in again is refused until a person chooses a version.
 - **A bring-in** (bringing in a list from the master checklist) adds the new items to every deal that uses the list and is not marked Closed. "Undo all" first restores the list. If that is refused (because the list has changed since, or another PC brought in the same items), it undoes nothing else. Otherwise, it then undoes each deal's additions, leaving turned on any item that another of the deal's lists holds (`undoBringIn`).
+  Before submitting a write, the import session checks the reviewed destination items and the General wording used for
+  checked removals against its current view.
+  While General has multiple versions, the duplicate check uses the same common items as checklist additions.
 - **A deal's items** (kind `item`) are only ever added, never removed. An item's ID is `i_` derived from the deal and its wording's `key()` (`norm()`, with case folded and any trailing period removed), so the same wording added on two PCs is one item. The wording, `from` (the list and its `rev`), and the section are bookkeeping fields. Turned off (`off`) is the only field a person sets, and a write of bookkeeping fields alone folds into a concurrent change of `off` (#19).
 - **Items are added** when a deal is created; when a deal gets a new structure, sector, or technology (in the same change); by a bring-in; and by "Add them" when the master checklist's lists hold items the deal lacks. "Add them" is offered only on a loaded deal that is not marked Closed and not in two versions, and only while this PC's copy of each list the items name is at least as new as the `rev` they name (`offeredItems`). Picking another list swaps lists: items that only the old list held are turned off and marked `offBySwap`, and they are turned back on when a list that holds them returns.
 - **Order:** Items are ordered by layer (general, structure, sector, technology), then in the order of the master checklist's lists for that layer (`orderItems`). An item whose wording is not in the current master checklist lists for the deal's layers shows an icon (`unlistedItems`).
@@ -249,7 +252,9 @@ A deal's checklist is made up of its own item records, linked to the findings an
   through `parts.ts`, when the service refuses it as too long or cuts the reply off; lines it leaves unplaced are read
   once more by the thorough model), and tied out so that every line is accounted for (`src/app/listRead.ts`,
   `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one
-  **Undo** for all of them.
+  **Undo** for all of them. The import session rebinds section metadata and refreshes recalled approvals.
+  The retained review keeps checks inactive when a service failure leaves suggestions or matches unavailable. A
+  check returns only when the same row offers the same wording or all the same duplicate matches.
 - **An issues list** is attached or pasted as text, and read through `src/app/issuesList.ts`. The model reads the
   file once, then proposes titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command
   resolve the same matches through `src/app/issuesListJoins.ts`.
