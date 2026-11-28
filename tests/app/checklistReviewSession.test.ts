@@ -83,14 +83,20 @@ async function technologyReview(questions: string[], name: string, compare = fal
   return session;
 }
 
-it('imports only the wording accepted for the destination chosen after Back (#56)', async () => {
+it.each([
+  { changed: 'name', layer: 'technology', name: 'Wind' },
+  { changed: 'layer', layer: 'sector', name: 'Solar' },
+] as const)('imports only the destination’s wording after changing its $changed (#56)', async ({ layer, name }) => {
   const questions = portfolioQuestions().slice(0, 2_000);
   const solarItems = priorItems(questions, 'photovoltaic');
-  const windItems = priorItems(questions, 'wind turbine');
-  const lists = [{ name: 'Solar', items: solarItems }, { name: 'Wind', items: windItems }];
-  for (const { name, items } of lists) {
+  const targetItems = priorItems(questions, 'grid connection');
+  const lists = [
+    { layer: 'technology' as const, name: 'Solar', items: solarItems },
+    { layer, name, items: targetItems },
+  ];
+  for (const list of lists) {
     const result = await app.store.dispatch(BringInList, {
-      list: { layer: 'technology', name, items, file: 'Prior requests.csv', fileDate: '' },
+      list: { ...list, file: 'Prior requests.csv', fileDate: '' },
     });
     expect(result.ok).toBe(true);
   }
@@ -102,17 +108,16 @@ it('imports only the wording accepted for the destination chosen after Back (#56
   await session.next();
   expect(session.view.listReview.useReword.has(0)).toBe(false);
   session.backToList();
-  session.setName('Wind');
+  if (layer === 'technology') session.setName(name);
+  else session.setLayer(layer);
   session.close();
   const reopened = open();
   await reopened.next();
-  const shown = reopened.view.listReview.review?.rewords.map(({ text }) => text);
+  expect(reopened.view.listReview.review?.rewords.map(({ text }) => text)).toEqual(targetItems.map(({ text }) => text));
   await reopened.bringIn();
   const saved = app.store.get().firmList;
-  const wind = saved[listId('technology', 'Wind')]?.items;
-  expect(wind?.[1]).toEqual(windItems[1]);
-  expect(wind).toEqual([...windItems, ...questions.slice(120).map((text) => ({ text }))]);
-  expect(shown).toEqual(windItems.map(({ text }) => text));
+  const originalItems = questions.slice(120).map((text) => ({ text }));
+  expect(saved[listId(layer, name)]?.items).toEqual([...targetItems, ...originalItems]);
   expect(saved[listId('technology', 'Solar')]?.items).toEqual(solarItems);
 });
 
@@ -163,14 +168,19 @@ it('refuses a queued Import when an earlier write changes the reviewed list (#56
   expect(keptImport(key)).toBeDefined();
 });
 
-it('keeps checked wording while remapping the section of the same row (#56)', async () => {
+it.each([
+  { field: 'section', column: 1, section: 'Financing', subsection: 'Reports' },
+  { field: 'subsection', column: 3, section: 'Operations', subsection: 'Supporting records' },
+] as const)('keeps checked wording while remapping only $field (#56)', async (mapping) => {
+  const { field, column, section, subsection } = mapping;
   const questions = portfolioQuestions().slice(0, 2_000);
   app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
   const text = 'Provide the executed EPC contract and appendices.';
   const reword = vi.fn(async () => ok([{ at: 0, text, why: '' }]));
   app.store.services.ai.reword = reword;
-  const rows = questions.map((question) => ['Operations', 'Financing', question]);
-  const encoded = await csvCodec.write('Sheet1', [['Section', 'Alternate area', 'Item'], ...rows]);
+  const rows = questions.map((question) => ['Operations', 'Financing', 'Reports', 'Supporting records', question]);
+  const headers = ['Section', 'Alternate area', 'Subsection', 'Alternate subsection', 'Item'];
+  const encoded = await csvCodec.write('Sheet1', [headers, ...rows]);
   if (!encoded.ok) throw new Error(encoded.error.message);
   const session = open();
   await session.load(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.csv'));
@@ -180,14 +190,14 @@ it('keeps checked wording while remapping the section of the same row (#56)', as
   await session.next();
   session.flipReword(0);
   session.backToList();
-  session.pickColumn('section', 1);
+  session.pickColumn(field, column);
   await session.next();
   expect(session.view.listReview.useReword.has(0)).toBe(true);
   expect(reword).toHaveBeenCalledTimes(1);
   await session.bringIn();
   const items = app.store.get().firmList[listId('broad', '')]?.items;
   expect(items).toHaveLength(2_000);
-  expect(items?.[0]).toEqual({ text, was: questions[0], section: 'Financing' });
+  expect(items?.[0]).toEqual({ text, was: questions[0], section, subsection });
 });
 
 async function savePriorList(layer: 'broad' | 'technology', name: string, items: { text: string }[]) {
