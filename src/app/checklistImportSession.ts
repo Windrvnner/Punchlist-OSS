@@ -270,12 +270,16 @@ export class ChecklistImportSession {
   /** Section columns change the metadata of the same source rows (#56). */
   private remapChecklistSections(mapping: ChecklistMapping) {
     const target = this.target;
-    const cached = this.plan(this.source, target)?.cached;
+    const before = this.plan(this.source, target);
+    const review = this.review;
     this.choices = { ...this.choices, mapping };
-    const plan = cached && this.plan(this.source, target);
-    if (plan) {
-      this.review = { ...cached, items: plan.items };
-      this.choices.askedFor = plan.signature;
+    const after = this.plan(this.source, target);
+    // Rebind the rows even if an updated approval or General list still requires a fresh review.
+    const sameRows = review && before && review.choicesKey === before.choicesKey
+      && sameContent(review.items, before.items);
+    if (sameRows && after) {
+      this.review = { ...review, items: after.items };
+      if (before.cached) this.choices.askedFor = after.signature;
     }
     this.keep();
   }
@@ -316,7 +320,13 @@ export class ChecklistImportSession {
     }
   };
 
+  private resetReview() {
+    this.review = null;
+    this.choices = { ...this.choices, askedFor: '', shown: false, remove: new Set(), useReword: new Set() };
+  }
+
   private acceptSource(table: ImportTable | null, text: ChecklistText | null, mapping = this.choices.mapping) {
+    this.resetReview();
     this.table = table;
     this.text = text;
     this.error = '';
@@ -369,6 +379,7 @@ export class ChecklistImportSession {
         if (!read.ok) {
           this.error = `Could not read ${where.sheet ?? this.table!.name}: ${read.error.message}`;
         } else {
+          if (read.value.table.sheet !== this.table?.sheet) this.resetReview();
           this.table = read.value.table;
           this.choices.mapping = read.value.mapping;
           if (!byColumns) {
@@ -384,11 +395,13 @@ export class ChecklistImportSession {
   }
 
   private showReview = (change: ChecklistReviewChange) => {
-    if (change.kind === 'fresh') {
+    if (change.kind === 'fresh' || (change.kind === 'retry' && change.wording && !change.failure)) {
       this.error = '';
-      const checked = keepChecklistReviewChoices(this.review, change.review, change.checked, this.choices);
-      this.review = change.review;
-      this.choose({ shown: true, askedFor: change.signature, ...checked });
+      const defaults = change.kind === 'fresh' ? change.checked : new Set<number>();
+      const { review, ...checked } = keepChecklistReviewChoices(this.review, change.review, defaults, this.choices);
+      this.review = review;
+      const opened = change.kind === 'fresh' ? { shown: true, askedFor: change.signature } : {};
+      this.choose({ ...opened, ...checked });
     } else if (change.kind === 'retry') {
       this.review = change.review;
       if (change.failure) this.error = `${NOT_DONE[change.failure]} again`;

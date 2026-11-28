@@ -1,7 +1,7 @@
 import { findList, key, listId, type FirmList, type Layer } from '../domain/checklist';
 import { alphabetical } from '../domain/order';
 import { sameContent } from '../domain/versions';
-import type { Review } from './checklistImport';
+import type { Review, WordingChoice } from './checklistImport';
 import { usableFirm } from './commands/checklist';
 import { versionsWord, type State } from './state';
 
@@ -76,20 +76,30 @@ function keepRemovals(previous: Review, current: Review, checked: Set<number>) {
 }
 
 function keepWording(previous: Review, current: Review, checked: Set<number>, defaults: Set<number>) {
-  const old = new Map(previous.rewords.map((wording) => [wording.at, wording]));
-  return new Set(current.rewords.filter(({ at, text, also }) => {
-    const prior = old.get(at);
-    return prior?.text === text && sameContent(prior.also, also) ? checked.has(at) : defaults.has(at);
-  }).map(({ at }) => at));
+  const remembered = new Map<number, WordingChoice>(previous.pendingWording?.map((choice) => [choice.at, choice]));
+  for (const { at, text, also } of previous.rewords) {
+    remembered.set(at, { at, text, also, checked: checked.has(at) });
+  }
+  const useReword = new Set<number>();
+  for (const { at, text, also } of current.rewords) {
+    const prior = remembered.get(at);
+    const applies = prior?.text === text && sameContent(prior.also, also);
+    if (applies ? prior.checked : defaults.has(at)) useReword.add(at);
+    remembered.delete(at);
+  }
+  const failed = current.asked.reword === 'unreachable' || current.asked.reword === 'failed';
+  const excluded = new Set(current.noReword);
+  const pending = failed ? [...remembered.values()].filter(({ at }) => !excluded.has(at)) : [];
+  return { review: { ...current, pendingWording: pending.length ? pending : undefined }, useReword };
 }
 
-/** Carry only choices still offered for the same rows after General changes (#56). */
+/** Carry choices only for the same reviewed rows, options and destination (#56). */
 export function keepChecklistReviewChoices(previous: Review | null, review: Review, checked: Set<number>, was: Checks) {
   if (!previous || previous.choicesKey !== review.choicesKey || !sameContent(previous.items, review.items)) {
-    return { useReword: checked, remove: new Set<number>() };
+    return { review, useReword: checked, remove: new Set<number>() };
   }
   return {
-    useReword: keepWording(previous, review, was.useReword, checked),
+    ...keepWording(previous, review, was.useReword, checked),
     remove: keepRemovals(previous, review, was.remove),
   };
 }
