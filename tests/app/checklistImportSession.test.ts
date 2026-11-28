@@ -2,7 +2,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryKeptImports } from '../../src/adapters/keptImports';
 import { ChecklistImportSession } from '../../src/app/checklistImportSession';
-import { importKey, initializeKeptImports, keptImport, keptImportsReady } from '../../src/app/keptImports';
+import { importKey, initializeKeptImports, keptImport, keptImportsReady, saveImport } from '../../src/app/keptImports';
+import { readImportBytes } from '../../src/app/transfer';
 import { registry } from '../../src/app/commands/undo';
 import { RestoreList } from '../../src/app/commands/checklist';
 import { listId } from '../../src/domain/checklist';
@@ -164,4 +165,23 @@ it('ignores a retry that ends after change and detects headings before manual co
   session.startOver();
   expect(session.view.step).toBe('pick');
   expect(keptImport(key)).toBeUndefined();
+});
+
+it.each(['xlsx', 'csv'])('reopens a kept .%s worksheet and rereads its columns', async (extension) => {
+  app.store.services.sheets = checklistSpreadsheet;
+  app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
+  const name = `Portfolio checklist.${extension}`;
+  const rows = portfolioQuestions().slice(0, 2_000).map((item) => [item, 'Project agreements']);
+  const encoded = await checklistSpreadsheet.write('Sheet1', [['Item', 'Section'], ...rows]);
+  if (!encoded.ok) throw new Error(encoded.error.message);
+  const loaded = await readImportBytes(app.store, name, encoded.value.bytes);
+  if (!loaded.ok) throw new Error(loaded.error.message);
+  expect(await saveImport(key, { table: loaded.value })).toBe(true);
+
+  const session = open();
+  expect(session.view.source.table?.name).toBe(name);
+  await vi.waitFor(() => expect(session.view.source.readFailed).toBe('failed'));
+  await session.chooseColumns();
+  expect(session.view.step).toBe('columns');
+  expect(session.view.source.table?.rows).toEqual(rows);
 });
