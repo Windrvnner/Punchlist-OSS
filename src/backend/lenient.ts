@@ -50,6 +50,14 @@ export function readJson(reply: string, keys: string[], allowUnkeyed = false): R
   return keys.length && !allowUnkeyed ? null : fallback;
 }
 
+/** Read the raw end of a cut-off reply before trying closed substrings of it. */
+export function readCutJson(reply: string, keys: string[]): Record<string, unknown> | null {
+  const open = reply.search(/[\[{]/);
+  const raw = parse(open < 0 ? reply : reply.slice(open));
+  if (Array.isArray(raw)) return { [keys[0]]: raw };
+  return isObject(raw) && keys.some((key) => key in raw) ? raw : readJson(reply, keys);
+}
+
 /**
  * Whether a reply stops inside its JSON: some bracket of its last block is still open at the end (quotes inside strings
  * respected). A block is the first `{"` (or else the first `{`, or a `[` that leads the reply) and, once one has closed, any later `{"` or `[{`,
