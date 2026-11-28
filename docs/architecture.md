@@ -251,7 +251,7 @@ A deal's checklist is made up of its own item records, linked to the findings an
   entries. The form reports failures, and an interrupted-action notice reopens the correlated submission with its
   original choices. Starting over or replacing the file discards unfinished entries. Committed and discarded entries
   keep their correlation until local storage confirms removal, so a stale draft cannot write rows again.
-- **The master checklist** is pasted or imported from a Word, RTF, PDF, OpenDocument, or text file.
+- **The master checklist** is pasted or imported from a Word, RTF, PDF, OpenDocument text (`.odt`), or plain text file.
   The model reads it whole in one call (in halves through `parts.ts` when the service refuses it as too long or cuts
   the reply off). The thorough model rereads any unplaced lines, and the app accounts for every line (`src/app/listRead.ts`,
   `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one

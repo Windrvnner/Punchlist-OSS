@@ -8,12 +8,12 @@ import {
 import { importKey, initializeKeptImports, keptImport, keptImportsReady, saveImport } from '../../src/app/keptImports';
 import {
   checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests, checklistSourceLines,
-  loadChecklistSource, readChecklistColumns, rereadChecklistTable, tieChecklistLines,
+  readChecklistColumns, rereadChecklistTable, tieChecklistLines,
 } from '../../src/app/listRead';
 import { firmOf, listId, norm } from '../../src/domain/checklist';
 import type { LineRead, ListReply } from '../../src/domain/listRead';
 import { fail, ok, type Result } from '../../src/domain/result';
-import { checklistSpreadsheet, portfolioFile } from '../fixtures/checklistSpreadsheet';
+import { checklistSpreadsheet, portfolioFile, readChecklistTable } from '../fixtures/checklistSpreadsheet';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { recoveryApp } from './recoveryKit';
 
@@ -150,17 +150,16 @@ it('re-reads a portfolio spreadsheet by hand after the model fails, preserving i
   try {
     const questions = portfolioQuestions();
     const { store } = app;
-    const source = value(await loadChecklistSource(store, await portfolioFile(questions)));
-    if (!('table' in source)) throw new Error('Expected a checklist table');
-    expect(source.table.headerRow).toBe(1);
-    const lines = checklistSourceLines(null, source.table)!;
+    const source = await readChecklistTable(store, await portfolioFile(questions));
+    expect(source.headerRow).toBe(1);
+    const lines = checklistSourceLines(null, source)!;
     expect(lines[0]).toBe('Portfolio | Financing | Checklist');
     expect(lines[1]).toBe('Section | Requirement | Subsection');
     const unavailable = fail({ kind: 'unreachable', message: 'Could not reach the model' });
     store.services.ai.readList = async () => unavailable;
     const reading = checklistReading(store, checklistRequests());
     expect(await reading.sourceChanged(lines, false, READ_EVENTS)).toEqual(unavailable);
-    const { table, mapping } = value(await readChecklistColumns(store, source.table, { headerRow: 2 }, true));
+    const { table, mapping } = value(await readChecklistColumns(store, source, { headerRow: 2 }, true));
     expect(table.headerRow).toBe(2);
     expect(mapping).toEqual({ item: 1, section: 0, subsection: 2 });
     expect(checklistReadCounts(table, checklistSourceLines(null, table), null)).toEqual({
@@ -229,8 +228,7 @@ it('keeps review input reserved for the latest worksheet read, including a read 
   try {
     const { store } = app;
     const questions = portfolioQuestions();
-    const source = value(await loadChecklistSource(store, await portfolioFile(questions)));
-    if (!('table' in source)) throw new Error('Expected a checklist table');
+    const source = await readChecklistTable(store, await portfolioFile(questions));
     const requests = checklistRequests();
     const events = { started: vi.fn(), finished: vi.fn() };
     const read = vi.fn<typeof store.services.sheets.read>();
@@ -245,8 +243,8 @@ it('keeps review input reserved for the latest worksheet read, including a read 
     store.services.ai.readList = model;
     const reading = checklistReading(store, requests);
 
-    const earlier = rereadChecklistTable(store, requests, source.table, { sheet: 'Supplement' }, false, events);
-    const latest = rereadChecklistTable(store, requests, source.table, { sheet: 'Unreadable' }, false, events);
+    const earlier = rereadChecklistTable(store, requests, source, { sheet: 'Supplement' }, false, events);
+    const latest = rereadChecklistTable(store, requests, source, { sheet: 'Unreadable' }, false, events);
     releases[0]();
     await earlier;
     expect(requests.tableReadPending()).toBe(true);
@@ -269,15 +267,14 @@ it('keeps review input reserved for the latest worksheet read, including a read 
 
 /** A held worksheet read of `questions`, answered under the sheet's own name (#821). */
 async function heldSheetRead(app: Awaited<ReturnType<typeof readyApp>>, questions: string[]) {
-  const source = value(await loadChecklistSource(app.store, await portfolioFile(questions)));
-  if (!('table' in source)) throw new Error('Expected a checklist table');
+  const source = await readChecklistTable(app.store, await portfolioFile(questions));
   const releases: (() => void)[] = [];
   const { sheets } = app.store.services;
   sheets.read = async (_bytes, _name, options) => {
     await new Promise<void>((resolve) => { releases.push(resolve); });
     return ok({ columns: ['Item'], sheet: options?.sheet, rows: questions.map((text) => [text]) });
   };
-  return { table: source.table, releases };
+  return { table: source, releases };
 }
 
 it('holds Next, duplicates and wording while a worksheet read runs, whatever else takes a token (#821)', async () => {

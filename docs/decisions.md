@@ -157,8 +157,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - With no lists, the **Firm’s Checklist** dialog shows one 160px drop area, "Drop a checklist here, or choose a file…"; an import under way reopens as it was left.
 - A deal has no "Add an item": the checklist stays based on the master checklist.
 - **Turn Off Item** is in an item's ⋯ menu; a turned-off item stays in place, dimmed.
-- Paste a checklist or import a clearly laid-out Word, RTF, PDF, OpenDocument, or text file (#1424). The model
-  reads it, every line is accounted for, and lines left out are listed with a checkbox to bring them in.
+- Paste a checklist or import a clearly laid-out Word, RTF, PDF, OpenDocument text (`.odt`), or plain text file (#1393).
+  The model reads it, every line is accounted for, and lines left out are listed with a checkbox to bring them in.
   A line brought in comes in exactly as written, its bullet or number included. The app keeps every item's wording
   as written and stores every line the model reads with its edge spaces and tabs. Here accuracy comes
   before cost: the standard model reads the whole list in one call and names each line's kind by a handle that no line's

@@ -1,5 +1,6 @@
 // The checklist review at deal size, with model replies held until the test releases them (#378).
-import { spreadsheetFile } from './headingRow.mjs';
+import { itemDocument } from './checklistFileFormats.mjs';
+import { openKeptChecklist } from './checklistKeptTable.mjs';
 
 async function openReview(page, workbook) {
   const agreements = ['equipment supply agreement', 'construction contract', 'interconnection agreement', 'site lease',
@@ -10,13 +11,15 @@ async function openReview(page, workbook) {
     evidence.map((detail) => `Provide the ${detail} of the ${agreement} for site ${site + 1}.`))).flat();
   rows.push('Produce the signed pages of the equipment supply agreement for site 1.',
     'Provide the equipment supply payment schedule for site 1.');
-  await page.click('#u-menu');
-  await page.click('#s-checklist-open');
-  await page.click('#fl-import');
-  const grid = ['Item', ...rows].map((text) => [text]);
-  const file = workbook ? await sheetFile(page, rows, workbook)
-    : await spreadsheetFile(page, 'Duplicate retries.ods', [{ name: 'Sheet1', grid }]);
-  await page.setInputFiles('#cl-file', file);
+  if (workbook) {
+    const sheet = (name, item) => ({ name, grid: ['Item', item, ...rows].map((value) => [value]) });
+    await openKeptChecklist(page, workbook.name, [sheet('Main', workbook.first), sheet('Appendix', workbook.second)]);
+  } else {
+    await page.click('#u-menu');
+    await page.click('#s-checklist-open');
+    await page.click('#fl-import');
+    await page.setInputFiles('#cl-file', itemDocument('Duplicate retries', rows));
+  }
   const next = page.locator('#cl-next');
   const retry = page.locator('#cl-retry');
   await page.uncheck('#cl-askreword');
@@ -46,11 +49,6 @@ async function openReview(page, workbook) {
     missed: document.querySelector('#cl-missed')?.textContent,
   }), pair.b);
   return { page, finish, next, retry, calls, review, pair, rows, itemCount: rows.length };
-}
-
-async function sheetFile(page, rows, { name = 'Checklist workbook.ods', first, second }) {
-  const sheet = (name, item) => ({ name, grid: ['Item', item, ...rows].map((value) => [value]) });
-  return spreadsheetFile(page, name, [sheet('Main', first), sheet('Appendix', second)]);
 }
 
 const failed = (kind) => ({ ok: false, error: { kind, message: kind } });
@@ -166,12 +164,8 @@ async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, sa
   await page.locator('.imprev').getByText(`- ${pasted}`, { exact: true }).waitFor();
   await page.click('#cl-back');
   const first = 'Provide the equipment acceptance certificate for each commissioned substation.';
-  const appendix = 'Provide the operating permits for the collection network.';
-  const name = 'Replacement checklist.ods';
-  await page.setInputFiles('#cl-file', await sheetFile(page, rows, { name, first, second: appendix }));
+  await page.setInputFiles('#cl-file', itemDocument('Replacement checklist', [first, ...rows]));
   await page.locator('.imprev').getByText(first, { exact: true }).waitFor();
-  const sheetError = await sheetErrorWhileWaiting(page, next, name);
-  const sourceControls = await retrySourceRead(page, appendix);
   const waiting = await next.isDisabled() && /^Asking /.test(await page.locator('#cl-line').textContent());
   await next.evaluate((button) => button.click());
   const after = (await calls()).length;
@@ -183,8 +177,6 @@ async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, sa
     waiting && before === after && latest.count === rows.length + 1 && latest.only === undefined
       && await page.locator('#cl-line').textContent() === 'Import 2,163 items',
     JSON.stringify({ waiting, before, after, latest }));
-  say('Sheet, list reading Retry, and Choose Columns stay available while a review retry is pending', sourceControls);
-  say('A worksheet read error shows in place of the review wait, and Next still waits', sheetError);
 }
 
 // A worksheet that cannot be read shows its error while a review request is pending, not the wait (#378).
@@ -253,16 +245,23 @@ export async function checkDuplicateRetries(start, say) {
 }
 
 export async function checkSheetReadDuringRetry(start, say) {
+  const name = 'Checklist workbook.ods';
   const first = 'Provide signed easements for the access road.';
   const second = 'Provide the warranty for each installed turbine.';
   const { ctx, page } = await start();
-  const { next, retry, finish, calls, itemCount } = await openReview(page, { first, second });
+  const { next, retry, finish, calls, itemCount } = await openReview(page, { name, first, second });
   await next.click();
   await finish(failed('failed'));
   await retry.click();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
-  await holdAppendix(page);
   const sheet = page.locator('#cl-sheet');
+  const sheetError = await sheetErrorWhileWaiting(page, next, name);
+  const sourceControls = await retrySourceRead(page, second);
+  say('Sheet, list reading Retry, and Choose Columns stay available while a review retry is pending', sourceControls);
+  say('A worksheet read error shows in place of the review wait, and Next still waits', sheetError);
+  await sheet.selectOption('Main');
+  await page.locator('.imprev').getByText(first, { exact: true }).waitFor();
+  await holdAppendix(page);
   await sheet.selectOption('Appendix');
   await page.waitForFunction(() => !!window.__releaseAppendix);
   await finish({ ok: true, value: { pairs: [] } });
