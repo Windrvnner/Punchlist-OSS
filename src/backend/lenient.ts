@@ -50,12 +50,41 @@ export function readJson(reply: string, keys: string[], allowUnkeyed = false): R
   return keys.length && !allowUnkeyed ? null : fallback;
 }
 
-/** Read the raw end of a cut-off reply before trying closed substrings of it. */
+/** The closed values at the root or in its lists, before repair can complete a cut-off row. */
+function closedPrefix(text: string) {
+  // Match complete strings first, so that brackets and escaped quotes inside them are ignored.
+  const tokens = /"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|["'{}\[\]]/g;
+  const closing: Record<string, string> = { ']': '[', '}': '{' };
+  const stack: string[] = [];
+  let end = 0;
+  for (const match of text.matchAll(tokens)) {
+    const token = match[0];
+    if (token.length > 1) continue;
+    if (token === '"' || token === "'") break;
+    if (!closing[token]) {
+      stack.push(token);
+      continue;
+    }
+    if (stack.pop() !== closing[token]) break;
+    if (stack.length <= 1 || (stack.length === 2 && stack.at(-1) === '[')) end = match.index + 1;
+    if (!stack.length) break;
+  }
+  return text.slice(0, end);
+}
+
+/** Read only the structurally complete entries of a raw cut-off array or object. */
 export function readCutJson(reply: string, keys: string[]): Record<string, unknown> | null {
-  const open = reply.search(/[\[{]/);
-  const raw = parse(open < 0 ? reply : reply.slice(open));
-  if (Array.isArray(raw)) return { [keys[0]]: raw };
-  return isObject(raw) && keys.some((key) => key in raw) ? raw : readJson(reply, keys);
+  const fence = /^\s*```[a-zA-Z0-9]*\s*([\[{])/m.exec(reply);
+  const line = /^[\t ]*[\[{]/m.exec(reply);
+  const at = (match: RegExpExecArray | null) => match ? match.index + match[0].length - 1 : -1;
+  const openings = [at(fence), reply.search(/[\[{]/), at(line)];
+  for (const open of new Set(openings)) {
+    if (open < 0) continue;
+    const raw = parse(closedPrefix(reply.slice(open)));
+    if (Array.isArray(raw) && raw.some(isObject)) return { [keys[0]]: raw };
+    if (isObject(raw) && keys.some((key) => key in raw)) return raw;
+  }
+  return null;
 }
 
 /**

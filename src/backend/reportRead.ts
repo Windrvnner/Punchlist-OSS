@@ -91,8 +91,9 @@ function resumeAsk(resume: ReportCut | undefined) {
     const places = sources.map(({ loc, quote }) => quote ? `${loc} "${quote}"` : loc).join(', ');
     return `${issue.finding ?? issue.covered}: ${issue.title} (${places})`;
   });
-  return '\n\nThe previous reply was cut off. Give the remaining issues from the entire report. '
-    + 'Include issues before the cutoff that are not listed below. Omit only the exact issues already kept here:'
+  const reason = resume.invalidIssue ? 'had an incomplete finding write-up' : 'was cut off';
+  return `\n\nThe previous reply ${reason}. Give the remaining issues from the entire report. `
+    + 'Include issues from the previous reply that are not listed below. Omit only the exact issues already kept here:'
     + (kept.length ? `\n${kept.join('\n')}` : ' none.');
 }
 
@@ -105,6 +106,7 @@ export function readAsk(r: ReadAt, known: Known[]) {
 
 /** a finding this report raised: its id is the one `idFor` gives the report and its title */
 function isOwn(k: ReportKit, doc: string, f: Known) {
+  if (f.signature) return f.signature.startsWith(`${doc}:`);
   for (let n = 1; n <= 5; n++) if (k.idFor(doc, f.title, n) === f.id) return true;
   return false;
 }
@@ -119,9 +121,17 @@ const issueId = (issue?: ReadIssue) => issue?.finding ?? issue?.covered ?? '';
 const earlierIssue = (row: Record<string, unknown>, before?: ReadLine) =>
   before?.issues[(tagNumber(row.still, 'E') ?? 0) - 1];
 
-function issueSignature(title: string, body: string[], sources: Source[]) {
-  const parts = [title, body, ...sources.map(placement).sort()];
-  return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+function issueSignature(doc: string, title: string, body: string[], sources: Source[]) {
+  // Source order matters because the body numbers refer to it.
+  const parts = [title, body, ...sources.map(placement)];
+  return `${doc}:${createHash('sha256').update(JSON.stringify(parts)).digest('hex')}`;
+}
+
+const hasWriteup = (row: Record<string, unknown>) => !!titleOf(row) && prose(row.body).length > 0;
+
+function needsClosedWriteup(row: Record<string, unknown>, known: Known[], before?: ReadLine) {
+  if (issueId(earlierIssue(row, before)) || hasWriteup(row)) return false;
+  return known.some((f) => f.id === row.covered && f.closed && !f.deleted);
 }
 
 /** One read of one report, in one call: what it has found. */
@@ -162,9 +172,9 @@ class ReportRead {
   }
 
   private keep(row: KeptReportIssue) {
-    if (!this.retaining) return;
     this.remember(row);
-    this.kept.push(row);
+    if (row.issue.finding) this.reserved.add(row.issue.finding);
+    if (this.retaining) this.kept.push(row);
   }
 
   private get verifying() { return this.retaining || !!this.resume; }
@@ -194,7 +204,7 @@ class ReportRead {
     const covering = known.find((f) => f.id === row.covered);
     const title = titleOf(row);
     // one only a closed finding covers is raised again, so it must come written out: as covered only, it has no page
-    if (covering?.closed && !covering.deleted && !title) { this.unplaced++; return true; }
+    if (covering?.closed && !covering.deleted && !hasWriteup(row)) return this.miss();
     if (covering && !(covering.closed && title)) { await this.covered(row, covering); return true; }
     if (!title) return this.verifying ? this.miss() : true;
     return this.raise(row, title, known, covering);
@@ -227,13 +237,15 @@ class ReportRead {
 
   /** Continue the existing title ordinals, including a finding written before its cutoff was logged. */
   private idFor(title: string, signature: string, known: Known[]) {
+    const same = known.find((finding) => finding.signature === signature);
+    if (same) return same.id;
     const key = reportTitleKey(title);
     let nth = (this.titles.get(key) ?? 0) + 1;
     for (;;) {
       const id = this.k.idFor(this.rec.docId, title, nth);
-      const had = this.verifying ? known.find((finding) => finding.id === id) : undefined;
+      const had = known.find((finding) => finding.id === id);
       // Legacy findings and deletions keep their existing title ordinal.
-      if (!this.reserved.has(id) && (had?.signature === undefined || had.signature === signature)) {
+      if (!this.reserved.has(id) && had?.signature === undefined) {
         this.titles.set(key, nth);
         return id;
       }
@@ -248,7 +260,7 @@ class ReportRead {
     // an issue stands on a page of the report a person can open, as any finding does
     if (!fitted.text || !fitted.sources.length) { this.unplaced++; return true; }
     const body = k.fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()));
-    const signature = issueSignature(title, body, fitted.sources);
+    const signature = issueSignature(this.rec.docId, title, body, fitted.sources);
     if (this.seen.has(signature)) return true;
     const id = this.idFor(title, signature, known);
     const issue: Issue = {
@@ -299,9 +311,11 @@ class ReportRead {
     if (advisor && !this.advisor) this.advisor = advisor;
   }
 
-  cutoff(): { cut: ReportCut } {
+  cutoff(invalidIssue?: true): { cut: ReportCut } {
     const owe = [...this.owe].map(([finding, sources]) => ({ finding, sources }));
-    return { cut: { advisor: this.advisor, issues: this.kept, ...(owe.length ? { owe } : {}) } };
+    return { cut: { advisor: this.advisor, issues: this.kept, ...(owe.length ? { owe } : {}),
+      ...(invalidIssue ? { invalidIssue } : {}),
+    } };
   }
 
   /** the line to write. What the earlier draft raised and this one still does is carried over, for the next draft */
@@ -343,7 +357,7 @@ function reportIssueRows(reply: Record<string, unknown>, before?: ReadLine): Rec
 function issueRow(row: unknown, before?: ReadLine): row is Record<string, unknown> {
   if (!isObject(row)) return false;
   const covered = typeof row.covered === 'string' && row.covered !== '';
-  const drafted = !!titleOf(row) && prose(row.body).length > 0;
+  const drafted = hasWriteup(row);
   return drafted || covered || !!issueId(earlierIssue(row, before));
 }
 
@@ -366,13 +380,22 @@ async function ask(r: ReportRead, known: Known[]) {
     return { reply: await k.ask(input, keys, correction), cut: false };
   } catch (e) {
     if (!isCut(e)) throw e;
-    const failure = e as { text?: string; partial?: unknown };
-    const partial = failure.text ? readCutJson(failure.text, keys) : failure.partial;
-    const prefix = isObject(partial) && Array.isArray(partial.issues)
-      ? { advisor: partial.advisor, issues: partial.issues.slice(0, -1) }
-      : null;
-    return { reply: prefix && !(await unusable(JSON.stringify(prefix))) ? prefix : null, cut: true };
+    return { reply: await checkedPrefix(e as { text?: string; partial?: unknown }, keys, unusable), cut: true };
   }
+}
+
+async function checkedPrefix(failure: { text?: string; partial?: unknown }, keys: string[],
+  unusable: (text: string) => Promise<boolean>) {
+  const partial = failure.text ? readCutJson(failure.text, keys) : failure.partial;
+  if (!isObject(partial)) return null;
+  const read = listOf(partial.issues);
+  // A repaired partial without its original text cannot prove that its last entry was complete.
+  const complete = failure.text ? read : read.slice(0, -1);
+  const issues = [];
+  for (const row of complete) {
+    if (isObject(row) && !(await unusable(JSON.stringify({ issues: [row] })))) issues.push(row);
+  }
+  return { advisor: partial.advisor, issues };
 }
 
 export type ReportReadResult = ReadLine | { cut: ReportCut } | 'not' | 'lost' | null;
@@ -405,8 +428,12 @@ export async function read(
   const issues = reportIssueRows(got.reply, before);
   if (!issues) return null;
   r.heard(got.reply);
-  if (!(await r.takeAll(issues, known))) return null;
-  return finish(r, last && !resume);
+  const invalid = issues.some((row) => needsClosedWriteup(row, known, before));
+  r.retaining = invalid;
+  const saved = await r.takeAll(issues, known);
+  if (invalid) return r.cutoff(true);
+  if (!saved) return null;
+  return finish(r, last && (!resume || !!resume.invalidIssue));
 }
 
 async function keepCut(r: ReportRead, reply: Record<string, unknown> | null, known: Known[]) {
