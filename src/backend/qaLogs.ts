@@ -192,6 +192,7 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
       if (!kept.ok) return kept;
       const read = {
         columns: t.columns, cols: t.cols ?? t.columns.map((_, index) => index), rows: t.rows,
+        columnCount: t.columnCount,
         lines: t.lines ?? t.rows.map((_, index) => index + 2), lastRow: t.lastRow ?? t.rows.length + 1,
         stamp: sha256(bytes),
       };

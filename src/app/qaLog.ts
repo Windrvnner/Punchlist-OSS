@@ -71,7 +71,7 @@ export function logTakenBy(store: Store, dealId: string, path: string | null): s
 export async function keepImportedLog(
   store: Store, dealId: string,
   t: {
-    path: string | null; sheet: string; headerRow: number; columns: string[]; cols?: number[];
+    path: string | null; sheet: string; headerRow: number; columns: string[]; cols?: number[]; columnCount?: number;
     mapping: Mapping; make: boolean; rows: string[][];
   },
   key?: string,
@@ -82,9 +82,11 @@ export async function keepImportedLog(
     const choice = logChoice(store, dealId, t.path);
     if (!choice || (choice === 'new' && !t.make)) return ok(undefined);
     const at = placeOf(t.path!)!;
-    const { sheet, headerRow, mapping } = t;
+    const { sheet, headerRow, columnCount, mapping } = t;
     const name = logOf(store, dealId)?.name ?? logName(at.file);
-    const log = { name, file: at.file, folder: at.folder, sheet, headerRow, mapping, headers: logHeaders(t) };
+    const log = {
+      name, file: at.file, folder: at.folder, sheet, headerRow, columnCount, mapping, headers: logHeaders(t),
+    };
     return store.dispatch(KeepQaLog, { dealId, log }, opts);
   });
   if (!kept.ok) return kept;
@@ -181,7 +183,7 @@ async function startLog(store: Store, dealId: string): Promise<Result<QaLog | nu
   const columns = grid[0].map(String);
   const log = {
     name, file: made.value.file, folder: folder.value, sheet: 'Q&A log', headerRow: 1,
-    mapping: suggestMapping(columns), headers: logHeaders({ columns }),
+    mapping: suggestMapping(columns), headers: logHeaders({ columns }), columnCount: columns.length,
   };
   const r = await store.dispatch(KeepQaLog, { dealId, log }, { quiet: true });
   return r.ok ? ok(logOf(store, dealId)!) : r;

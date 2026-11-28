@@ -2,8 +2,8 @@ import type { Mapping } from './importExport';
 import { fail, ok, rejected, type Result } from './result';
 
 type LogHeader = { label: string; column: number };
-export type QaLogLayout = { headers: LogHeader[]; mapping: Record<string, number | null> };
-type Columns = { columns: string[]; cols?: number[] };
+export type QaLogLayout = { headers: LogHeader[]; mapping: Record<string, number | null>; columnCount?: number };
+type Columns = { columns: string[]; cols?: number[]; columnCount?: number };
 
 export function logHeaders({ columns, cols }: Columns): LogHeader[] {
   return columns.map((label, index) => ({ label, column: cols?.[index] ?? index }));
@@ -33,6 +33,18 @@ function uniqueColumn(headers: LogHeader[], label: string): number {
   return matches.length === 1 ? matches[0] : -1;
 }
 
+/** Without a heading, the saved position is usable only within the same physical column count (#282). */
+function sameWidth(layout: QaLogLayout, read: Columns) {
+  return layout.columnCount !== undefined && layout.columnCount === read.columnCount;
+}
+
+function selectedColumn(before: LogHeader, previous: LogHeader[], current: LogHeader[], unchanged: boolean) {
+  const { label, column } = before;
+  if (unchanged) return current.findIndex((header) => header.column === column && header.label === label);
+  if (!label.trim() || uniqueColumn(previous, label) < 0) return -1;
+  return uniqueColumn(current, label);
+}
+
 /** Match the person's choices to this read's compact column indexes before using any rows or planning edits (#282). */
 export function resolveLogMapping(layout: QaLogLayout, read: Columns): Result<Mapping> {
   const current = logHeaders(read);
@@ -43,15 +55,9 @@ export function resolveLogMapping(layout: QaLogLayout, read: Columns): Result<Ma
     if (index == null) continue;
     const before = layout.headers[index];
     if (!before) return fail(logLayoutChanged());
-    const { label, column } = before;
-    if (same) {
-      const position = current.findIndex((header) => header.column === column && header.label === label);
-      if (position < 0) return fail(logLayoutChanged());
-      mapping[field] = position;
-      continue;
-    }
-    const position = uniqueColumn(current, label);
-    if (!label.trim() || position < 0 || uniqueColumn(layout.headers, label) !== index) return fail(logLayoutChanged());
+    if (!before.label.trim() && !sameWidth(layout, read)) return fail(logLayoutChanged());
+    const position = selectedColumn(before, layout.headers, current, same);
+    if (position < 0) return fail(logLayoutChanged());
     mapping[field] = position;
   }
   return ok(mapping);

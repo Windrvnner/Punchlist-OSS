@@ -117,7 +117,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An import can make a spreadsheet the deal's log ("Make this the deal's Q&A log", checked for a file with two or more parties). If there is no log, the first update creates one in the app's layout, in a folder a person picks. A later party's file only adds and updates questions and is never written to.
 - Updates add no columns and never write to a formula cell. To reply to one party, use Export filtered by Submitted By.
 - A linked Q&A log follows the exact selected headers when columns move. If a selected column cannot be identified
-  unambiguously, Update Q&A Log leaves the file alone and asks for a review in Import Q&A Log (#282).
+  unambiguously, including an unnamed column when the column count changes, Update Q&A Log asks for a review
+  in Import Q&A Log before writing (#282).
 - **Update Q&A Log** brings every column up to date and first saves the old version to the folder's archive; it never deletes anything else. A log open elsewhere is retried every 30 seconds for 20 minutes; the notice names who has it open only when the lock file does.
 - An edit made in the log wins over the app's value, exactly as written: a cell is compared character for character, so a "?" stays a "?". Only the file's own storage (line breaks kept as one "\n", an .xlsx keeps control characters exactly, through Excel's own "_xHHHH_" codes (#1149), and other formats keep their own storage) is allowed for. Matching a row to a question only picks the row and never changes text. Where both changed, the question is in two versions.
 - A Q&A log cell is written exactly as given, in every format; a CSV cell that starts with =, +, - or @ gets no added character (#1107).

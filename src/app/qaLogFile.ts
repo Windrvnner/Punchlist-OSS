@@ -68,9 +68,10 @@ function placeLogEdits(kept: KeptLogEdits, choices: number[], below: number) {
 }
 
 export async function readLinkedLog(files: QaLogFiles, log: QaLog, includeKept: boolean) {
-  const { folder, file, sheet, headerRow, headers, mapping } = log;
+  const { folder, file, sheet, headerRow, headers, mapping, columnCount } = log;
   const kept = includeKept ? keptLogColumns(mapping) : undefined;
-  const table = await files.read({ folder, file }, { sheet, headerRow, layout: { headers, mapping }, kept });
+  const layout = { headers, mapping, columnCount };
+  const table = await files.read({ folder, file }, { sheet, headerRow, layout, kept });
   if (!table.ok) return table;
   const resolved = resolveLogMapping(log, table.value);
   return resolved.ok ? ok({ table: table.value, mapping: resolved.value }) : resolved;

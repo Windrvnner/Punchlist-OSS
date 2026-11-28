@@ -205,6 +205,24 @@ it('stops if a selected unnamed column is deleted from the file', async () => {
   expect(fs.existsSync(path.join(folder, '01. Archive'))).toBe(false);
 });
 
+it('stops when deleting the selected column shifts another unnamed column into its place', async () => {
+  const [first, second] = portfolio(2);
+  const { store, dealId, file, folder, write } = await linkedLog([NUMBER, QUESTION, '', ''], [
+    [first[0], first[1], 'Previous lender reply', 'Check the certificate'], [...second, ''],
+  ], { response: 2 });
+  const item = dealQuestions(store.get(), dealId)[1];
+  value(await store.dispatch(SetResponse, {
+    dealId, questionId: item.id, response: 'The lenders signed the consent letter.',
+  }));
+  await write([NUMBER, QUESTION, ''], [[first[0], first[1], 'Check the certificate'], second]);
+  const original = fs.readFileSync(file);
+  expect(await exportQaLog(store, dealId)).toMatchObject({
+    ok: false, error: { kind: 'rejected', message: expect.stringContaining('Import Q&A Log') },
+  });
+  expect(fs.readFileSync(file)).toEqual(original);
+  expect(fs.existsSync(path.join(folder, '01. Archive'))).toBe(false);
+});
+
 async function saveKeptFixture(
   folder: string, file: string, rows: string[][], sheets: SpreadsheetCodec, headings = ORIGINAL,
 ) {

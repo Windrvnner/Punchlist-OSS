@@ -54,8 +54,11 @@ function used(grid: string[][]): { table: string[][]; first: number } | null {
   return a < b ? { table: grid.slice(a, b), first: a + 1 } : null;
 }
 
-/** `cols[i]` is the sheet column (from 0) of `columns[i]`: columns with neither a heading nor a value are left out, so the two can differ */
-export type ReadTable = { columns: string[]; cols: number[]; rows: string[][]; lines: number[]; sheets: string[]; sheet: string; headerRow: number; lastRow: number; previews: SheetPreview[] };
+/** Source column positions and count before dropping columns with neither a heading nor a value. */
+export type ReadTable = {
+  columns: string[]; cols: number[]; columnCount: number; rows: string[][]; lines: number[];
+  sheets: string[]; sheet: string; headerRow: number; lastRow: number; previews: SheetPreview[];
+};
 export type SheetReadOptions = { sheet?: string; headerRow?: number; includeColumns?: readonly number[] };
 /**
  * One step of an edit to a spreadsheet, in order. Rows and columns count from 0 on the sheet. `rows` inserts `count`
@@ -86,6 +89,7 @@ export function tableFrom(all: Sheet[], opts?: SheetReadOptions): ReadTable | nu
     || kept.some(({ r }) => !!r[column]?.trim()));
   const cut = (r: string[]) => r.filter((_, ci) => keep[ci]);
   return {
+    columnCount: width,
     columns: cut(header), cols: header.map((_, ci) => ci).filter((ci) => keep[ci]), rows: kept.map((x) => cut(x.r)), lines: kept.map((x) => x.line), sheets, sheet, headerRow: first + h, lastRow: first + table.length - 1,
     previews: sheets.map((n) => { const g = grids.get(n)!; return { name: n, first: g.first, rows: g.table.slice(0, 30).map((r) => r.slice(0, 40).map((c) => (c.length > 80 ? c.slice(0, 80) : c))) }; }),
   };

@@ -24,6 +24,7 @@ export interface QaLogFiles {
   read(at: QaLogPlace, opts: QaLogReadOptions): Promise<Result<{
     columns: string[];
     cols: number[];
+    columnCount?: number;
     rows: string[][];
     lines: number[];
     lastRow: number;

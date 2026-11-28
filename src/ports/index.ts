@@ -573,6 +573,7 @@ export interface SpreadsheetCodec {
     columns: string[];
     /** the sheet column of each column */
     cols?: number[];
+    columnCount?: number;
     rows: string[][];
     lines?: number[];
     sheets?: string[];
