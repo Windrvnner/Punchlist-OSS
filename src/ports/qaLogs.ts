@@ -51,4 +51,3 @@ export interface QaLogFiles {
   /** a new log in `folder`, under `file` or, if that name is taken, the first free "name (2).ext"; the name it got */
   create(req: QaLogPlace & { bytes: Uint8Array }): Promise<Result<{ file: string }>>;
 }
-
