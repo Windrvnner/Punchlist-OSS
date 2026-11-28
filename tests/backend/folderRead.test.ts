@@ -202,7 +202,11 @@ describe('reading a whole folder from the chat', () => {
     const w = setupWithout(recs, missing); const r = await w.ai.answer(ask('Anything odd?')); expect(r.ok).toBe(true);
     expect(w.turns[1].prompt).toContain('Not read: documents 9–16 (the reply on them could not be read); documents 17–24 (they could not be opened on this PC).');
     expect(s.turns[1].prompt).toContain('Not read: documents 9–16 (the reply on them could not be read).'); expect(s.turns[1].prompt).toContain('16 were read');
-    const v = r.ok ? r.value : null; expect(v!.read!.docs).toBe(8); expect(w.turns[1].prompt).not.toContain('Permits/P3.pdf');
+    const v = r.ok ? r.value : null;
+    expect(v!.read!.docs).toBe(8);
+    expect(w.turns[1].prompt).toContain('Unavailable files (ask to read by id):');
+    expect(w.turns[1].prompt).toContain('Permits/P3.pdf');
+    expect(listed(w.turns[1]).some(({ path }) => path.endsWith('Permits/P3.pdf'))).toBe(false);
     const down = setup(recs, (_c, k) => (k === 1 ? { tool: 'folder', folder: 'permits' } : { text: 'ok', sources: [] }), { reads: () => { throw Object.assign(new Error('down'), { code: 'unreachable' }); } });
     const d = await down.ai.answer(ask('Anything odd?')); expect(!d.ok && d.error.kind).toBe('unreachable');
   });

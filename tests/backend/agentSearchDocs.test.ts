@@ -117,8 +117,9 @@ describe('searching documents from the chat, a page at a time', () => {
     const s = setupIn(ROOM, [docs()], 4);
     expect((await s.ai.answer(ask('Hello'))).ok).toBe(true);
     expect(names(s.reads[s.reads.length - 1])).toEqual(RANKED.slice(0, 4));
-    const left = RANKED.slice(4, 8).map((name) => `vdr/${name}`).join('; ');
-    expect(s.turns[1].prompt).toContain(`with the others): ${left}. Read them by name`);
+    const left = RANKED.slice(4, 8).map((name) => ROOM.find((rec) => rec.name === name)!);
+    expect(s.turns[1].prompt).toContain('with the others). Ask to read them by id:');
+    for (const doc of left) expect(s.turns[1].prompt).toContain(`- ${doc.docId} (vdr/${doc.name})`);
   }, 60_000);
 
   it('can be asked for the last page first: it holds the last 7', async () => {
@@ -316,6 +317,23 @@ describe('a blackline needs its clean draft in the same model context (#1430)', 
     expect(prompt.split(`vdr/${clean.name}`)).toHaveLength(3);
     expect(prompt.split(`vdr/${blackline.name}`)).toHaveLength(3);
     expect(result).toMatchObject({ ok: true, value: { sources: [], research: { read: { docs: 0, of: 2 } } } });
+  });
+
+  it('retries the exact omitted search result when two deals share a path', async () => {
+    const other = doc(10, clean.name);
+    const handle = `d2/${other.docId}`;
+    const unavailable = [clean.docId, other.docId];
+    const s = setupIn(room, [{
+      toJSON() { unavailable.length = 0; return { tool: 'read', docs: [handle] }; },
+    }, { text: 'The facility is secured. [1]', sources: [{ doc: handle, page: 2 }] }],
+    Infinity, NO_HELP, { d2: [other] }, unavailable, 'native');
+    const result = await s.ai.answer({ message: 'Credit Agreement', history: [], model: 'standard',
+      dealIds: ['d1', 'd2'],
+    });
+    expect(s.turns[0].prompt).toContain(`d1/${clean.docId} (vdr/${clean.name})`);
+    expect(s.turns[0].prompt).toContain(`${handle} (vdr/${other.name})`);
+    expect(s.turns[1].files.map(({ name }) => fromStoreName(name)?.docId)).toEqual([other.docId]);
+    expect(result).toMatchObject({ ok: true, value: { sources: [{ dealId: 'd2', docId: other.docId }] } });
   });
 
   it('names omitted folder evidence and reads the pair when files become available again', async () => {
