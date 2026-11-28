@@ -8,9 +8,17 @@ const sites = Array.from({ length: 18 }, (_, index) => `Site ${index + 1}`);
 const preview = '.imprev:not(.imchg) tbody';
 const unused = '.imwhere .efstate.fail';
 
+// The browser uses the same table parser as the desktop with sheets supplied by its stand-in.
+export async function spreadsheetFile(page, name, sheets) {
+  await page.evaluate(([name, sheets]) => {
+    window.__sheets = { ...window.__sheets, [name]: sheets };
+  }, [name, sheets]);
+  return { name, mimeType: 'application/octet-stream', buffer: Buffer.from('PK') };
+}
+
 export async function headingWorkbook(page, prefix, { supplementOnly = false, headingAtSix = false } = {}) {
   const qa = prefix === 'im';
-  const name = qa ? 'Lender Q&A.xlsx' : 'Solar diligence checklist.xlsx';
+  const name = qa ? 'Lender Q&A.xlsx' : 'Solar diligence checklist.ods';
   const headings = qa ? ['#', 'Question', 'Response'] : ['Section', 'Item'];
   const rows = sites.flatMap((site) => items.map((item) => [site, item.replaceAll('’', "'")])).slice(0, 2000)
     .map(([site, item], index) => qa
@@ -22,10 +30,7 @@ export async function headingWorkbook(page, prefix, { supplementOnly = false, he
     : [headings, rows[0], headings, ...rows.slice(1)];
   const supplement = { name: 'Supplement', grid: [[], [], [], headings, rows.at(-1)] };
   const sheets = supplementOnly ? [supplement] : [{ name: 'Main', grid }, supplement];
-  await page.evaluate(([name, sheets]) => { window.__sheets = { [name]: sheets }; }, [name, sheets]);
-  await page.setInputFiles(`#${prefix}-file`, {
-    name, mimeType: 'application/octet-stream', buffer: Buffer.from('PK'),
-  });
+  await page.setInputFiles(`#${prefix}-file`, await spreadsheetFile(page, name, sheets));
   return { lastRow: grid.length, first: rows[0][1], next: rows[1][1], other: rows.at(-1)[1] };
 }
 

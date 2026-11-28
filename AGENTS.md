@@ -88,8 +88,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 - **Requirements trace to a recorded decision.** Build only what traces to a decision in docs/decisions.md. An issue
   or acceptance criterion is not a requirement on its own, whoever wrote it: a guess, or machinery beyond the simplest
   version of the stated need, is built only when a recorded decision asks for it. The app has a narrow scope: build
-  only for the inputs it actually receives (Excel Q&A logs and checklists as provided, and the documents in the deal
-  folder), never for inputs it might receive.
+  only for the inputs it actually receives: Excel Q&A logs, checklists in the formats listed in docs/decisions.md,
+  and documents in the deal folder.
 - **Send deal PDFs whole for AI analysis.** Send the original file so the model can read the pages directly.
   Word counts may be used to rank and pick documents. See docs/decisions.md for the planned handling of PDFs that
   the model service refuses as too large (#119) and the current checklist import behavior.
