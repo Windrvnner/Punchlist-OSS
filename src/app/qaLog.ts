@@ -7,6 +7,7 @@
  * app's own layout at its first update, in a folder a person picks. Replying to one party is an export filtered by
  * Submitted by, not a write into their file.
  */
+import { dialogReportsFailure, resumeQaImportStep } from './qaImportJournal';
 import type { Store } from './store';
 import { localYmd, type QaLog, type Question } from '../domain/model';
 import { dealQuestions, dealTwin, qaChanged, qaKept } from './state';
@@ -63,22 +64,47 @@ export function logTakenBy(store: Store, dealId: string, path: string | null): s
 }
 
 /**
- * After an import: a file becomes the deal's log only when a person said so in the import (`make`); the
- * deal's log imported again keeps where its table is. Any other file only brought questions in. Quietly: the import
- * has its own notice and Undo.
+ * After an import, keep the chosen log and record its cells through their own journal entries (#270).
+ * The import has its own notice and Undo.
  */
-export async function keepImportedLog(store: Store, dealId: string, t: { path: string | null; sheet: string; headerRow: number; mapping: Mapping; make: boolean; rows: string[][] }): Promise<Result<void>> {
-  const choice = logChoice(store, dealId, t.path); if (!choice || (choice === 'new' && !t.make)) return ok(undefined);
-  const at = placeOf(t.path!)!; const had = logOf(store, dealId);
-  const r = await store.dispatch(KeepQaLog, { dealId, log: { name: had?.name ?? logName(at.file), file: at.file, folder: at.folder, sheet: t.sheet, headerRow: t.headerRow, mapping: t.mapping } }, { quiet: true });
-  if (!r.ok) return r;
-  // What the file holds is recorded as what the app last wrote: the questions now say what it says, so a cell a person
-  // later changes in the app is the app's to bring up to date, and one someone changes in the file is theirs (logWrite).
-  const log = logOf(store, dealId)!; const qs = dealQuestions(store.get(), dealId); const holds = logHolds({ rows: t.rows }, t.mapping, qs);
-  // the record is dated anew, so a choice made in Resolve since the last update is folded in here, or it would be asked again
-  const now = withPicks(log, qs);
-  const rec = await store.dispatch(RecordQaLogExport, { dealId, name: log.name, last: { archive: log.last?.archive ?? '', at: store.services.clock.now(), by: store.get().user?.name ?? '', sent: { ...now.sent, ...Object.fromEntries(Object.entries(holds).map(([id, h]) => [id, { ...now.sent[id], ...h }])) }, kept: now.kept, changed: log.last?.changed ?? {} } }, { quiet: true });
-  return rec.ok ? ok(undefined) : rec;
+export async function keepImportedLog(
+  store: Store, dealId: string,
+  t: { path: string | null; sheet: string; headerRow: number; mapping: Mapping; make: boolean; rows: string[][] },
+  key?: string,
+): Promise<Result<void>> {
+  if (!t.path) return ok(undefined);
+  const opts = { ...dialogReportsFailure, quiet: true, idempotencyKey: key };
+  const kept = await resumeQaImportStep(store, key, KeepQaLog.name, async () => {
+    const choice = logChoice(store, dealId, t.path);
+    if (!choice || (choice === 'new' && !t.make)) return ok(undefined);
+    const at = placeOf(t.path!)!;
+    const { sheet, headerRow, mapping } = t;
+    const name = logOf(store, dealId)?.name ?? logName(at.file);
+    const log = { name, file: at.file, folder: at.folder, sheet, headerRow, mapping };
+    return store.dispatch(KeepQaLog, { dealId, log }, opts);
+  });
+  if (!kept.ok) return kept;
+  return resumeQaImportStep(store, key, RecordQaLogExport.name, async () => {
+    const state = store.get();
+    const deal = state.deals[dealId];
+    const log = deal?.qaLogs[0];
+    if (!log || logChoice(store, dealId, t.path) !== 'same') return ok(undefined);
+    const questions = dealQuestions(state, dealId);
+    const holds = logHolds({ rows: t.rows }, t.mapping, questions);
+    // The new snapshot includes cell choices made since the previous update.
+    const now = withPicks(log, questions);
+    const savedCells = Object.entries(holds).map(([id, cells]) => [id, { ...now.sent[id], ...cells }]);
+    const sent = { ...now.sent, ...Object.fromEntries(savedCells) };
+    const last = {
+      archive: log.last?.archive ?? '', at: store.services.clock.now(), by: store.get().user?.name ?? '',
+      sent, kept: now.kept, changed: log.last?.changed ?? {},
+    };
+    // A retained snapshot includes the Resolve choices on these questions.
+    const source = key ? {
+      dealRev: deal.rev, questions: Object.fromEntries(questions.map(({ id, rev }) => [id, rev])),
+    } : undefined;
+    return store.dispatch(RecordQaLogExport, { dealId, name: log.name, last, source }, opts);
+  });
 }
 
 /**

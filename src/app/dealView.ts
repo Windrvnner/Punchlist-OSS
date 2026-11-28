@@ -1,6 +1,7 @@
 import type { Deal, Operation } from '../domain/model';
 import { GROUP_HEADING } from './commands/deals';
 import { isMine } from './commands/members';
+import { isCorrelatedQaImport } from './qaImport';
 import type { State } from './state';
 
 type DealState = Pick<State, 'deals' | 'members' | 'user'>;
@@ -42,13 +43,19 @@ export function interruptedOperations(state: Pick<State, 'ops'>) {
 const INTERRUPTED_ROWS = 3;
 
 /** Show rotates from the first hidden action. Dismissed actions also count toward the overflow. */
-export function interruptedView(state: Pick<State, 'ops'>, first: string | undefined, dismissed: string[]) {
+export function interruptedView(
+  state: Pick<State, 'ops'> & Partial<Pick<State, 'deals' | 'ui'>>, first: string | undefined, dismissed: string[],
+) {
+  const dialog = state.ui?.dialog;
   const ops = interruptedOperations(state);
+  const covered = dialog?.kind === 'importQa' && state.deals?.[dialog.dealId]
+    ? ops.filter((op) => op.dealId === dialog.dealId && isCorrelatedQaImport(op)).map((op) => op.id)
+    : [];
   const start = Math.max(0, ops.findIndex((op) => op.id === first));
   const ordered = [...ops.slice(start), ...ops.slice(0, start)];
   const showing = ordered.filter((op) => !dismissed.includes(op.id)).slice(0, INTERRUPTED_ROWS);
   const hidden = ordered.filter((op) => !showing.includes(op));
-  return { showing, hidden };
+  return { showing, hidden, covered };
 }
 
 export function dismissInterrupted(state: Pick<State, 'ops'>, dismissed: string[], id: string) {
