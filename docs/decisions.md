@@ -96,7 +96,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A response on a question linked to a finding marks that finding; a response on an unlinked question is checked once against the open findings.
 - Import finds the table and its columns by the app's own rules and asks the model only when no question column is
   found. Nothing is imported until the person clicks **Import**, and the whole import is one Undo. The form reports
-  a failed import and retries its saved choices. **Retry** on an interrupted import reopens that form (#270).
+  a failed import and retries its saved choices. **Retry** on an interrupted import reopens that form. Starting
+  over or replacing the file retires its unfinished action before clearing its choices (#270).
 - Q&A and checklist imports keep an unused heading row as typed and mark it “Not used.” The preview stays on the
   last accepted table until another sheet or heading row is read (#380). Accepted Q&A matches stay with that sheet
   when its heading row is read again. Reading another file or sheet clears those matches (#1210).

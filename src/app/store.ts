@@ -542,8 +542,8 @@ export class Store {
       && !(operation.state === 'succeeded' && operation.idempotencyKey?.startsWith('qa-import:'));
   }
 
-  /** A retained import durably recorded completion; its correlation key may now leave the journal. */
-  async releaseImport(key: string): Promise<boolean> {
+  /** Retire an import correlation after completion, or discard its unfinished action when the file is cleared. */
+  async releaseImport(key: string, options: { abandon?: boolean } = {}): Promise<boolean> {
     const read = await this.services.repo.list('op');
     if (!read.ok) return false;
     const writes: Transaction['writes'] = [];
@@ -551,15 +551,33 @@ export class Store {
     for (const loaded of read.value) {
       const operation = this.parse('op', loaded) as Operation | null;
       if (operation?.idempotencyKey !== key) continue;
-      if (operation.state === 'pending' || operation.state === 'interrupted') return false;
-      const next = { ...operation, idempotencyKey: undefined };
+      const next = this.retireImportOperation(operation, options.abandon === true);
+      if (!next) return false;
       writes.push({ kind: 'op', id: operation.id, data: next, expectedRev: loaded.rev });
       released[operation.id] = next;
     }
     if (!writes.length) return true;
     const result = await this.services.repo.transaction({ writes });
-    if (result.ok) this.set({ ...this.state, ops: { ...this.state.ops, ...released } });
-    return result.ok;
+    if (!result.ok) return false;
+    for (const id of Object.keys(released)) {
+      this.unsettledHere.delete(id);
+      this.unwritten.delete(id);
+    }
+    this.set({ ...this.state, ops: { ...this.state.ops, ...released } });
+    return true;
+  }
+
+  /** Clear the correlation without touching a live write or the Undo of a committed import. */
+  private retireImportOperation(operation: Operation, abandon: boolean): Operation | undefined {
+    if (operation.state === 'interrupted' && !abandon) return;
+    if (operation.state === 'pending') {
+      const failedHere = this.unsettledHere.has(operation.id) || this.unwritten.has(operation.id);
+      if (!abandon || (this.isLive(operation) && !failedHere)) return;
+    }
+    if (abandon && this.rerun.has(operation.id)) return;
+    const released = { ...operation, idempotencyKey: undefined };
+    if (!abandon || operation.state === 'succeeded' || operation.state === 'discarded') return released;
+    return { ...released, state: 'discarded', settledAt: this.services.clock.now() };
   }
 
   private pruning = false;

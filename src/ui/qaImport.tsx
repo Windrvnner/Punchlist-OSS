@@ -148,12 +148,18 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
     store.ui({ dialog: null });
   };
 
-  const startOver = () => {
+  const startOver = async () => {
     token.current++;
-    clearQaImport(store, qa.key);
+    reader.cancel();
     qa.setRestart(false);
-    setBusy('');
+    setBusy('importing');
     setError('');
+    const cleared = await clearQaImport(store, qa.key);
+    setBusy('');
+    if (!cleared.ok) {
+      setError(cleared.error.message);
+      return;
+    }
     reader.replace(null);
     qa.setPath(null);
     qa.setMode('merge');
@@ -191,12 +197,18 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     setError('');
     const read = await loadQaImport(store, dealId, file);
     if (token.current !== mine) return;   // the dialog moved on while the file was read
-    setBusy('');
     if (!read.ok) {
+      setBusy('');
       setError(read.error.message);
       return;
     }
-    replaceQaImport(store, qa.key);
+    setBusy('importing');
+    const replaced = await replaceQaImport(store, qa.key);
+    setBusy('');
+    if (!replaced.ok) {
+      setError(replaced.error.message);
+      return;
+    }
     const { table, path, askForLayout } = read.value;
     reader.replace(table);
     qa.setPath(path);

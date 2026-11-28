@@ -92,19 +92,24 @@ export function keepQaImport(key: string, table: ImportTable, choices: QaChoices
 }
 
 /** A newly accepted file replaces the previous attempt and any kept heading edit. */
-export function replaceQaImport(store: Store, key: string) {
-  releaseQaAttempt(store, key);
+export async function replaceQaImport(store: Store, key: string) {
+  const released = await releaseQaAttempt(store, key);
+  if (!released.ok) return released;
   keepImport(key, { submission: null, headingDraft: null });
+  return ok(undefined);
 }
 
-export function clearQaImport(store: Store, key: string) {
-  releaseQaAttempt(store, key);
+export async function clearQaImport(store: Store, key: string) {
+  const released = await releaseQaAttempt(store, key);
+  if (!released.ok) return released;
   dropImport(key);
+  return ok(undefined);
 }
 
-function releaseQaAttempt(store: Store, key: string) {
+async function releaseQaAttempt(store: Store, key: string) {
   const submitted = savedSubmission(key);
-  if (submitted) void store.releaseImport(submitted.key);
+  if (!submitted || await store.releaseImport(submitted.key, { abandon: true })) return ok(undefined);
+  return fail({ kind: 'failed', message: 'Couldn’t clear the previous import. Try again.' });
 }
 
 /** Another deal's Q&A log is refused before its file is read (#38). */
@@ -224,7 +229,7 @@ export async function retryInterruptedImport(store: Store, opId: string) {
   if (savedSubmission(key)?.key !== idempotencyKey) return store.retryOp(opId);
   await store.loadDeal(dealId, { gaps: false });
   const state = store.get();
-  if (state.dealLoad[dealId] !== 'loaded') {
+  if (state.dealLoad[dealId] !== 'loaded' || !state.deals[dealId]) {
     store.toast('The deal could not be loaded. Retry when it is available.', 'warn');
     return;
   }
