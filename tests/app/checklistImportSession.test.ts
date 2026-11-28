@@ -7,6 +7,7 @@ import { registry } from '../../src/app/commands/undo';
 import { RestoreList } from '../../src/app/commands/checklist';
 import { listId } from '../../src/domain/checklist';
 import { fail, ok } from '../../src/domain/result';
+import { checklistSpreadsheet } from '../fixtures/checklistSpreadsheet';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { holdRecoveryWrite, recoveryApp } from './recoveryKit';
 
@@ -130,8 +131,9 @@ it('keeps new typing from a reopened import while its previous instance finishes
 
 it('ignores a retry that ends after change and detects headings before manual column selection', async () => {
   app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
+  app.store.services.sheets = checklistSpreadsheet;
   const session = open();
-  const file = new File(['Item,Section\nLegal opinion,Financing\nTitle report,Property'], 'Lender list.csv');
+  const file = new File(['Item,Section\nLegal opinion,Financing\nTitle report,Property'], 'Lender list.ods');
   await session.loadDropped(file);
   expect(session.view.source.readFailed).toBe('failed');
   let release!: () => void;
@@ -158,7 +160,7 @@ it('ignores a retry that ends after change and detects headings before manual co
   session.pickColumn('item', 0);
   expect(session.view.canNext).toBe(true);
   await session.loadDropped(new File(['other'], 'Other.txt'));
-  expect(session.view.source.table?.name).toBe('Lender list.csv');
+  expect(session.view.source.table?.name).toBe('Lender list.ods');
   session.startOver();
   expect(session.view.step).toBe('pick');
   expect(keptImport(key)).toBeUndefined();

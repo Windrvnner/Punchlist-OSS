@@ -1,4 +1,6 @@
 // The checklist review at deal size, with model replies held until the test releases them (#378).
+import { spreadsheetFile } from './headingRow.mjs';
+
 async function openReview(page, workbook) {
   const agreements = ['equipment supply agreement', 'construction contract', 'interconnection agreement', 'site lease',
     'maintenance agreement', 'power purchase agreement', 'credit agreement', 'insurance policy'];
@@ -11,9 +13,10 @@ async function openReview(page, workbook) {
   await page.click('#u-menu');
   await page.click('#s-checklist-open');
   await page.click('#fl-import');
-  await page.setInputFiles('#cl-file', workbook ? await sheetFile(page, rows, workbook) : {
-    name: 'Duplicate retries.csv', mimeType: 'text/csv', buffer: Buffer.from(['Item', ...rows].join('\n')),
-  });
+  const grid = ['Item', ...rows].map((text) => [text]);
+  const file = workbook ? await sheetFile(page, rows, workbook)
+    : await spreadsheetFile(page, 'Duplicate retries.ods', [{ name: 'Sheet1', grid }]);
+  await page.setInputFiles('#cl-file', file);
   const next = page.locator('#cl-next');
   const retry = page.locator('#cl-retry');
   await page.uncheck('#cl-askreword');
@@ -46,12 +49,8 @@ async function openReview(page, workbook) {
 }
 
 async function sheetFile(page, rows, { name = 'Checklist workbook.ods', first, second }) {
-  await page.evaluate(({ name, rows, first, second }) => {
-    const sheet = (name, item) => ({ name, grid: ['Item', item, ...rows].map((value) => [value]) });
-    window.__sheets = { [name]: [sheet('Main', first), sheet('Appendix', second)] };
-  }, { name, rows, first, second });
-  const mimeType = 'application/vnd.oasis.opendocument.spreadsheet';
-  return { name, mimeType, buffer: Buffer.alloc(0) };
+  const sheet = (name, item) => ({ name, grid: ['Item', item, ...rows].map((value) => [value]) });
+  return spreadsheetFile(page, name, [sheet('Main', first), sheet('Appendix', second)]);
 }
 
 const failed = (kind) => ({ ok: false, error: { kind, message: kind } });

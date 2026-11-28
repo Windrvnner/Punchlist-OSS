@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import { MemoryKeptImports } from '../../src/adapters/keptImports';
-import { csvCodec } from '../../src/adapters/spreadsheet';
 import {
   checklistReviewCounts, checklistReviewSession, checklistSelection, checklistShelf, checklistWordingChoices,
   listTarget, submitChecklist, type ChecklistReviewChange,
@@ -14,6 +13,7 @@ import {
 import { firmOf, listId, norm } from '../../src/domain/checklist';
 import type { LineRead, ListReply } from '../../src/domain/listRead';
 import { fail, ok, type Result } from '../../src/domain/result';
+import { checklistSpreadsheet, portfolioFile } from '../fixtures/checklistSpreadsheet';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { recoveryApp } from './recoveryKit';
 
@@ -40,6 +40,7 @@ async function readyApp() {
   initializeKeptImports(port);
   await keptImportsReady;
   const app = recoveryApp();
+  app.store.services.sheets = { ...checklistSpreadsheet };
   await app.store.boot();
   return { ...app, port };
 }
@@ -143,19 +144,6 @@ it('ties out, reviews, and brings in a pasted portfolio checklist without a comp
     await app.repo.close();
   }
 });
-
-async function portfolioFile(questions: string[]) {
-  const workstream = 'Project agreements';
-  const rows = questions.map((text) => [workstream, text, 'Financing']);
-  const csv = value(await csvCodec.write('Sheet1', [
-    ['Portfolio', 'Financing', 'Checklist'],
-    ['Section', 'Requirement', 'Subsection'],
-    ...rows,
-    [workstream, '', 'Outstanding'],
-    rows[0],
-  ]));
-  return new File([csv.bytes.slice().buffer], 'Portfolio checklist.csv');
-}
 
 it('re-reads a portfolio spreadsheet by hand after the model fails, preserving its rows and counts', async () => {
   const app = await readyApp();
