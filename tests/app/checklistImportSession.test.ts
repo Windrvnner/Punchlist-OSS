@@ -116,6 +116,26 @@ async function reviewPortfolio() {
   return reopened;
 }
 
+it('refuses a queued Import when an earlier write changes the reviewed list (#56)', async () => {
+  const id = listId('broad', '');
+  const list = { layer: 'broad' as const, name: '', file: 'Prior requests.csv', fileDate: '' };
+  const items = [{ text: 'Provide the original grid connection agreement.' }];
+  expect((await app.store.dispatch(BringInList, { list: { ...list, items } })).ok).toBe(true);
+  const session = await reviewPortfolio();
+  const updated = [{ text: 'Provide the executed amendment to the grid connection agreement.' }];
+  const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
+  const first = app.store.dispatch(BringInList, { list: { ...list, items: updated } });
+  await held.entered;
+  const queued = session.bringIn();
+  held.release();
+  expect((await first).ok).toBe(true);
+  await queued;
+  expect(app.store.get().firmList[id].items[0]).toEqual(updated[0]);
+  expect(app.store.get().firmList[id].items).toHaveLength(1);
+  expect(session.view.work.error).toContain('The list changed');
+  expect(keptImport(key)).toBeDefined();
+});
+
 it('brings in the restored review, holds the draft until the write, and offers Undo All', async () => {
   const session = await reviewPortfolio();
   const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));

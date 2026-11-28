@@ -9,6 +9,7 @@ import {
 import { keepChecklistImport, readKeptChecklist, type ChecklistChoices } from './checklistKept';
 import { NOT_DONE, showChecklistOutcome } from './checklistOutcome';
 import { keepChecklistReviewChoices, reviewChanged } from './checklistReview';
+import { LIST_CHANGED_SINCE_REVIEW } from './commands/checklist';
 import { dropImport, importKey } from './keptImports';
 import {
   checklistCellRows, checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
@@ -493,12 +494,12 @@ export class ChecklistImportSession {
     const { items } = this.selection(review, remove, useReword);
     const file = this.table?.name ?? this.text?.name ?? '';
     const target = this.target;
-    if (reviewChanged(review, target, remove)) {
-      return this.activity('', 'The list changed. Go back and review it again.');
-    }
+    if (reviewChanged(review, target, remove)) return this.activity('', LIST_CHANGED_SINCE_REVIEW);
+    const usesGeneral = review.pairs.some(({ a, inAgainst }) => inAgainst && remove.has(a));
+    const reviewed = { destination: target.revision, general: usesGeneral ? target.generalRevision : undefined };
     this.activity('importing');
     try {
-      const result = await submitChecklist(this.store, this.key, target, items, file);
+      const result = await submitChecklist(this.store, this.key, target, items, file, reviewed);
       if (!result.ok) return this.activity('', `Couldn’t import: ${result.error.message}`);
       // Once written, the dialog goes back to the lists, even if this session was closed during the write.
       this.dispose();

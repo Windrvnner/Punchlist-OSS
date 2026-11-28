@@ -17,6 +17,7 @@ export interface ListTarget {
   named: boolean;
   /** the list of that name the firm has now, if any */
   replaces: ReturnType<typeof findList>;
+  revision: number | null;
   /** the list in two versions, when it is: it waits for a choice before it can be brought in */
   split: State['conflicts'][string] | undefined;
   splitSays: string;
@@ -24,6 +25,7 @@ export interface ListTarget {
   hasGeneral: boolean;
   /** the general list's items, which another list's items are checked against for duplicates */
   generalTexts: string[];
+  generalRevision: number;
 }
 
 export function listTarget(state: State, firm: FirmList, layer: Layer, name: string): ListTarget {
@@ -41,6 +43,7 @@ export function listTarget(state: State, firm: FirmList, layer: Layer, name: str
   const listNames = alphabetical(firm.lists.filter((list) => list.layer === layer).map((list) => list.name));
   return {
     id, layer, name, named, replaces, split, splitSays, generalTexts, listNames, hasGeneral: !!general,
+    revision: state.firmList[id]?.rev ?? null, generalRevision: general?.rev ?? 0,
   };
 }
 

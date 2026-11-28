@@ -9,7 +9,7 @@ import { listId } from '../../src/domain/checklist';
 import { fail, ok } from '../../src/domain/result';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { ELSEWHERE } from '../adapters/memRepo';
-import { copyRecoveryDisk, recoveryApp } from './recoveryKit';
+import { copyRecoveryDisk, holdRecoveryWrite, recoveryApp } from './recoveryKit';
 
 const key = importKey.checklist();
 let app: ReturnType<typeof recoveryApp>;
@@ -224,7 +224,7 @@ it('preserves a synced destination addition even without previously approved wor
   expect(session.view.work.error).toContain('The list changed');
 });
 
-it('preserves rows when General changes before Import (#56)', async () => {
+it.each(['before Import', 'at commit'])('preserves rows when General changes %s (#56)', async (when) => {
   const questions = portfolioQuestions().slice(0, 2_000);
   const edited = 'Provide the latest independent energy yield report.';
   app.store.services.ai.reword = async () => ok([{ at: 120, text: edited, why: '' }]);
@@ -236,9 +236,18 @@ it('preserves rows when General changes before Import (#56)', async () => {
   for (let index = 0; index < 120; index++) session.flipRemove(index);
   const changed = [{ text: 'Confirm all lender notice periods and deliverables.' }, ...general.slice(1)];
 
-  peerChangesList(id, changed);
-  await app.store.refreshSync();
-  await session.bringIn();
+  if (when === 'before Import') {
+    peerChangesList(id, changed);
+    await app.store.refreshSync();
+    await session.bringIn();
+  } else {
+    const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
+    const importing = session.bringIn();
+    await held.entered;
+    peerChangesList(id, changed);
+    held.release();
+    await importing;
+  }
 
   const wind = listId('technology', 'Wind');
   expect(app.store.get().firmList[wind]?.items.length ?? 0).toBe(0);
