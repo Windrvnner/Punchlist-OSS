@@ -38,7 +38,10 @@ A blackline is called this deal's own only when that is confirmed; otherwise the
 - [`blacklineLine`](../src/backend/ai.ts) and the listing lines in [`send`](../src/backend/ai.ts).
 - [`batchesOf`](../src/backend/agentBatches.ts) keeps a blackline and its clean draft together in chat searches,
   folder reads, the `read` tool, and first-turn attachments. In the `read` tool and first-turn attachments,
-  chat names deferred or unavailable files by id for another read (#1213).
+  chat names deferred or unavailable files by id for another read (#1213). Chat sends a paired blackline when its
+  clean draft is also sent or the same model context already received it whole. A fresh context or helper call
+  needs the clean file on that call. A withheld blackline stays out of the read count and is named with the
+  unavailable evidence (#1430).
 - The parent design's cap of two places in any pick for a document of another project.
 
 ## New
