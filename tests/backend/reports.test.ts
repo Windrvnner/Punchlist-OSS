@@ -380,6 +380,29 @@ describe('third-party reports at deal scale', () => {
     expect(marks).toEqual([]);
   });
 
+  it('compares a new draft with both the last completed draft and verified intervening issues (#1212)', async () => {
+    const report = room().find((doc) => doc.name === 'Independent Engineer Report.pdf')!;
+    const complete = 'doc_111111111111111111111111';
+    const cut = 'doc_222222222222222222222222';
+    const permit = { title: 'The stormwater permit has expired', finding: 'f_permit' };
+    const switchgear = { title: 'The switchgear test report is missing', finding: 'f_switchgear' };
+    const log: ReportLine[] = [
+      { read: { doc: complete, advisor: 'the engineer', issues: [permit] } },
+      { tried: { doc: cut, step: 'read', cut: { advisor: 'the engineer', issues: [{
+        issue: switchgear, sources: [{ docId: cut, doc: 'Engineer Report v2.pdf', loc: 'p. 8' }],
+      }] } } },
+    ];
+    const { k, marks } = kit([report], {
+      log, earlier: new Map([[report.docId, [cut, complete]]]),
+      answer: ({ kind, prompt }) => kind === 'report'
+        ? { issues: [], dropped: [...prompt.matchAll(/^(E\d+): /gm)].map((match) => match[1]) }
+        : undefined,
+    });
+    await sweep(k);
+    expect(marks.map(({ id }) => id).sort()).toEqual([permit.finding, switchgear.finding].sort());
+    expect(stateOf(log).read.get(report.docId)?.from).toBe(complete);
+  });
+
   it('a read that fails writes nothing; the next sweep reads it again', async () => {
     const docs = room().filter((d) => d.name === 'Independent Engineer Report.pdf');
     const findings = new Map<string, Known & { issue?: Issue }>();
@@ -842,6 +865,7 @@ describe('advisor report reply shape (#1212)', () => {
   it.each([
     { report: true }, { issues: null }, { issues: 'Missing inverter warranty' }, { issues: {} },
     { advisor: 'Independent engineer' }, {}, { report: null }, { report: false, issues: null },
+    { report: true, issues: [null, {}] },
   ])('sends a thin reply back once and leaves it unread if still thin (%j)', async (reply) => {
     const { report, state, reads, repairs, findings } = await sweepReply(() => reply);
     expect(reads).toHaveLength(2);

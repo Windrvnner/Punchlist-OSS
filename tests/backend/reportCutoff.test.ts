@@ -133,6 +133,23 @@ it('reopens a checkpoint and preserves same-title issues at separate places (#12
   }
 });
 
+it.each([false, true])('preserves distinct issues with the same title and citation (cutoff: %s)', async (cut) => {
+  const first = row('the inverter contract excludes replacement costs', 16);
+  const other = { ...first, body: ['The exclusion also leaves transport and crane hire unbudgeted. [1]'] };
+  const s = await reader((_call, attempt) => {
+    if (cut && attempt === 1) cutAfter([first, other], 2);
+    return JSON.stringify({ issues: cut ? [] : [first, other] });
+  });
+  try {
+    await s.sweep();
+    const saved = val(await s.repo.list('finding', 'd1')).map(({ envelope }) => envelope.data as Finding);
+    expect(saved.map(({ body }) => body[0]).sort()).toEqual([first.body[0], other.body[0]].sort());
+    expect(s.state().read.get(docId)?.issues).toHaveLength(2);
+  } finally {
+    await s.ai.close();
+  }
+});
+
 it('rejects a cut prefix that names an unshown document (#1212)', async () => {
   const valid = row('the substation transformer has no test record', 2);
   const invalid = row('the maintenance schedule has expired', 3);
