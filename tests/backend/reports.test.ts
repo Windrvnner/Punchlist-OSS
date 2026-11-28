@@ -339,10 +339,9 @@ describe('third-party reports at deal scale', () => {
     ]);
   });
 
-  it('a reply cut off at the length limit writes nothing, and is read again by the '
-    + 'next sweep', async () => {
+  it('a cutoff saves the verified prefix and leaves the report unfinished for the next sweep (#1212)', async () => {
     const docs = room().filter((d) => d.name === 'Independent Engineer Report.pdf');
-    const { k, findings, calls } = kit(docs, {
+    const { k, findings, calls, log } = kit(docs, {
       answer: ({ kind, prompt, name }) => {
         if (kind !== 'report') return undefined;
         const r = readReply(prompt, name);
@@ -350,8 +349,35 @@ describe('third-party reports at deal scale', () => {
       },
     });
     await sweep(k);
-    expect(raisedTitles(findings).length).toBe(0);
-    expect(calls.filter((c) => c.kind === 'report').length).toBe(1);
+    expect(raisedTitles(findings)).toEqual(ISSUES['Independent Engineer Report.pdf'].slice(0, 6));
+    expect(stateOf(log).read.has(docs[0].docId)).toBe(false);
+    await sweep(k);
+    expect(calls.at(-1)?.prompt).toContain('remaining issues');
+    expect(calls.at(-1)?.prompt).toContain(ISSUES['Independent Engineer Report.pdf'][5]);
+    expect(calls.filter((c) => c.kind === 'report').length).toBe(2);
+  });
+
+  it('keeps an earlier draft issue that the cutoff verified as still raised (#1212)', async () => {
+    const report = room().find((doc) => doc.name === 'Independent Engineer Report.pdf')!;
+    const before = 'doc_111111111111111111111111';
+    const earlier = new Map([[report.docId, [before]]]);
+    const issue = { title: 'Substation completion behind schedule', finding: 'f_substation' };
+    const log: ReportLine[] = [{ read: { doc: before, advisor: 'the engineer', issues: [issue] } }];
+    let first = true;
+    const { k, marks } = kit([report], {
+      log, earlier,
+      answer: ({ kind }) => {
+        if (kind !== 'report') return undefined;
+        if (!first) return { issues: [], dropped: ['E1'] };
+        first = false;
+        const still = { still: 'E1', sources: [{ doc: report.docId, page: 17 }] };
+        return Object.assign(new Error('cut'), { code: 'cutoff', partial: { issues: [still, {}] } });
+      },
+    });
+    await sweep(k);
+    await sweep(k);
+    expect(stateOf(log).read.get(report.docId)?.issues).toEqual([issue]);
+    expect(marks).toEqual([]);
   });
 
   it('a read that fails writes nothing; the next sweep reads it again', async () => {

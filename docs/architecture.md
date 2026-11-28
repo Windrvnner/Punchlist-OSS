@@ -197,6 +197,11 @@ object goes through the same checks as an array entry. The same whole report is 
 the parsed reply omits its issues or gives them in an unusable form. An incomplete reply leaves a failed attempt
 in the check log. An explicit negative classification is logged as a non-report (#1212).
 
+A cut-off reply keeps its citation-verified complete issues, and the check log records their places with the
+unfinished attempt. The next attempt sends the same whole report and asks for the remaining issues. A completed
+read combines the kept issues with the final reply. Overview shows exhausted reads from the persisted attempts
+in Documents, where a single count expands to show the report names (#1212).
+
 ## Checklist items and links
 
 A deal's checklist is made up of its own item records, linked to the findings and questions that bear on them (#2). The code is in `src/domain/checklist.ts`, `src/app/commands/checklist.ts`, `src/app/checklistImport.ts`, and `src/app/state.ts`. What is not built yet is described in [linking-design.md](linking-design.md).
