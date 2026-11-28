@@ -39,7 +39,7 @@ a counterparty response bears on an open finding, the finding is marked **May be
 
 The master checklist supplies a general list and lists by structure, sector, and technology. To manage those lists,
 choose **Open** in the **Checklist** row in **Settings**. In **Firm’s Checklist**, use **Import a List…** to
-paste a list or choose a Word, RTF, PDF, CSV, OpenDocument, or text file.
+paste a list or choose a Word, RTF, PDF, OpenDocument, or text file.
 
 Deal checklist results include:
 

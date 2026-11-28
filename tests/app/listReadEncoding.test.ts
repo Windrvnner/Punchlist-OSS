@@ -42,7 +42,7 @@ describe('a plain-text list in any encoding a text editor or Excel saves (#382)'
 });
 
 describe('checklist source formats', () => {
-  it.each(['xlsx', 'XLSM', 'xlsb', 'xls'])('refuses an Excel .%s before reading it', async (extension) => {
+  it.each(['xlsx', 'XLSM', 'xlsb', 'xls', 'csv'])('refuses a .%s before reading it', async (extension) => {
     const arrayBuffer = vi.fn(async () => new ArrayBuffer(0));
     const source = { name: `Checklist.${extension}`, arrayBuffer };
     const read = vi.fn(async () => ({ ok: true as const, value: { columns: ['Item'], rows: [['Review the lease']] } }));
@@ -51,14 +51,6 @@ describe('checklist source formats', () => {
     expect(arrayBuffer).not.toHaveBeenCalled();
     expect(read).not.toHaveBeenCalled();
     expect(LIST_ACCEPT.split(',')).not.toContain(`.${extension.toLowerCase()}`);
-  });
-
-  it('asks for a CSV export when a workbook has a CSV filename', async () => {
-    const read = vi.fn();
-    const bytes = Uint8Array.of(0x50, 0x4b, 0x03, 0x04);
-    const result = await readListFile({ services: { sheets: { read } } } as never, file('Checklist.csv', bytes));
-    expect(result).toMatchObject({ ok: false, error: { message: 'Save this workbook as CSV or paste the checklist' } });
-    expect(read).not.toHaveBeenCalled();
   });
 
   it('passes a Word checklist to the document text reader', async () => {

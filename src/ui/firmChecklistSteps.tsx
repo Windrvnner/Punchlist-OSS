@@ -20,7 +20,7 @@ import { NOT_DONE } from '../app/checklistOutcome';
 import { plural } from './counts';
 
 /** the tooltip on a checklist's "choose a file…": the kinds of file it reads */
-export const LIST_TIP = 'A CSV, OpenDocument spreadsheet, Word document, PDF, or text file';
+export const LIST_TIP = 'A Word document, PDF, OpenDocument file, RTF, or text file';
 
 export const Head = ({ title, onClose, disabled }: { title: string; onClose: () => void; disabled?: boolean }) => (
   <div class="shead"><h2>{title}</h2>

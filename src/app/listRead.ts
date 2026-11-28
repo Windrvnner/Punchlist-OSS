@@ -7,7 +7,6 @@
  * call is (backend/retry.ts).
  */
 import { decodeText } from '../domain/textEncoding';
-import { isWorkbook } from '../domain/sheets';
 import type { AiService } from '../ports';
 import {
   cellText, fillUnplaced, unplaced, textLines, tableLines, tableRowsAsWritten, tieOut, readingOf, type ListReading,
@@ -35,9 +34,8 @@ export async function readList(
 }
 
 /** The files a list can be brought in from: spreadsheets, documents and plain text. */
-const FILE_EXTENSIONS = ['.ods', '.csv', '.docx', '.docm', '.doc', '.odt', '.rtf', '.pdf', '.txt', '.text', '.md'];
+const FILE_EXTENSIONS = ['.ods', '.docx', '.docm', '.doc', '.odt', '.rtf', '.pdf', '.txt', '.text', '.md'];
 export const LIST_ACCEPT = FILE_EXTENSIONS.join(',');
-const SHEET = /\.(ods|csv)$/;
 const PLAIN = /\.(txt|text|md)$/;
 
 /**
@@ -72,12 +70,15 @@ export async function readListFile(
 ): Promise<Result<{ table: ImportTable } | { lines: string[] }>> {
   const name = file.name.toLowerCase();
   if (!FILE_EXTENSIONS.some((extension) => name.endsWith(extension))) {
-    const message = 'Choose a CSV, OpenDocument spreadsheet, Word document, PDF, or text file';
+    const message = 'Choose a Word document, PDF, OpenDocument file, RTF, or text file';
     return fail({ kind: 'invalid', message });
   }
   let bytes: Uint8Array;
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }
-  if (SHEET.test(name)) return readListSpreadsheet(store, file.name, bytes);
+  if (name.endsWith('.ods')) {
+    const read = await readImportBytes(store, file.name, bytes, { headerRow: 1 });
+    return read.ok ? ok({ table: read.value }) : read;
+  }
   let text: string;
   // by byte-order mark, else UTF-8, else Windows-1252, as a CSV is read (#382)
   if (PLAIN.test(name)) {
@@ -91,15 +92,6 @@ export async function readListFile(
   }
   const lines = textLines(text.replace(/^\uFEFF/, ''));
   return lines.some((l) => l.trim()) ? ok({ lines }) : fail({ kind: 'invalid', message: 'The file has no text' });
-}
-
-async function readListSpreadsheet(store: Store, name: string, bytes: Uint8Array) {
-  // The shared CSV reader suggests renaming workbook files to .xlsx, which is only useful in Q&A.
-  if (/\.csv$/i.test(name) && isWorkbook(bytes)) {
-    return fail({ kind: 'invalid', message: 'Save this workbook as CSV or paste the checklist' });
-  }
-  const read = await readImportBytes(store, name, bytes, { headerRow: 1 });
-  return read.ok ? ok({ table: read.value }) : read;
 }
 
 type ChecklistFile = Parameters<typeof readListFile>[1];
