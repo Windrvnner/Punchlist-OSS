@@ -145,7 +145,7 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
     n: (await qs(page, dealId)).length, stored: await stored(), storedBefore,
     footer: await page.textContent('#im-line'), notices: await page.locator('.toasts .toast').allTextContents(),
   };
-  const onlyFormReportsFailure = /storage is full/i.test(full.footer)
+  const onlyFormReportsFailure = /The disk is full/.test(full.footer)
     && !full.notices.some((notice) => /storage is full|Couldn’t save/i.test(notice));
   say('import-storage-full-atomic', full.n === beforeImport.length && full.stored === storedBefore
     && storedBefore > 0 && onlyFormReportsFailure, JSON.stringify(full));
