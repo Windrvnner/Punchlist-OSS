@@ -6,8 +6,9 @@
  */
 import type { Result } from '../domain/result';
 import type { RecordKind, Envelope, Source, Folder, AuditEntry } from '../domain/model';
-import type { SheetEdit } from '../domain/sheets';
-import type { KeptAsk } from '../domain/keptMerge';
+import type { SheetReadOptions } from '../domain/sheets';
+import type { QaLogFiles } from './qaLogs';
+export type { QaLogFiles } from './qaLogs';
 
 /**
  * expectedRev: number = optimistic check; null = must not exist yet; 'any' = overwrite without a check.
@@ -568,41 +569,24 @@ export interface SpreadsheetCodec {
    * left out of `rows`. `opts.sheet` and `opts.headerRow` (a sheet row number) are the person's own choice; without them
    * the reader picks the sheet and finds the heading row, and reports both so the person can see and change them.
    */
-  read(bytes: Uint8Array, fileName: string, opts?: { sheet?: string; headerRow?: number }): Promise<Result<{ columns: string[]; /** the sheet column of each column */ cols?: number[]; rows: string[][]; lines?: number[]; sheets?: string[]; sheet?: string; headerRow?: number; lastRow?: number; previews?: SheetPreview[] }>>;
+  read(bytes: Uint8Array, fileName: string, opts?: SheetReadOptions): Promise<Result<{
+    columns: string[];
+    /** the sheet column of each column */
+    cols?: number[];
+    rows: string[][];
+    lines?: number[];
+    sheets?: string[];
+    sheet?: string;
+    headerRow?: number;
+    lastRow?: number;
+    previews?: SheetPreview[];
+  }>>;
   /** an export: the file's bytes, and the kind of file they make */
   write(sheetName: string, rows: (string | number)[][]): Promise<Result<{ bytes: Uint8Array; ext: 'xlsx' | 'csv' }>>;
   /** Optional: a document's text as lines, for a list brought in from a Word file, an OpenDocument or RTF text, or a PDF. Without it only spreadsheets and plain text can be brought in. */
   text?(bytes: Uint8Array, fileName: string): Promise<Result<string>>;
   /** Optional: the deal memo, given as an OpenDocument text in one file (domain/memoDoc), as a Word file and a PDF. Without it the memo is saved as that file. */
   document?(fodt: string): Promise<Result<{ docx: Uint8Array; pdf: Uint8Array }>>;
-}
-
-/**
- * A deal's Q&A log, the file itself where the team keeps it (a NAS, a drive): people edit it there, with or without the app,
- * and the app keeps no copy of its own. `folder` and `file` say where it is.
- */
-export interface QaLogFiles {
-  /**
-   * the log's table as it is now, read as an import reads it (SpreadsheetCodec.read); `stamp` names the bytes read. With
-   * `kept` (an update; `text`, `n` and `by`: the question, number and Submitted by columns' places in `columns`), edits a save kept aside in the log's folder are brought in: the table is the log with
-   * `kept.steps` made, which the update saves along with its own; `kept.clashes` are rows (indexes into `rows`) with a cell
-   * both they and the log changed, where the log's value stays; `kept.files` go, by `settle`, once the update is saved, each
-   * with `left` when some of its changes were not brought in, `clashes`, its own rows of `kept.clashes`, and `steps` when some
-   * of `kept.steps` are its.
-   */
-  read(at: { folder: string; file: string }, opts: { sheet: string; headerRow: number; kept?: { text: number; n?: number; by?: number } }): Promise<Result<{ columns: string[]; cols: number[]; rows: string[][]; lines: number[]; lastRow: number; stamp: string; kept?: { files: { name: string; hash: string; left?: true; clashes?: number[]; steps?: true }[]; steps: SheetEdit[]; clashes: number[]; /** rows that read alike, for the person to say where each goes */ ask?: (KeptAsk & { file: string })[] } }>>;
-  /**
-   * the kept edits an update brought in (`read`'s `kept.files`), once it is saved: each first to the archive, then from the
-   * folder. One the archive refuses now is marked as brought in, so it is never merged again, and goes at a later update.
-   */
-  settle?(req: { folder: string; file: string; kept: { name: string; hash: string; left?: boolean }[] }): Promise<Result<{ gone: string[] }>>;
-  /**
-   * Write `steps` into the log, which must still be the file read (`stamp`): the version it replaces goes to the folder's
-   * archive first. "later": the file is open somewhere (Excel), or changed since it was read; nothing was written.
-   */
-  save(req: { folder: string; file: string; sheet: string; steps: SheetEdit[]; stamp: string }): Promise<Result<{ status: 'written'; archive: string } | { status: 'later'; by?: string }>>;   // by: who has it open, when their lock file names them
-  /** a new log in `folder`, under `file` or, if that name is taken, the first free "name (2).ext"; the name it got */
-  create(req: { folder: string; file: string; bytes: Uint8Array }): Promise<Result<{ file: string }>>;
 }
 
 export interface Session {
