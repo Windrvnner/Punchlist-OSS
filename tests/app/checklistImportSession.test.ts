@@ -8,7 +8,7 @@ import { registry } from '../../src/app/commands/undo';
 import { BringInList, RestoreList } from '../../src/app/commands/checklist';
 import { listId } from '../../src/domain/checklist';
 import { fail, ok } from '../../src/domain/result';
-import { checklistSpreadsheet } from '../fixtures/checklistSpreadsheet';
+import { checklistSpreadsheet, keepChecklistTable } from '../fixtures/checklistSpreadsheet';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { holdRecoveryWrite, recoveryApp } from './recoveryKit';
 
@@ -183,11 +183,11 @@ it('keeps new typing from a reopened import while its previous instance finishes
   expect(reopened.view.source.paste).toBe('  Obtain the signed lender consent.  ');
 });
 
-it('ignores a retry that ends after change and detects headings before manual column selection', async () => {
+it('ignores a retry that ends after the document is replaced with a paste', async () => {
   app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
   app.store.services.sheets = checklistSpreadsheet;
   const session = open();
-  const file = new File(['Item,Section\nLegal opinion,Financing\nTitle report,Property'], 'Lender list.ods');
+  const file = new File(['Legal opinion\nTitle report'], 'Lender list.txt');
   await session.loadDropped(file);
   expect(session.view.source.readFailed).toBe('failed');
   let release!: () => void;
@@ -203,8 +203,15 @@ it('ignores a retry that ends after change and detects headings before manual co
   await retry;
   expect(session.view.step).toBe('pick');
   expect(session.view.source.reads).toBeNull();
+});
+
+it('detects headings when manually choosing columns in a kept worksheet', async () => {
   app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
-  await session.load(file);
+  app.store.services.sheets = checklistSpreadsheet;
+  const file = new File(['Item,Section\nLegal opinion,Financing\nTitle report,Property'], 'Lender list.ods');
+  await keepChecklistTable(app.store, file);
+  const session = open();
+  await vi.waitFor(() => expect(session.view.source.readFailed).toBe('failed'));
   await session.chooseColumns();
   expect(session.view.step).toBe('columns');
   session.pickColumn('item', null);

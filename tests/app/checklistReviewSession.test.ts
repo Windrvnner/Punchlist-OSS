@@ -6,7 +6,7 @@ import { importKey, initializeKeptImports, keptImport, keptImportsReady } from '
 import { BringInList } from '../../src/app/commands/checklist';
 import { listId } from '../../src/domain/checklist';
 import { fail, ok } from '../../src/domain/result';
-import { checklistSpreadsheet } from '../fixtures/checklistSpreadsheet';
+import { checklistSpreadsheet, keepChecklistTable } from '../fixtures/checklistSpreadsheet';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { ELSEWHERE } from '../adapters/memRepo';
 import { copyRecoveryDisk, recoveryApp } from './recoveryKit';
@@ -37,6 +37,13 @@ function open() {
   return session;
 }
 
+async function openTable(file: File) {
+  await keepChecklistTable(app.store, file);
+  const session = open();
+  await vi.waitFor(() => expect(session.view.source.readFailed).toBe('failed'));
+  return session;
+}
+
 it('imports the section and subsection remapped after Back (#56)', async () => {
   app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
   const questions = portfolioQuestions().slice(0, 2_000);
@@ -45,10 +52,9 @@ it('imports the section and subsection remapped after Back (#56)', async () => {
   const encoded = await checklistSpreadsheet.write('Sheet1', [headers, ...rows]);
   if (!encoded.ok) throw new Error(encoded.error.message);
   const file = new File([encoded.value.bytes.slice().buffer], 'Portfolio requests.ods');
-  const session = open();
+  const session = await openTable(file);
   session.setAskReword(false);
   session.setAskSame(false);
-  await session.load(file);
   await session.chooseColumns();
   await session.next();
   expect(session.view.step).toBe('review');
@@ -162,8 +168,7 @@ it.each([
   const headers = ['Section', 'Alternate area', 'Subsection', 'Alternate subsection', 'Item'];
   const encoded = await checklistSpreadsheet.write('Sheet1', [headers, ...rows]);
   if (!encoded.ok) throw new Error(encoded.error.message);
-  const session = open();
-  await session.load(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.ods'));
+  const session = await openTable(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.ods'));
   session.setAskReword(true);
   session.setAskSame(false);
   await session.chooseColumns();
@@ -322,10 +327,9 @@ it('keeps other choices after a list replacement and a reopened Section remap (#
   if (!encoded.ok) throw new Error(encoded.error.message);
   const prior = priorItems(questions, 'offshore wind');
   const id = await savePriorList('technology', 'Wind', prior);
-  const session = open();
+  const session = await openTable(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.ods'));
   session.setLayer('technology');
   session.setName('Wind');
-  await session.load(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.ods'));
   session.setAskReword(true);
   session.setAskSame(false);
   await session.chooseColumns();
@@ -416,8 +420,7 @@ it('keeps checks after a failed sheet read and starts over on an accepted new sh
   };
   app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
   app.store.services.ai.reword = async () => ok([{ at: 0, text: revised, why: '' }]);
-  const session = open();
-  await session.load(new File(['test workbook'], 'Checklist.ods'));
+  const session = await openTable(new File(['test workbook'], 'Checklist.ods'));
   session.setAskReword(true);
   session.setAskSame(false);
   await session.chooseColumns();
