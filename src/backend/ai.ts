@@ -69,7 +69,7 @@ import { families, roomPath } from './families';
 import { foldersOf, matchFolders, inside } from './folderList';
 import { cleanDrafts, againstOf, otherProject, isBlackline, type Against } from './blacklines';
 import { coreSet, shortNamesIn, BEST as CORE_BEST } from './core';
-import { sweep as sweepReports, type ReportLine } from './reports';
+import { sweep as sweepReports, stateOf as reportStateOf, incompleteReports, type ReportLine } from './reports';
 import {
   ReportSweeps, knownFindings, raiseFinding, citeFinding, reportFindingId, reportCandidates,
 } from './reportsKit';
@@ -1089,20 +1089,35 @@ export function nodeAi(o: AiOptions) {
     await claim(dealId, free);
     return free;
   }
+  const reportLines = (all: CheckLine[]) => all.flatMap((line) => line.report ? [line.report] : []);
+
+  function candidatesForReportRead(dealId: string, records: DocRecord[]) {
+    let shut = new Map<string, string>();
+    try { shut = o.docs.shut?.(dealId, records.map((r) => r.docId)) ?? shut; } catch { /* none known */ }
+    return reportCandidates(records, { where, shut, blacklines: cleanOf(dealId) });
+  }
+
+  function reportReadStatus(dealId: string, all: CheckLine[], records: DocRecord[]) {
+    const state = reportStateOf(reportLines(all));
+    const incomplete = incompleteReports(records, state);
+    if (!incomplete.length) return {};
+    const candidates = candidatesForReportRead(dealId, records);
+    return { incompleteReports: incompleteReports(candidates.docs, state) };
+  }
+
   async function reports(dealId: string) {
     const all = o.docs.records(dealId);
     if (!all.length) return;
-    let shut = new Map<string, string>();
-    try { shut = o.docs.shut?.(dealId, all.map((r) => r.docId)) ?? shut; } catch { /* none known */ }
-    const { docs, earlier } = reportCandidates(all, { where, shut, blacklines: cleanOf(dealId) });
+    const { docs, earlier } = candidatesForReportRead(dealId, all);
     const m = await models();
     await sweepReports({
       dealId, docs, earlier, where, system: RULES, models: { fast: m.fast, standard: m.standard },
       workstreams: WORKSTREAMS, workstreamOf, fitParas,
-      lines: async () => (await lines(dealId)).flatMap((l) => (l.report ? [l.report] : [])),
+      lines: async () => reportLines(await lines(dealId)),
       say: async (report) => { await say(dealId, { report }); },
       claim: (keys) => claimReports(dealId, keys),
       release: async (keys) => { if (o.shared) await release(dealId, keys).catch(() => undefined); },
+      again: () => reportsSoon(dealId),
       ask: (input, keys, correction) => askJson(input, keys, undefined, true, correction),
       unusable: (sent, keys, shown) => docsUnusable(sent, false, keys, where, shown),
       send: async (rec, share) => {
@@ -3841,7 +3856,16 @@ export function nodeAi(o: AiOptions) {
         }
         const has = new Set(o.docs.records(dealId).map((r) => r.docId)); const items = (await shownItems(dealId, latest, done)).map(({ id }) => { const l = latest.get(id); return unmoored(l, (d) => has.has(d)) ? 'unsettled' : l?.result; }); const count = (r: Outcome) => items.filter((x) => x === r).length;
         const also = await alsoIn(dealId, o.docs.records(dealId));
-        return ok({ folders: [...folders.values()], ...(also.length ? { alsoIn: also } : {}), checklist: { items: items.length, satisfied: count('ok'), findings: count('finding'), gaps: count('gap'), unsettled: items.length - count('ok') - count('finding') - count('gap') } });
+        const reportStatus = reportReadStatus(dealId, all, o.docs.records(dealId));
+        return ok({
+          folders: [...folders.values()],
+          ...(also.length ? { alsoIn: also } : {}),
+          ...reportStatus,
+          checklist: {
+            items: items.length, satisfied: count('ok'), findings: count('finding'), gaps: count('gap'),
+            unsettled: items.length - count('ok') - count('finding') - count('gap'),
+          },
+        });
       } catch { return fail({ kind: 'failed', message: 'The checklist results could not be read' }); }
     },
     /**

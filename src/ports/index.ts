@@ -342,6 +342,7 @@ export interface ChecklistRow { id: string; text: string; result: 'satisfied' | 
 export interface DealProgress {
   folders: { folder: string; files: number; read: number; core: number; coreRead: number; /** files here that are copies of a document already counted (its first place), so not counted again */ copies?: number }[];
   checklist: { items: number; satisfied: number; findings: number; gaps: number; unsettled: number };
+  incompleteReports?: { docId: string; name: string }[];
   /** other deals whose data rooms hold most of this deal's documents, the same files by content; `docs` of this deal's are there. Most first. */
   alsoIn?: { dealId: string; docs: number; of: number }[];
 }
