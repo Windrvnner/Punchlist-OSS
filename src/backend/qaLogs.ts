@@ -8,16 +8,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Converter } from './convert';
-import type { QaLogFiles } from '../ports';
-import { ok, fail } from '../domain/result';
+import type { QaLogFiles, SpreadsheetCodec } from '../ports';
+import { ok, fail, type Result } from '../domain/result';
 import {
-  parseCsv, writtenAsMeant, withSteps, tableFrom, type Sheet, type SheetEdit,
+  parseCsv, writtenAsMeant, withSteps, tableFrom, type Sheet, type SheetEdit, type SheetReadOptions,
 } from '../domain/sheets';
 import { editLog, libreOfficeSheets } from './spreadsheets';
 import { decodeText } from '../domain/textEncoding';
 import { saveLog, createLog, sha256, restoreAside, keptEdits, settleKept, type KeptEdit } from './qaLogFolder';
 import { fixedCells } from './xlsxEdit';
 import { mergeKept, type KeptAsk } from '../domain/keptMerge';
+import { keptLogColumns, logLayoutChanged, resolveLogMapping, selectedUnnamedColumns } from '../domain/qaLogLayout';
 
 const EXT = /^\.(xlsx|xlsm|xls|ods|csv)$/i;
 
@@ -43,6 +44,28 @@ function copyArchivedBase(base: NonNullable<KeptEdit['base']>, target: string): 
   }
 }
 
+type ReadOptions = Parameters<QaLogFiles['read']>[1];
+type SheetTable = Extract<Awaited<ReturnType<SpreadsheetCodec['read']>>, { ok: true }>['value'];
+
+function atLinkedTable(table: SheetTable, { sheet, headerRow }: ReadOptions) {
+  return table.sheet === sheet && table.headerRow === headerRow;
+}
+
+function keptColumnsForRead(table: SheetTable, opts: ReadOptions): Result<ReadOptions['kept']> {
+  if (!opts.layout) return ok(opts.kept);
+  if (!atLinkedTable(table, opts)) return fail(logLayoutChanged());
+  const mapping = resolveLogMapping(opts.layout, table);
+  if (!mapping.ok) return mapping;
+  return ok(opts.kept ? keptLogColumns(mapping.value) : undefined);
+}
+
+/** Keep the retained-edit calculation on the exact bytes whose stamp guards the write (#282). */
+function stageLog(work: string, extension: string, bytes: Uint8Array) {
+  const file = path.join(work, `log${extension}`);
+  fs.writeFileSync(file, bytes);
+  return file;
+}
+
 export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogFiles {
   const conv: Converter = o.convert ?? Object.assign(() => Promise.reject(new Error('no converter')), { id: 'none' });   // a CSV log needs none
   /** every sheet of a file, as text */
@@ -61,7 +84,11 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
    * cells with nowhere to go), and `clashes`, its rows where the log's value stays; and `steps` when some are in `kept.steps`. A `.kept` file was merged at an earlier
    * update and is only filed now, so it says nothing.
    */
-  const bringIn = async (file: string, bytes: Uint8Array, folder: string, found: KeptEdit[], opts: { sheet: string; headerRow: number }, cols: { text: number; n?: number; by?: number }, read: { columns: string[]; cols: number[]; rows: string[][]; lines: number[]; lastRow: number }) => {
+  const bringIn = async (
+    file: string, bytes: Uint8Array, folder: string, found: KeptEdit[],
+    opts: SheetReadOptions & { sheet: string; headerRow: number }, cols: { text: number; n?: number; by?: number },
+    read: { columns: string[]; cols: number[]; rows: string[][]; lines: number[]; lastRow: number },
+  ) => {
     const ext = path.extname(file); const steps: SheetEdit[] = []; const clashes = new Set<number>(); let table = read; const files = found.filter((k) => !k.base);
     const ask: (KeptAsk & { file: string })[] = [];                                     // rows the person says where they go
     // what each file brought in: one not listed here was merged in full, or was never merged at all (left)
@@ -82,9 +109,14 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
         /** the formula a cell holds, or false */
         return (r: number, c: number): string | false => { const t = fg[r]?.[c] ?? ''; return t.startsWith('=') && t !== (vg[r]?.[c] ?? '') ? t : false; };
       };
-      const logFile = copy(file, 'log'); let now = await sheets(logFile); const text = read.columns[cols.text] ?? ''; const number = cols.n === undefined ? '' : read.columns[cols.n] ?? ''; const by = cols.by === undefined ? '' : read.columns[cols.by] ?? '';
+      const logFile = stageLog(work, ext, bytes);
+      let now = await sheets(logFile);
       const logF = formulas && (await formulas(logFile, now)); const merged = /\.xlsx$|\.xlsm$/i.test(ext) ? fixedCells(bytes, opts.sheet) : () => false;
       const fixed = (r: number, c: number) => merged(r, c) || (!!logF && !!logF(r, c));
+      // Applying a kept edit can change which unnamed columns appear in the compact table.
+      const position = (index: number | undefined) => (
+        index === undefined ? undefined : table.cols.indexOf(read.cols[index])
+      );
       for (const [i, k] of found.entries()) {
         if (!k.base) continue;
         try {
@@ -93,8 +125,11 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
           const ks = await sheets(kf);
           const bs = await sheets(bf); const base = tableFrom(bs, opts), kept = tableFrom(ks, opts);
           files.push(k);
-          if (!base || !kept || base.sheet !== opts.sheet || kept.sheet !== opts.sheet) continue;
-          const m = mergeKept(base, kept, table, text, fixed, (formulas && (await formulas(kf, ks))) || undefined, number, (formulas && (await formulas(bf, bs))) || undefined, by);
+          if (!base || !kept || !atLinkedTable(base, opts) || !atLinkedTable(kept, opts)) continue;
+          const ours = (formulas && (await formulas(bf, bs))) || undefined;
+          const theirs = (formulas && (await formulas(kf, ks))) || undefined;
+          const text = position(cols.text) ?? -1;
+          const m = mergeKept(base, kept, table, text, fixed, theirs, position(cols.n), ours, position(cols.by));
           ask.push(...m.ask.map((a) => ({ ...a, file: k.name })));
           if (!m.steps.length && !m.clashes.length) { done.set(k, { left: m.left > 0, clashes: [], ...(m.ask.length ? { steps: true as const } : {}) }); continue; }
           const next = withSteps(now, opts.sheet, m.steps); const t = next && tableFrom(next, opts); if (!next || !t) continue;
@@ -113,12 +148,24 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
     async read(at, opts) {
       const w = where(at.folder, at.file); if (!w.ok) return w;
       const bytes = new Uint8Array(fs.readFileSync(w.value));
-      const r = await libreOfficeSheets(conv).read(bytes, at.file, { sheet: opts.sheet, headerRow: opts.headerRow });
+      const { sheet, headerRow, layout } = opts;
+      const includeColumns = layout ? selectedUnnamedColumns(layout) : undefined;
+      const choice = { sheet, headerRow, includeColumns };
+      const r = await libreOfficeSheets(conv).read(bytes, at.file, choice);
       if (!r.ok) return r;
-      const t = r.value; const read = { columns: t.columns, cols: t.cols ?? t.columns.map((_, i) => i), rows: t.rows, lines: t.lines ?? t.rows.map((_, i) => i + 2), lastRow: t.lastRow ?? t.rows.length + 1, stamp: sha256(bytes) };
-      if (!opts.kept) return ok(read);
-      const found = keptEdits(at.folder, at.file); if (!found.length) return ok(read);
-      return ok({ ...read, ...(await bringIn(w.value, bytes, at.folder, found, { sheet: opts.sheet, headerRow: opts.headerRow }, opts.kept, read)) });
+      const t = r.value;
+      const kept = keptColumnsForRead(t, opts);
+      if (!kept.ok) return kept;
+      const read = {
+        columns: t.columns, cols: t.cols ?? t.columns.map((_, index) => index), rows: t.rows,
+        lines: t.lines ?? t.rows.map((_, index) => index + 2), lastRow: t.lastRow ?? t.rows.length + 1,
+        stamp: sha256(bytes),
+      };
+      if (!kept.value) return ok(read);
+      const found = keptEdits(at.folder, at.file);
+      if (!found.length) return ok(read);
+      const merged = await bringIn(w.value, bytes, at.folder, found, choice, kept.value, read);
+      return ok({ ...read, ...merged });
     },
     async settle(req) { try { return ok({ gone: settleKept(req.folder, req.file, req.kept) }); } catch (e) { return fail({ kind: 'failed', message: `The kept edits were not filed: ${(e as Error).message}` }); } },
     async save(req) {

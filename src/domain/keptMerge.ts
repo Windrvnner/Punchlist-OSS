@@ -54,6 +54,23 @@ export interface KeptAsk {
 
 /** a column's key: its heading, spacing and case aside, and which of the columns so headed it is */
 const keys = (columns: string[]) => { const seen = new Map<string, number>(); return columns.map((c) => { const h = c.replace(/\s+/g, ' ').trim().toLowerCase(); const k = (seen.get(h) ?? 0) + 1; seen.set(h, k); return `${h}#${k}`; }); };
+
+/** A selected duplicate or unnamed key must occupy the same positions in the versions being merged (#282). */
+function logColumnKey(
+  choice: string | number, log: KeptTable, current: string[], earlier: { table: KeptTable; keys: string[] }[],
+): string {
+  if (typeof choice === 'string') return current[log.columns.indexOf(choice)] ?? '';
+  const key = current[choice];
+  if (!key) return '';
+  const heading = key.slice(0, key.lastIndexOf('#'));
+  const group = (table: KeptTable, keys: string[]) => keys.flatMap((candidate, index) =>
+    candidate.slice(0, candidate.lastIndexOf('#')) === heading ? [[table.cols[index], table.columns[index]]] : []);
+  const selected = group(log, current);
+  const previous = earlier.map(({ table, keys }) => group(table, keys));
+  if (heading && selected.length === 1 && previous.every((columns) => columns.length <= 1)) return key;
+  const positions = JSON.stringify(selected);
+  return previous.every((columns) => JSON.stringify(columns) === positions) ? key : '';
+}
 /** a row that asks a question: a heading or a blank line stands for none, as the log update reads it (logWrite.ts) */
 const hasQuestion = (r: string[], text: number) => (r[text] ?? '').trim() !== '';
 
@@ -205,10 +222,18 @@ export const cell = (row: number, col: number, s: string): SheetEdit =>
  * their change, nor written into a row they added. `number`: the heading of the question number column, if the log has one;
  * `by`: of Submitted by. `baseFormula`: as `formula`, for the version they edited.
  */
-export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text: string, fixed: (row: number, col: number) => boolean = () => false, formula: (row: number, col: number) => string | boolean = () => false, number = '', baseFormula?: (row: number, col: number) => string | boolean, by = ''): KeptMerge {
+export function mergeKept(
+  base: KeptTable, kept: KeptTable, log: KeptTable, text: string | number,
+  fixed: (row: number, col: number) => boolean = () => false,
+  formula: (row: number, col: number) => string | boolean = () => false,
+  number: string | number = '', baseFormula?: (row: number, col: number) => string | boolean,
+  by: string | number = '',
+): KeptMerge {
   const out: KeptMerge = { steps: [], clashes: [], cells: 0, added: 0, left: 0, ask: [] };
   const kb = keys(base.columns), kk = keys(kept.columns), kl = keys(log.columns);
-  const tk = kl[log.columns.indexOf(text)]; const bt = kb.indexOf(tk), kt = kk.indexOf(tk), lt = kl.indexOf(tk);
+  const earlier = [{ table: base, keys: kb }, { table: kept, keys: kk }];
+  const tk = logColumnKey(text, log, kl, earlier);
+  const bt = kb.indexOf(tk), kt = kk.indexOf(tk), lt = kl.indexOf(tk);
   // no question column in common: nothing can be lined up, so whatever they changed is left out
   if (!tk || bt < 0 || kt < 0 || lt < 0) { out.left = JSON.stringify([kept.columns, kept.rows]) === JSON.stringify([base.columns, base.rows]) ? 0 : 1; return out; }
   // The columns they and the log have, by where each is in its table's rows (`b`: in the version they edited, -1 for one
@@ -234,8 +259,10 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     if (!all && goes.has(c)) return; const b = kb.indexOf(k); const was = i !== undefined && b >= 0 ? base.rows[i][b] ?? '' : '';
     if (keptWorked(j, c) ? typed(j, c, i) : (kept.rows[j][c] ?? '') !== was) out.left++;
   });
-  const nkey = number ? kl[log.columns.indexOf(number)] : undefined; const nb = nkey ? kb.indexOf(nkey) : -1, nkk = nkey ? kk.indexOf(nkey) : -1, nll = nkey ? kl.indexOf(nkey) : -1;
-  const bkey = by ? kl[log.columns.indexOf(by)] : undefined; const bb = bkey ? kb.indexOf(bkey) : -1, bkk = bkey ? kk.indexOf(bkey) : -1, bll = bkey ? kl.indexOf(bkey) : -1;
+  const nkey = number === '' ? '' : logColumnKey(number, log, kl, earlier);
+  const nb = kb.indexOf(nkey), nkk = kk.indexOf(nkey), nll = kl.indexOf(nkey);
+  const bkey = by === '' ? '' : logColumnKey(by, log, kl, earlier);
+  const bb = kb.indexOf(bkey), bkk = kk.indexOf(bkey), bll = kl.indexOf(bkey);
   const [baseForKept, keptCols] = lookupCols([bt, kt], [nb, nkk], [bb, bkk]);
   const ks = lineUp(base.rows, baseForKept, kept.rows, keptCols).out;
   const [baseForLog, logCols] = lookupCols([bt, lt], [nb, nll], [bb, bll]);
