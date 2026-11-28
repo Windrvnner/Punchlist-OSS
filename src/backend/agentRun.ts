@@ -23,6 +23,15 @@ export const foundAt = (source: Source) =>
 export const withPlaces = (text: string, ids: string[], sources: Source[]) =>
   text.replace(/\[(\d+)\]/g, (_m, n) => `[${ids[+n - 1] ?? '?'} ${sources[+n - 1]?.loc ?? ''}]`);
 
+/** How a turn would change the run if the model accepts these attachments. */
+export interface ReadAttachment {
+  got: Sent[];
+  opened: Sent[];
+  shown: Sent[];
+  done: string[];
+  missing: string[];
+}
+
 export class AgentRun {
   /** every document a model was given in this conversation: what may be cited */
   readonly opened: Sent[] = [];
@@ -128,23 +137,12 @@ export class AgentRun {
     return numbers;
   }
 
-  /** a document opened for a model that was not given it after all: it is not opened, nor counted */
-  unopen(sent: Sent): void {
-    this.opened.splice(this.opened.indexOf(sent), 1);
-    this.touched.delete(sent);
-  }
-
   /** the ids of the documents these sources cite, '?' for one not given to a model */
   idsOf(sources: Source[]): string[] {
     return sources.map((s) => {
       const doc = this.opened.find((x) => cites(s, x));
       return doc ? this.idOf(doc) : '?';
     });
-  }
-
-  /** the documents listed to the main session: those opened, less the quiet ones */
-  shown(): Sent[] {
-    return this.opened.filter((s) => !this.quiet.has(s));
   }
 
   /**
@@ -198,22 +196,35 @@ export class AgentRun {
       ? `Ask to read the remaining documents by id in another batch.\n${this.readList(deferred)}` : '';
   }
 
-  /** Only files the send returned may enter the citation list, count and read steps (#12, #1213). */
-  attached(got: Sent[]): void {
-    const missing = this.whole.filter((s) => !got.includes(s));
-    if (missing.length) this.whole = this.whole.filter((s) => got.includes(s));
+  /** The prompt and reply validator use the same proposed attachments, even on a fresh retry (#1430). */
+  attachment(got: Sent[]): ReadAttachment {
+    const inCall = (doc: Sent) => got.some((s) => sameDoc(doc, s));
+    const newlyOpened = got.filter((doc) => !this.opened.some((s) => sameDoc(doc, s)));
+    const opened = [...this.opened, ...newlyOpened];
+    const shown = opened.filter((s) => !this.quiet.has(s) || inCall(s));
+    const done = [...this.done];
+    if (this.readResult === undefined) return { got, opened, shown, done, missing: [] };
+    const missing = this.whole.filter((doc) => !inCall(doc));
+    const attached = got.length ? `Attached for reading ${got.map((s) => this.idOf(s)).join(', ')}.`
+      : 'No document was attached.';
+    const unavailable = missing.length ? `These files could not be attached.\n${this.readLines(missing)}` : '';
+    done[this.readResult] = [attached, done[this.readResult], unavailable].filter(Boolean).join('\n');
+    return { got, opened, shown, done, missing: missing.map((doc) => this.idOf(doc)) };
+  }
+
+  /** Only an accepted turn may add files to the citation list, count and read steps (#12, #1213). */
+  attached(attachment: ReadAttachment): void {
+    this.whole = attachment.got;
     const result = this.readResult;
     if (result === undefined) return;
     this.readResult = undefined;
+    this.done[result] = attachment.done[result];
+    for (const id of attachment.missing) this.readTargets.add(id);
     for (const s of this.whole) {
       this.open(s.dealId, s.rec);
       const pages = s.rec.pages ? `${s.rec.pages} pages` : '';
       this.steps.push({ kind: 'read', text: `Reviewed ${s.rec.name}`, result: pages, done: true });
     }
-    const attached = this.whole.length ? `Attached for reading ${this.whole.map((s) => this.idOf(s)).join(', ')}.`
-      : 'No document was attached.';
-    const unavailable = missing.length ? `These files could not be attached.\n${this.readList(missing)}` : '';
-    this.done[result] = [attached, this.done[result], unavailable].filter(Boolean).join('\n');
   }
 
   /** whether a tool result gave the model an id to request in another read */
@@ -223,11 +234,12 @@ export class AgentRun {
 
   /** name an unread file by its existing id, even when another file has the same display path */
   private readList(docs: DealDoc[]): string {
-    return docs.map((doc) => {
-      const handle = this.idOf(doc);
-      this.readTargets.add(handle);
-      return `- ${handle} (${this.kit.where(doc.rec)})`;
-    }).join('\n');
+    for (const doc of docs) this.readTargets.add(this.idOf(doc));
+    return this.readLines(docs);
+  }
+
+  private readLines(docs: DealDoc[]): string {
+    return docs.map((doc) => `- ${this.idOf(doc)} (${this.kit.where(doc.rec)})`).join('\n');
   }
 
   /** a unique document named by its whole path or its whole file name, in any case */

@@ -20,7 +20,7 @@ function runOver(names: string[], pairs: [string, string][] = []) {
 /** the requested batch was sent in full, as the next chat turn would confirm */
 function readAndAttach(run: AgentRun, names: string[], width: number) {
   run.done.push(run.read(names, width));
-  run.attached(run.whole);
+  run.attached(run.attachment(run.whole));
   return run.done.at(-1)!;
 }
 

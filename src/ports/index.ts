@@ -317,6 +317,8 @@ export interface ModelThread {
   model: string;
   tokens: number;
   opened: { dealId: string; docId: string }[];
+  /** Whole documents actually attached to this model conversation, excluding its helpers and transcript. */
+  whole?: ModelThread['opened'];
   transcript?: string;
   call?: string;
 }
