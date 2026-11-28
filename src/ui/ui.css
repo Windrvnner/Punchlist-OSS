@@ -1378,6 +1378,15 @@ select.field.unset{color:var(--ink-3)}select.field.unset option{color:var(--opti
 .lfdlg .lfcount .err{color:var(--high)}
 /* a deal folder not on this PC: no bar, and the first line says so once */
 .dcrow .awayfn{grid-column:span 2}.dcrow .rd.away{color:var(--high)}
+.incomplete-reports{grid-column:1/-1;border-bottom:1px solid var(--line);font-size:13.5px}
+.incomplete-reports summary{line-height:20px;padding:8px 0;color:var(--high);cursor:pointer}
+.incomplete-reports ul{
+  max-height:148px;overflow:auto;margin:0 0 8px;padding:0;list-style:none;border-top:1px solid var(--line)
+}
+.incomplete-reports li{
+  padding:7px 12px 7px 16px;overflow-wrap:anywhere;color:var(--ink);border-bottom:1px solid var(--line)
+}
+.incomplete-reports li:last-child{border-bottom:0}
 /* beside a deal's name when another deal has the same name: its counterparty and the day it was made */
 .dtw{flex:0 1 auto;min-width:0;margin-left:6px;color:var(--ink-3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* a same-named deal in the narrow sidebar: what tells it apart goes on a second, smaller line under the name, so both show in full */

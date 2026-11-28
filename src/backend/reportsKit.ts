@@ -7,7 +7,7 @@ import type { Source } from '../domain/model';
 import { derivedId } from '../domain/derivedId';
 import type { DocRecord } from './documents';
 import { families, inPrecedents } from './families';
-import type { Known, Issue } from './reports';
+import { type Known, type Issue, reportTitleKey, sameReportIssue } from './reportTypes';
 
 /** what the finding writes need beside the store */
 export interface FindingWrites {
@@ -19,35 +19,61 @@ export interface FindingWrites {
 
 const failed = (r: { ok: false; error: { message: string } }) => new Error(r.error.message);
 
+interface StoredFinding {
+  id?: string;
+  title?: string;
+  status?: string;
+  body?: string[];
+  sources?: Source[];
+  reportIssueSignature?: string;
+}
+
+function issueEvidence(data: unknown): Pick<Known, 'signature' | 'unsigned'> {
+  const { title, body, sources, reportIssueSignature } = data as StoredFinding;
+  if (reportIssueSignature !== undefined) return { signature: reportIssueSignature };
+  if (typeof title === 'string' && Array.isArray(body) && Array.isArray(sources) && sources.every(Boolean)) {
+    return { unsigned: { title, body, sources } };
+  }
+  return {};
+}
+
 /** The deal's findings, open, closed and deleted, as a report's issues are compared with them. Throws when unread. */
 export async function knownFindings(repo: Repository, dealId: string): Promise<Known[]> {
   const held = await repo.list('finding', dealId);
   if (!held.ok) throw failed(held);
   const notes = await repo.list('tombstone', dealId);
   if (!notes.ok) throw failed(notes);
-  type Finding = { id: string; title?: unknown; status?: string };
   const live: Known[] = [];
   for (const l of held.value) {
-    const d = l.envelope.data as Finding;
-    if (typeof d.title !== 'string') continue;
-    live.push({ id: d.id, title: d.title, ...(d.status === 'closed' ? { closed: true } : {}) });
+    const d = l.envelope.data as StoredFinding;
+    if (typeof d.id !== 'string' || typeof d.title !== 'string') continue;
+    live.push({
+      id: d.id, title: d.title, ...issueEvidence(d),
+      ...(d.status === 'closed' ? { closed: true } : {}),
+    });
   }
   // a finding a person deleted: an issue it covers is not raised again
-  type Note = { kind?: string; snapshot?: { id?: unknown; title?: unknown } };
+  type Note = { kind?: string; snapshot?: StoredFinding };
   const gone: Known[] = [];
   for (const l of notes.value) {
     const d = l.envelope.data as Note;
     const { id, title } = d.snapshot ?? {};
     const isFinding = (d.kind ?? 'finding') === 'finding';
-    if (isFinding && typeof id === 'string' && typeof title === 'string') gone.push({ id, title, deleted: true });
+    if (isFinding && typeof id === 'string' && typeof title === 'string') {
+      gone.push({
+        id, title, ...issueEvidence(d.snapshot), deleted: true,
+      });
+    }
   }
   return [...live, ...gone];
 }
 
-/** a finding a person deleted, by its deletion note */
-async function wasDeleted(repo: Repository, dealId: string, id: string) {
+/** the saved version of a finding a person deleted */
+async function deletedFinding(repo: Repository, dealId: string, id: string) {
   const notes = await repo.list('tombstone', dealId);
-  return notes.ok && notes.value.some((l) => (l.envelope.data as { snapshot?: { id?: unknown } }).snapshot?.id === id);
+  if (!notes.ok) return undefined;
+  return notes.value.map(({ envelope }) => (envelope.data as { snapshot?: StoredFinding }).snapshot)
+    .find((snapshot) => snapshot?.id === id);
 }
 
 /**
@@ -56,8 +82,9 @@ async function wasDeleted(repo: Repository, dealId: string, id: string) {
  */
 export async function raiseFinding(w: FindingWrites, dealId: string, id: string, f: Issue): Promise<boolean> {
   const had = await w.repo.get('finding', id);
-  if (had.ok && had.value) return true;
-  if (await wasDeleted(w.repo, dealId, id)) return true;
+  if (had.ok && had.value) return sameReportIssue(issueEvidence(had.value.envelope.data), f);
+  const deleted = await deletedFinding(w.repo, dealId, id);
+  if (deleted) return sameReportIssue(issueEvidence(deleted), f);
   const now = w.clock();
   const data = {
     id, dealId, rev: 0, createdAt: now, updatedAt: now,
@@ -65,12 +92,13 @@ export async function raiseFinding(w: FindingWrites, dealId: string, id: string,
     body: f.body, sources: f.sources,
     origin: 'ai', note: '', reviewed: null, updated: false,
     ...(f.earlier ? { earlier: f.earlier } : {}),
+    ...(f.signature ? { reportIssueSignature: f.signature } : {}),
   };
   const index = { dealId, add: [{ kind: 'finding' as const, id }] };
   const wrote = await w.repo.transaction({ writes: [{ kind: 'finding', id, data, expectedRev: null }], index });
   if (!wrote.ok) {
     const again = await w.repo.get('finding', id);
-    return !!(again.ok && again.value);
+    return !!(again.ok && again.value && sameReportIssue(issueEvidence(again.value.envelope.data), f));
   }
   w.announce?.('finding', id);
   return true;
@@ -110,7 +138,7 @@ export async function citeFinding(w: FindingWrites, id: string, add: Source[]): 
 
 /** a report's finding's fixed id: the same on every PC for the same deal, report and issue title */
 export const reportFindingId = (dealId: string, doc: string, title: string, n: number) =>
-  derivedId('f', [dealId, 'report', doc, title.toLowerCase().replace(/\s+/g, ' '), String(n)]);
+  derivedId('f', [dealId, 'report', doc, reportTitleKey(title), String(n)]);
 
 /** what tells which of a deal's documents the sweep may read */
 export interface Candidates {

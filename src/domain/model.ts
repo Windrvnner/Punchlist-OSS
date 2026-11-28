@@ -271,6 +271,8 @@ export const Finding = Record.extend({
   aiWorkstream: z.boolean().optional(),
   /** a closed finding of the same title that this one was raised after: a person settled that one, and this is a new problem */
   earlier: z.string().optional(),
+  /** The original advisor-report issue, for retrying a read after the finding was edited or deleted. */
+  reportIssueSignature: z.string().optional(),
   /** the points of issues lists it is on: the list (its file's id and name), the point's number there, and its words */
   onLists: z.array(ListPoint).optional(),
 }).loose();

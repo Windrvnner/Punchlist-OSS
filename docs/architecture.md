@@ -192,6 +192,20 @@ New documents or responses go to the fast model, which says what they could chan
 
 Every issue that an outside advisor raises in a report becomes a finding, whether or not a checklist item covers it (`src/backend/reports.ts`, `reportRead.ts`, `reportsKit.ts`). After a round or first pass, and once each time a PC starts, a background sweep runs in two steps. First, the fast model sorts paths it has not seen into reports. Then the standard model reads the newest draft of each report, with the deal's findings in view, so that an issue already covered cites the existing finding instead of raising a new one. Each step is claimed and logged in the deal's check log, in the same way as describing documents. A finding's ID is derived from the deal, the report, and the issue's title, so two PCs raise the same record.
 
+The standard model sends an issues array for a report, empty when it finds no issues. A single issue given as an
+object goes through the same checks as an array entry. The same whole report is sent back with a correction when
+the parsed reply omits its issues or gives them in an unusable form. An incomplete reply leaves a failed attempt
+in the check log. An explicit negative classification is logged as a non-report (#1212).
+
+A cut-off reply keeps its complete, citation-verified issues. A reply that names a closed finding without a full
+write-up keeps any verified sibling issues and leaves the read unfinished. The check log records their places, and
+the next attempt sends the same whole report and asks for the remaining issues. A completed read combines the kept
+issues with the final reply. A finding retains its report ID and original issue signature through edits and deletion,
+so a restart can recognize a write that landed before its report checkpoint. An older finding without that signature
+can satisfy the write only when its stored title, body and citations match. A newer draft compares with the last
+completed draft and any verified intervening issues. Deal progress exposes exhausted reads, and the Documents
+section on Overview lists their names in one disclosure (#1212).
+
 ## Checklist items and links
 
 A deal's checklist is made up of its own item records, linked to the findings and questions that bear on them (#2). The code is in `src/domain/checklist.ts`, `src/app/commands/checklist.ts`, `src/app/checklistImport.ts`, and `src/app/state.ts`. What is not built yet is described in [linking-design.md](linking-design.md).

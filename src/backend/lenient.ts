@@ -28,25 +28,103 @@ function blocks(reply: string): string[] {
   return out;
 }
 
+function jsonObjects(text: string, fenced: string[]) {
+  const open = text.indexOf('{');
+  const close = text.lastIndexOf('}');
+  const candidates = [...fenced.filter((f) => f.startsWith('{')), ...blocks(text)];
+  if (open >= 0 && close > open) candidates.push(text.slice(open, close + 1));
+  // The final candidate may be a reply cut off before it closed.
+  if (open >= 0) candidates.push(text.slice(open));
+  return new Set(candidates);
+}
+
 /**
  * The object in a reply. `keys` are the fields that were asked for: of the objects found, the first that has one of them
  * is the answer, so an aside in braces is not mistaken for it. A reply that is nothing but a list is taken as the
- * first key's list. Null when there is nothing to read.
+ * first key's list. A caller checking reply shape may ask for the first unkeyed object when no keyed answer was found.
+ * Null when there is nothing to read.
  */
-export function readJson(reply: string, keys: string[]): Record<string, unknown> | null {
+export function readJson(reply: string, keys: string[], allowUnkeyed = false): Record<string, unknown> | null {
   const text = String(reply ?? '').replace(/^﻿/, '').trim(); if (!text) return null;
   const fenced = [...text.matchAll(/```[a-zA-Z0-9]*\s*([\s\S]*?)(?:```|$)/g)].map((m) => m[1].trim()).filter(Boolean);
   // a reply that is a list and nothing else
   for (const whole of [text, ...fenced]) if (whole.startsWith('[')) { const v = parse(whole); if (Array.isArray(v)) return { [keys[0]]: v }; }
-  const open = text.indexOf('{'); const close = text.lastIndexOf('}');
-  const candidates = [...fenced.filter((f) => f.startsWith('{')), ...blocks(text), ...(open >= 0 && close > open ? [text.slice(open, close + 1)] : []), ...(open >= 0 ? [text.slice(open)] : [])];   // the last is a reply cut off before it closed
   let fallback: Record<string, unknown> | null = null;
-  for (const c of candidates.filter((x, i, all) => all.indexOf(x) === i)) {
-    const v = parse(c); if (!isObject(v)) continue;
-    if (keys.some((k) => k in v)) return v;
-    fallback ??= v;
+  for (const candidate of jsonObjects(text, fenced)) {
+    const value = parse(candidate);
+    if (!isObject(value)) continue;
+    if (keys.some((key) => key in value)) return value;
+    fallback ??= value;
   }
-  return keys.length ? null : fallback;
+  return keys.length && !allowUnkeyed ? null : fallback;
+}
+
+// Match complete strings first, so that brackets and escaped quotes inside them are ignored.
+const cutTokens = new RegExp([
+  String.raw`"(?:[^"\\]|\\[\s\S])*"`, String.raw`'(?:[^'\\]|\\[\s\S])*'`,
+  String.raw`“(?:[^”\\]|\\[\s\S])*”`, String.raw`‘(?:[^’\\]|\\[\s\S])*’`,
+  String.raw`["'“‘{}\[\]]`,
+].join('|'), 'g');
+const openedBy: Record<string, string> = { ']': '[', '}': '{' };
+const closesWith: Record<string, string> = { '[': ']', '{': '}' };
+
+/** The last complete value in the root or its lists, with only the outer delimiters still needed. */
+function closedPrefix(text: string) {
+  const stack: string[] = [];
+  let end = 0;
+  let suffix = '';
+  for (const match of text.matchAll(cutTokens)) {
+    const token = match[0];
+    if (token.length > 1) continue;
+    if (closesWith[token]) {
+      stack.push(token);
+      continue;
+    }
+    if (!openedBy[token] || stack.pop() !== openedBy[token]) break;
+    if (stack.length <= 1 || (stack.length === 2 && stack.at(-1) === '[')) {
+      end = match.index + 1;
+      suffix = [...stack].reverse().map((opening) => closesWith[opening]).join('');
+    }
+    if (!stack.length) return { end, suffix, whole: true };
+  }
+  return { end, suffix, whole: false };
+}
+
+/** Normalize the delimiters of a complete lenient string before reading its closed array. */
+function cutString(token: string) {
+  if (token.length < 2 || token[0] === '"') return token;
+  const value = parse(token);
+  return typeof value === 'string' ? JSON.stringify(value) : token;
+}
+
+const firstOpening = (text: string) => text.search(/[\[{]/);
+
+/** Read only the structurally complete entries of a raw cut-off array or object. */
+export function readCutJson(reply: string, keys: string[]): Record<string, unknown> | null {
+  const fence = /^\s*```[a-zA-Z0-9]*\s*([\[{])/m.exec(reply);
+  const line = /^[\t ]*[\[{]/m.exec(reply);
+  const at = (match: RegExpExecArray | null) => match ? match.index + match[0].length - 1 : -1;
+  const openings = [at(fence), firstOpening(reply), at(line)];
+  for (const open of new Set(openings)) {
+    if (open < 0) continue;
+    const raw = cutObject(reply.slice(open), keys);
+    if (raw) return raw;
+  }
+  return null;
+}
+
+function cutObject(text: string, keys: string[]): Record<string, unknown> | null {
+  while (text.length) {
+    const { end, suffix, whole } = closedPrefix(text);
+    const raw = parse(text.slice(0, end).replace(cutTokens, cutString) + suffix);
+    if (Array.isArray(raw) && raw.some(isObject)) return { [keys[0]]: raw };
+    if (isObject(raw) && keys.some((key) => key in raw)) return raw;
+    if (!whole) break;
+    const next = firstOpening(text.slice(end));
+    if (next < 0) break;
+    text = text.slice(end + next);
+  }
+  return null;
 }
 
 /**

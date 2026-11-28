@@ -69,7 +69,8 @@ import { families, roomPath } from './families';
 import { foldersOf, matchFolders, inside } from './folderList';
 import { cleanDrafts, againstOf, otherProject, isBlackline, type Against } from './blacklines';
 import { coreSet, shortNamesIn, BEST as CORE_BEST } from './core';
-import { sweep as sweepReports, type ReportLine } from './reports';
+import { sweep as sweepReports, stateOf as reportStateOf, incompleteReports, type ReportLine } from './reports';
+import { documentProgress } from './dealProgress';
 import {
   ReportSweeps, knownFindings, raiseFinding, citeFinding, reportFindingId, reportCandidates,
 } from './reportsKit';
@@ -131,8 +132,8 @@ export interface AiOptions {
   /** `converse`, where the service has it, makes a chat one conversation there; `upload` and `remove` then keep its transcript at a compaction */
   service: Pick<ModelService, 'complete' | 'models'> & Partial<Pick<ModelService, 'converse' | 'upload' | 'remove' | 'outputLimit' | 'inputLimit'>>;
   docs: AiDocs; keeper: Pick<StoreKeeper, 'ensure'>; repo: Repository;
-  /** tell the window about a finding the first pass wrote */
-  announce?: (kind: 'finding', id: string) => void;
+  /** Tell the window about a saved finding or background review progress. */
+  announce?: (kind: 'finding' | 'progress', id: string) => void;
   /** what each run cost in calls, told when the run ends; a run that made no call tells nothing */
   usage?: (entry: UsageEntry) => void;
   /** why a document outside the core set was read: called once per branch-out */
@@ -500,7 +501,7 @@ function mergedText(reply: { text?: unknown } | null): string {
 }
 
 function readCorrection(
-  prompt: string, reply: Record<string, unknown> | null, again: { wrong: string },
+  prompt: string, reply: unknown, again: { wrong: string },
 ): string {
   if (!reply) return prompt;
   const previous = JSON.stringify(reply);
@@ -900,17 +901,36 @@ export function nodeAi(o: AiOptions) {
     }
   }
   /** a reply read as JSON, or none (`unusable`) when its caller cannot use it once its tries ran out (#1105) */
-  async function usableJson<T>(text: string, keys: string[], unusable?: Unusable) {
+  async function usableJson<T>(text: string, keys: string[], unusable?: Unusable, allowUnkeyed = false) {
     if (unusable && await unusable(text)) return { got: null, unusable: true };
-    return { got: json<T>(text, ...keys), unusable: false };
+    return { got: readJson(text, keys, allowUnkeyed) as T | null, unusable: false };
   }
-  async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
+  async function askJson<T = Record<string, unknown>>(
+    input: Ask, keys: string[], shape?: string, fix = true, correction?: (reply: T) => string | undefined,
+  ): Promise<T | null> {
     const raw = await whole(input, keys);
-    const read = await usableJson<T>(raw, keys, input.unusable);
+    const read = await usableJson<T>(raw, keys, input.unusable, !!correction);
+    if (read.got && correction) {
+      const wrong = correction(read.got);
+      if (wrong) return askCorrectedReply<T>(input, keys, read.got, wrong);
+    }
     if (read.got || read.unusable || !fix || !String(raw ?? '').trim()) return read.got;
+    return repairAnswer<T>(input, keys, shape, raw);
+  }
+
+  /** Ask to resend the same reply when its JSON cannot be read. */
+  async function repairAnswer<T>(input: Ask, keys: string[], shape: string | undefined, raw: string) {
+    const format = shape ? ` in this shape: ${shape}` : ` with these fields: ${keys.join(', ')}`;
+    const prompt = `The reply below was meant to be one JSON object${format}. It cannot be read as written. `
+      + `Send it again as valid JSON, changing nothing else. If it is not an answer at all, reply {}.\n\n${raw}`;
     let fixed: string;
-    try { fixed = await complete({ kind: 'fix', model: input.model, system: JSON_ONLY, prompt: `The reply below was meant to be one JSON object${shape ? ` in this shape: ${shape}` : ` with these fields: ${keys.join(', ')}`}. It cannot be read as written. Send it again as valid JSON, changing nothing else. If it is not an answer at all, reply {}.\n\n${raw}` }); }
-    catch (e) { if (isCutOff(e)) throw cutReply(e, keys); if (unreachable(e)) throw e; return null; }
+    try {
+      fixed = await complete({ kind: 'fix', model: input.model, system: JSON_ONLY, prompt });
+    } catch (e) {
+      if (isCutOff(e)) throw cutReply(e, keys);
+      if (unreachable(e)) throw e;
+      return null;
+    }
     if (unfinished(fixed)) throw cutReply(cutOff('The repaired reply stopped before its end', fixed), keys);
     return (await usableJson<T>(fixed, keys, input.unusable)).got;
   }
@@ -1083,21 +1103,59 @@ export function nodeAi(o: AiOptions) {
     await claim(dealId, free);
     return free;
   }
+  const reportLines = (all: CheckLine[]) => all.flatMap((line) => line.report ? [line.report] : []);
+
+  function candidatesForReportRead(dealId: string, records: DocRecord[]) {
+    let shut = new Map<string, string>();
+    try { shut = o.docs.shut?.(dealId, records.map((r) => r.docId)) ?? shut; } catch { /* none known */ }
+    return reportCandidates(records, { where, shut, blacklines: cleanOf(dealId) });
+  }
+
+  /** Only a check that came to a result contributes its documents to the read count. */
+  const checkedDocuments = (line: CheckLine) => line.result && line.result !== 'unsettled' ? line.docs ?? [] : [];
+
+  /** The checked document ids and latest checklist results in the same check-log snapshot. */
+  function progressResults(all: CheckLine[]) {
+    const read = new Set<string>();
+    const latest = new Map<string, CheckLine>();
+    let done: string[] | undefined;
+    const group = groupsOf(all);
+    for (const line of all) {
+      if (!line.item) {
+        if (line.done) done = line.done.items;
+        continue;
+      }
+      keep(latest, line, group);
+      for (const id of checkedDocuments(line)) read.add(id);
+    }
+    return { read, latest, done };
+  }
+
+  function reportReadStatus(dealId: string, all: CheckLine[], records: DocRecord[]) {
+    const state = reportStateOf(reportLines(all));
+    const incomplete = incompleteReports(records, state);
+    if (!incomplete.length) return {};
+    const candidates = candidatesForReportRead(dealId, records);
+    return { incompleteReports: incompleteReports(candidates.docs, state) };
+  }
+
   async function reports(dealId: string) {
     const all = o.docs.records(dealId);
     if (!all.length) return;
-    let shut = new Map<string, string>();
-    try { shut = o.docs.shut?.(dealId, all.map((r) => r.docId)) ?? shut; } catch { /* none known */ }
-    const { docs, earlier } = reportCandidates(all, { where, shut, blacklines: cleanOf(dealId) });
+    const { docs, earlier } = candidatesForReportRead(dealId, all);
     const m = await models();
     await sweepReports({
       dealId, docs, earlier, where, system: RULES, models: { fast: m.fast, standard: m.standard },
       workstreams: WORKSTREAMS, workstreamOf, fitParas,
-      lines: async () => (await lines(dealId)).flatMap((l) => (l.report ? [l.report] : [])),
-      say: async (report) => { await say(dealId, { report }); },
+      lines: async () => reportLines(await lines(dealId)),
+      say: async (report) => {
+        await say(dealId, { report });
+        if (report.tried?.step === 'read' || report.read) o.announce?.('progress', dealId);
+      },
       claim: (keys) => claimReports(dealId, keys),
       release: async (keys) => { if (o.shared) await release(dealId, keys).catch(() => undefined); },
-      ask: (input, keys) => askJson(input, keys),
+      again: () => reportsSoon(dealId),
+      ask: (input, keys, correction) => askJson(input, keys, undefined, true, correction),
       unusable: (sent, keys, shown) => docsUnusable(sent, false, keys, where, shown),
       send: async (rec, share) => {
         const r = await send(sentOf(dealId, [rec]), false, share);
@@ -1753,6 +1811,12 @@ export function nodeAi(o: AiOptions) {
     }
   }
 
+  /** Send the same request with the previous reply and what to correct. */
+  function askCorrectedReply<T>(ask: Ask, keys: string[], reply: T | null, wrong: string): Promise<T | null> {
+    const prompt = readCorrection(ask.prompt, reply, { wrong });
+    return askJson<T>({ ...ask, prompt }, keys, undefined, false);
+  }
+
   /**
    * One JSON reply that `usable` accepts: one it rejects is sent back once with what is wrong, as `draft` does (#1058).
    * The send-back is read as written, with no second reading; the caller decides what a reply still unusable means.
@@ -1762,8 +1826,7 @@ export function nodeAi(o: AiOptions) {
   ): Promise<T | null> {
     const reply = await askJson<T>(ask, keys);
     if (usable(reply)) return reply;
-    const prompt = readCorrection(ask.prompt, reply, { wrong });
-    return askJson<T>({ ...ask, prompt }, keys, undefined, false);
+    return askCorrectedReply<T>(ask, keys, reply, wrong);
   }
 
   function readCanRetry(model: string, again: { escalate: string; retrySharedModel?: boolean } | undefined): boolean {
@@ -3817,20 +3880,28 @@ export function nodeAi(o: AiOptions) {
      */
     async progress(dealId: string): Promise<Result<DealProgress>> {
       try {
-        const all = await lines(dealId); const read = new Set<string>(); const latest = new Map<string, CheckLine>(); let done: string[] | undefined; let core: string[] = [];
-        const group = groupsOf(all);
-        for (const l of all) { if (l.item) { keep(latest, l, group); if (l.result && l.result !== 'unsettled') for (const id of l.docs ?? []) read.add(id); } else if (l.done) done = l.done.items; }
-        core = await coreOf(dealId, true);   // worked out as a check would, with nothing described for it
-        const isCore = new Set(core); const folders = new Map<string, { folder: string; files: number; read: number; core: number; coreRead: number; copies?: number }>();
-        const entry = (folder: string) => { const f = folders.get(folder) ?? { folder, files: 0, read: 0, core: 0, coreRead: 0 }; folders.set(folder, f); return f; };
-        for (const r of o.docs.records(dealId)) {
-          const f = entry(r.folder); f.files++; if (read.has(r.docId)) f.read++; if (isCore.has(r.docId)) { f.core++; if (read.has(r.docId)) f.coreRead++; }
-          // a document's other places are copies: each is counted where it sits, and the document itself only at its first place
-          for (const c of r.copies ?? []) { const g = entry(c.folder); g.copies = (g.copies ?? 0) + 1; }
-        }
-        const has = new Set(o.docs.records(dealId).map((r) => r.docId)); const items = (await shownItems(dealId, latest, done)).map(({ id }) => { const l = latest.get(id); return unmoored(l, (d) => has.has(d)) ? 'unsettled' : l?.result; }); const count = (r: Outcome) => items.filter((x) => x === r).length;
-        const also = await alsoIn(dealId, o.docs.records(dealId));
-        return ok({ folders: [...folders.values()], ...(also.length ? { alsoIn: also } : {}), checklist: { items: items.length, satisfied: count('ok'), findings: count('finding'), gaps: count('gap'), unsettled: items.length - count('ok') - count('finding') - count('gap') } });
+        const all = await lines(dealId);
+        const { read, latest, done } = progressResults(all);
+        const core = await coreOf(dealId, true);   // worked out as a check would, with nothing described for it
+        const folders = documentProgress(o.docs.records(dealId), read, core);
+        const has = new Set(o.docs.records(dealId).map((record) => record.docId));
+        const items = (await shownItems(dealId, latest, done)).map(({ id }) => {
+          const line = latest.get(id);
+          return unmoored(line, (docId) => has.has(docId)) ? 'unsettled' : line?.result;
+        });
+        const count = (outcome: Outcome) => items.filter((result) => result === outcome).length;
+        const records = o.docs.records(dealId);
+        const also = await alsoIn(dealId, records);
+        const reportStatus = reportReadStatus(dealId, all, records);
+        return ok({
+          folders,
+          ...(also.length ? { alsoIn: also } : {}),
+          ...reportStatus,
+          checklist: {
+            items: items.length, satisfied: count('ok'), findings: count('finding'), gaps: count('gap'),
+            unsettled: items.length - count('ok') - count('finding') - count('gap'),
+          },
+        });
       } catch { return fail({ kind: 'failed', message: 'The checklist results could not be read' }); }
     },
     /**
