@@ -191,6 +191,23 @@ function peerChangesList(id: string, items: { text: string }[]) {
   app.repo.peer.change('firmList', id, { ...before, items, rev: before.rev + 1 }, ELSEWHERE);
 }
 
+it('imports a reopened draft’s checked removals after an unrelated General addition (#56)', async () => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const general = questions.slice(0, 120).map((text) => ({ text }));
+  await savePriorList('broad', '', general);
+  const session = await technologyReview(questions, 'Wind', true);
+  expect(session.view.listReview.review?.pairs).toHaveLength(120);
+  for (let at = 0; at < 120; at++) session.flipRemove(at);
+  session.close();
+  await savePriorList('broad', '', [...general, { text: 'Provide the executed water supply agreement.' }]);
+  const reopened = open();
+  expect(reopened.view.step).toBe('review');
+  await reopened.bringIn();
+  expect(reopened.view.work.error).toBe('');
+  expect(app.store.get().firmList[listId('technology', 'Wind')].items)
+    .toEqual(questions.slice(120).map((text) => ({ text })));
+});
+
 it('preserves a synced destination addition even without previously approved wording (#56)', async () => {
   const items = [{ text: 'Verify the original grid connection letter.' }];
   const id = await savePriorList('technology', 'Wind', items);

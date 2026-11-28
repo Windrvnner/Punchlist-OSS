@@ -8,7 +8,7 @@ import {
 } from './checklistImport';
 import { keepChecklistImport, readKeptChecklist, type ChecklistChoices } from './checklistKept';
 import { NOT_DONE, showChecklistOutcome } from './checklistOutcome';
-import { keepChecklistReviewChoices } from './checklistReview';
+import { keepChecklistReviewChoices, reviewChanged } from './checklistReview';
 import { dropImport, importKey } from './keptImports';
 import {
   checklistCellRows, checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
@@ -42,12 +42,6 @@ function whyNoNext(target: ListTarget, choices: ChecklistChoices) {
   if (choices.readFailed && !choices.byColumns) return 'The list was not read';
   if (!target.named) return `Name the ${LAYER_NAMES[target.layer].one.toLowerCase()}, as deals will pick it`;
   if (target.split) return `${target.splitSays}. Choose one first`;
-}
-
-function reviewChanged(review: Review, target: ListTarget, removesFromGeneral: boolean) {
-  return review.destination !== target.id
-    || !sameContent(review.destinationItems, target.replaces?.items ?? null)
-    || (removesFromGeneral && !sameContent(review.generalTexts, target.generalTexts));
 }
 
 // Keep the large source and its selection stable across unrelated field, activity and store changes.
@@ -497,10 +491,9 @@ export class ChecklistImportSession {
     if (!review) return;
     const { remove, useReword } = this.choices;
     const { items } = this.selection(review, remove, useReword);
-    const removesFromGeneral = review.pairs.some((pair) => pair.inAgainst && remove.has(pair.a));
     const file = this.table?.name ?? this.text?.name ?? '';
     const target = this.target;
-    if (reviewChanged(review, target, removesFromGeneral)) {
+    if (reviewChanged(review, target, remove)) {
       return this.activity('', 'The list changed. Go back and review it again.');
     }
     this.activity('importing');

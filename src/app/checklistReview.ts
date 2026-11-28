@@ -112,3 +112,13 @@ export function keepChecklistReviewChoices(previous: Review | null, review: Revi
   const { remove, pendingRemovals } = keepRemovals(previous, review, was.remove);
   return { review: { ...review, pendingWording, pendingRemovals }, useReword, remove };
 }
+
+/** A checked General removal still has its match when the exact reviewed wording remains in General (#56). */
+export function reviewChanged(review: Review, target: ListTarget, remove: Set<number>) {
+  if (review.destination !== target.id || !sameContent(review.destinationItems, target.replaces?.items ?? null)) {
+    return true;
+  }
+  if (!remove.size) return false;
+  const general = new Set(target.generalTexts);
+  return review.pairs.some(({ a, b, inAgainst }) => inAgainst && remove.has(a) && !general.has(review.generalTexts[b]));
+}
