@@ -1,12 +1,14 @@
 import { firmOf, LAYER_NAMES, type Layer } from '../domain/checklist';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import type { ListReading } from '../domain/listRead';
+import { sameContent } from '../domain/versions';
 import {
   checklistReviewSession, checklistSelection, checklistWordingChoices, failedAs, listTarget, submitChecklist,
   type ChecklistReviewChange, type ListTarget, type Review,
 } from './checklistImport';
 import { keepChecklistImport, readKeptChecklist, type ChecklistChoices } from './checklistKept';
 import { NOT_DONE, showChecklistOutcome } from './checklistOutcome';
+import { keepChecklistReviewChoices, reviewChanged } from './checklistReview';
 import { dropImport, importKey } from './keptImports';
 import {
   checklistCellRows, checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
@@ -233,7 +235,15 @@ export class ChecklistImportSession {
   setAskSame = (askSame: boolean) => this.choose({ askSame });
   setAskReword = (askReword: boolean) => this.choose({ askReword });
   flipBringIn = (line: number) => this.choose({ bringIn: toggled(this.choices.bringIn, line) });
-  flipRemove = (at: number) => this.choose({ remove: toggled(this.choices.remove, at) });
+  flipRemove = (at: number) => {
+    if (!this.live || this.busy === 'importing') return;
+    const review = this.review;
+    if (review?.pendingRemovals?.length) {
+      const pendingRemovals = review.pendingRemovals.filter((choice) => choice.at !== at);
+      this.review = { ...review, pendingRemovals };
+    }
+    this.choose({ remove: toggled(this.choices.remove, at) });
+  };
   flipReword = (at: number) => {
     if (!this.choices.remove.has(at)) this.choose({ useReword: toggled(this.choices.useReword, at) });
   };
@@ -251,9 +261,29 @@ export class ChecklistImportSession {
   };
 
   pickColumn = (column: keyof ChecklistMapping, value: number | null) => {
+    if (!this.live || this.busy === 'importing') return;
     this.error = '';
-    this.choose({ mapping: { ...this.choices.mapping, [column]: value } });
+    const mapping = { ...this.choices.mapping, [column]: value };
+    if (column === 'item' || this.busy || this.step !== 'columns') return this.choose({ mapping });
+    this.remapChecklistSections(mapping);
   };
+
+  /** Section columns change the metadata of the same source rows (#56). */
+  private remapChecklistSections(mapping: ChecklistMapping) {
+    const target = this.target;
+    const before = this.plan(this.source, target);
+    const review = this.review;
+    this.choices = { ...this.choices, mapping };
+    const after = this.plan(this.source, target);
+    // Rebind the rows even if an updated approval or General list still requires a fresh review.
+    const sameRows = review && before && review.choicesKey === before.choicesKey
+      && sameContent(review.items, before.items);
+    if (sameRows && after) {
+      this.review = { ...review, items: after.items };
+      if (before.cached) this.choices.askedFor = after.signature;
+    }
+    this.keep();
+  }
 
   setPaste = (paste: string) => {
     if (!this.live || this.busy === 'importing') return;
@@ -291,7 +321,13 @@ export class ChecklistImportSession {
     }
   };
 
+  private resetReview() {
+    this.review = null;
+    this.choices = { ...this.choices, askedFor: '', shown: false, remove: new Set(), useReword: new Set() };
+  }
+
   private acceptSource(table: ImportTable | null, text: ChecklistText | null, mapping = this.choices.mapping) {
+    this.resetReview();
     this.table = table;
     this.text = text;
     this.error = '';
@@ -344,6 +380,7 @@ export class ChecklistImportSession {
         if (!read.ok) {
           this.error = `Could not read ${where.sheet ?? this.table!.name}: ${read.error.message}`;
         } else {
+          if (read.value.table.sheet !== this.table?.sheet) this.resetReview();
           this.table = read.value.table;
           this.choices.mapping = read.value.mapping;
           if (!byColumns) {
@@ -359,15 +396,21 @@ export class ChecklistImportSession {
   }
 
   private showReview = (change: ChecklistReviewChange) => {
+    if (change.kind === 'open') {
+      this.review = change.review;
+      this.choose({ shown: true });
+      return;
+    }
+    const defaults = change.kind === 'fresh' ? change.checked : new Set<number>();
+    const { review, ...checked } = keepChecklistReviewChoices(this.review, change.review, defaults, this.choices);
+    this.review = review;
     if (change.kind === 'fresh') {
       this.error = '';
-      this.review = change.review;
-      this.choose({ shown: true, askedFor: change.signature, useReword: change.checked, remove: new Set() });
-    } else if (change.kind === 'retry') {
-      this.review = change.review;
+      this.choose({ shown: true, askedFor: change.signature, ...checked });
+    } else {
       if (change.failure) this.error = `${NOT_DONE[change.failure]} again`;
-      this.choose({ shown: change.open || this.choices.shown });
-    } else this.choose({ shown: true });
+      this.choose({ shown: change.open || this.choices.shown, ...checked });
+    }
   };
 
   next = async (): Promise<void> => {
@@ -378,7 +421,7 @@ export class ChecklistImportSession {
 
   retry = () => {
     if (this.review && !this.busy && this.live) {
-      return this.reviewer.duplicates(this.review, this.target.generalTexts, this.showReview);
+      return this.reviewer.duplicates(this.review, this.review.generalTexts, this.showReview);
     }
   };
 
@@ -444,13 +487,18 @@ export class ChecklistImportSession {
 
   bringIn = async (): Promise<void> => {
     if (!this.live || !this.view.canBringIn) return;
+    const review = this.review;
+    if (!review) return;
     const { remove, useReword } = this.choices;
-    const selection = this.selection(this.review, remove, useReword);
+    const { items } = this.selection(review, remove, useReword);
     const file = this.table?.name ?? this.text?.name ?? '';
     const target = this.target;
+    if (reviewChanged(review, target, remove)) {
+      return this.activity('', 'The list changed. Go back and review it again.');
+    }
     this.activity('importing');
     try {
-      const result = await submitChecklist(this.store, this.key, target, selection.items, file);
+      const result = await submitChecklist(this.store, this.key, target, items, file);
       if (!result.ok) return this.activity('', `Couldn’t import: ${result.error.message}`);
       // Once written, the dialog goes back to the lists, even if this session was closed during the write.
       this.dispose();
