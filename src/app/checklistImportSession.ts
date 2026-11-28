@@ -6,6 +6,7 @@ import {
   type ChecklistReviewChange, type ListTarget, type Review,
 } from './checklistImport';
 import { keepChecklistImport, readKeptChecklist, type ChecklistChoices } from './checklistKept';
+import { LIST_CHANGED_SINCE_REVIEW } from './commands/checklist';
 import { NOT_DONE, showChecklistOutcome } from './checklistOutcome';
 import { dropImport, importKey } from './keptImports';
 import {
@@ -40,6 +41,11 @@ function whyNoNext(target: ListTarget, choices: ChecklistChoices) {
   if (choices.readFailed && !choices.byColumns) return 'The list was not read';
   if (!target.named) return `Name the ${LAYER_NAMES[target.layer].one.toLowerCase()}, as deals will pick it`;
   if (target.split) return `${target.splitSays}. Choose one first`;
+}
+
+function whyNoBringIn(target: ListTarget, review: Review | null, destination: string | undefined) {
+  if (target.split) return `${target.splitSays}. Choose one first`;
+  if (review && review.destination !== destination) return LIST_CHANGED_SINCE_REVIEW;
 }
 
 // Keep the large source and its selection stable across unrelated field, activity and store changes.
@@ -198,7 +204,8 @@ export class ChecklistImportSession {
     const target = this.target;
     const step = this.step;
     const { byColumns, mapping, askSame, askReword, remove, useReword } = this.choices;
-    const waiting = !!this.plan(source, target)?.waiting;
+    const plan = this.plan(source, target);
+    const waiting = !!plan?.waiting;
     const importing = this.busy === 'importing';
     const whyNext = whyNoNext(target, this.choices);
     const noColumn = byColumns && mapping.item === null;
@@ -206,7 +213,7 @@ export class ChecklistImportSession {
       && (step === 'read' || step === 'columns');
     const { counts } = this.selection(this.review, remove, useReword);
     const wording = this.review && checklistWordingChoices(this.review, remove, useReword, importing);
-    const whyBringIn = target.split ? `${target.splitSays}. Choose one first` : undefined;
+    const whyBringIn = whyNoBringIn(target, this.review, plan?.destination);
     const canBringIn = this.live && !this.busy && !whyBringIn && target.named && !!counts.items && step === 'review';
     const listReview = {
       review: this.review, counts, askSame, askReword, remove, useReword, wording,
@@ -450,7 +457,7 @@ export class ChecklistImportSession {
     const target = this.target;
     this.activity('importing');
     try {
-      const result = await submitChecklist(this.store, this.key, target, selection.items, file);
+      const result = await submitChecklist(this.store, this.key, target, selection.items, file, target.revision);
       if (!result.ok) return this.activity('', `Couldn’t import: ${result.error.message}`);
       // Once written, the dialog goes back to the lists, even if this session was closed during the write.
       this.dispose();

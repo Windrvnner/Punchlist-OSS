@@ -22,9 +22,11 @@ import { FIRM, versionsWord, type State } from './state';
 
 export interface BringInResult { opIds: string[]; items: number; deals: number; /** deals the items could not be added to, by name, and why */ missed: { deal: string; why: string }[] }
 
-export async function bringIn(store: Store, list: Omit<FirmLayerList, 'by' | 'at'> & { layer: Layer; name: string }): Promise<Result<BringInResult>> {
+type ListForImport = Pick<FirmLayerList, 'layer' | 'name' | 'items' | 'file' | 'fileDate'>;
+export async function bringIn(store: Store, list: ListForImport, reviewedRevision?: number | null) {
   const id = listId(list.layer, list.name);
-  const r = await store.dispatch(BringInList, { list }, { quiet: true, idempotencyKey: 'bring-in-list' });
+  const input = { list, reviewedRevision };
+  const r = await store.dispatch(BringInList, input, { quiet: true, idempotencyKey: 'bring-in-list' });
   if (!r.ok) return r;
   // a list brought in again unchanged writes nothing, so there is nothing of it to undo: only an operation in the journal is
   const opIds = store.get().ops[r.value.opId] ? [r.value.opId] : []; let items = 0; let deals = 0; const missed: BringInResult['missed'] = [];
@@ -121,6 +123,7 @@ export interface Rewording {
   also?: string[];
 }
 export interface Review {
+  destination: string;
   items: ListItem[];
   rewords: Rewording[];
   pairs: Pair[];
@@ -144,6 +147,7 @@ export interface ListTarget {
   named: boolean;
   /** the list of that name the firm has now, if any */
   replaces: ReturnType<typeof findList>;
+  revision: number | null;
   /** the list in two versions, when it is: it waits for a choice before it can be brought in */
   split: State['conflicts'][string] | undefined;
   splitSays: string;
@@ -156,28 +160,23 @@ export interface ListTarget {
 export function listTarget(state: State, firm: FirmList, layer: Layer, name: string): ListTarget {
   const named = layer === 'broad' || !!key(name);
   const replaces = findList(firm, layer, name);
+  const id = listId(layer, name);
+  const revision = state.firmList[id]?.rev ?? null;
   // a list in two versions waits for a choice: said here, before its review is made, so no review is thrown away
-  const split = named ? state.conflicts[listId(layer, layer === 'broad' ? '' : name)] : undefined;
+  const split = named ? state.conflicts[id] : undefined;
   const versions = split ? versionsWord(split.versions.length).toLowerCase() : '';
   const splitSays = split ? `${theList(layer, replaces?.name ?? name)} has ${versions}` : '';
   const general = findList(firm, 'broad', '');
   const generalTexts = layer === 'broad' ? [] : (general?.items ?? []).map((item) => item.text);
   const listNames = alphabetical(firm.lists.filter((list) => list.layer === layer).map((list) => list.name));
-  return { layer, name, named, replaces, split, splitSays, generalTexts, listNames, hasGeneral: !!general };
+  return { layer, name, named, replaces, revision, split, splitSays, generalTexts, listNames, hasGeneral: !!general };
 }
-
-/**
- * What the review was asked about: a review asked for other choices, or made for the same wording in other sections
- * (another worksheet or header row), is not shown again (#821).
- */
-const askedAbout = (items: ListItem[], askReword: boolean, askSame: boolean, generalTexts: string[]) =>
-  JSON.stringify([items, askReword, askSame, generalTexts]);
 
 /** What a new review is made from: the items, the person's choices, and the model's replies (null when not asked). */
 interface ReviewInput {
   items: ListItem[];
-  /** the items of the list this one replaces, which hold the rewordings taken last time */
-  earlierItems: ListItem[] | undefined;
+  destination: string;
+  earlier: ReturnType<typeof earlierRewordings>;
   generalTexts: string[];
   askReword: boolean;
   askSame: boolean;
@@ -229,7 +228,7 @@ function makeReview(input: ReviewInput): { review: Review; checked: Set<number> 
   const model = sameReply?.ok ? sameReply.value.pairs.filter((pair) => !found.has(pairKey(pair))) : [];
   const offered = (at: number) => !worded.later.has(at) && !inGeneralAt.has(at);
   // a rewording taken last time comes back checked, in place of anything the model suggests for that row
-  const earlier = earlierRewordings(items, input.earlierItems)
+  const earlier = input.earlier
     .filter((rewording) => offered(rewording.at))
     .map((rewording) => ({ ...rewording, why: '', earlier: true }));
   const checked = new Set(earlier.map((rewording) => rewording.at));
@@ -237,6 +236,7 @@ function makeReview(input: ReviewInput): { review: Review; checked: Set<number> 
     ? rewordReply.value.filter((rewording) => offered(rewording.at) && !checked.has(rewording.at))
     : [];
   const review: Review = {
+    destination: input.destination,
     items,
     rewords: [...earlier, ...suggested].sort(byRow),
     pairs: [...worded.same, ...worded.inGeneral, ...model],
@@ -288,28 +288,19 @@ function checklistReviewPlan(
   review: Review | null, askedFor: string,
 ) {
   const texts = items.map((item) => item.text);
-  const signature = askedAbout(items, options.askReword, options.askSame, target.generalTexts);
+  const earlier = earlierRewordings(items, target.replaces?.items);
+  // Reuse a review only for the same items and sections (#821) and the same list and applicable wording (#56).
+  const destination = JSON.stringify([listId(target.layer, target.name), earlier]);
+  const signature = JSON.stringify([items, options.askReword, options.askSame, target.generalTexts, destination]);
   const cached = review && askedFor === signature ? review : null;
   const needsCall = cached
     ? can.sameMeaning && hasMissedDuplicates(cached)
     : (options.askReword && can.reword) || (options.askSame && can.sameMeaning);
-  return { can, items, target, options, texts, signature, cached, needsCall };
+  return { can, items, target, options, texts, earlier, destination, signature, cached, needsCall };
 }
 
 function hasMissedDuplicates(review: Review) {
   return !!review.sameMissed || review.asked.same === 'unreachable' || review.asked.same === 'failed';
-}
-
-/** Build the review from the same choices whether it can ask the model or only check wording locally. */
-function reviewChecklist(
-  can: Pick<Capabilities, 'reword' | 'sameMeaning'>, items: ListItem[], target: ListTarget, options: ReviewOptions,
-  replies: readonly [RewordReply | null, SameMeaningReply | null] = [null, null],
-) {
-  const [rewordReply, sameReply] = replies;
-  return makeReview({
-    items, earlierItems: target.replaces?.items, generalTexts: target.generalTexts, ...options,
-    canReword: can.reword, canAskSame: can.sameMeaning, rewordReply, sameReply,
-  });
 }
 
 /** The wording and duplicate requests run concurrently, and only for choices the model offers. */
@@ -423,7 +414,7 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
     });
   }
   function next(plan: ReviewPlan, show: ShowReview) {
-    const { can, items, target, options, texts, cached, needsCall } = plan;
+    const { target, options, texts, cached, needsCall, can, items, earlier, destination } = plan;
     // the items are those of the worksheet being read until that read ends (#821)
     if (requests.tableReadPending()) return;
     if (!texts.length || !target.named || signature !== plan.signature) return;
@@ -431,8 +422,11 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
       if (!needsCall) return show({ kind: 'open' });
       return duplicates(cached, target.generalTexts, show, true, texts);
     }
-    const fresh = (replies?: readonly [RewordReply | null, SameMeaningReply | null]) => {
-      const result = reviewChecklist(can, items, target, options, replies);
+    const fresh = ([rewordReply, sameReply]: readonly [RewordReply | null, SameMeaningReply | null] = [null, null]) => {
+      const result = makeReview({
+        items, earlier, destination, generalTexts: target.generalTexts, ...options,
+        canReword: can.reword, canAskSame: can.sameMeaning, rewordReply, sameReply,
+      });
       show({ kind: 'fresh', ...result, signature: plan.signature });
     };
     if (!needsCall) return fresh();
@@ -486,12 +480,13 @@ export function checklistShelf(state: State) {
 
 export async function submitChecklist(
   store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string,
+  reviewedRevision?: number | null,
 ) {
   const kept = keptImport(importKey);
   const name = target.layer === 'broad' ? '' : target.name;
   // The draft stays kept until the list is written, so a reload or a failure mid-write loses nothing (#931).
   // Kept after a write, it is offered again; bringing in the same list again writes nothing.
-  const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' });
+  const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' }, reviewedRevision);
   if (result.ok && kept && keptUnchanged(kept, keptImport(importKey))) dropImport(importKey);
   return result;
 }
