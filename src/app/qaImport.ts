@@ -5,7 +5,9 @@ import {
 } from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
 import type { AcceptedMatch } from '../domain/qaMatch';
-import { dropImport, finishKeptSubmission, importKey, keepImport, keptImport, keptImportsReady } from './keptImports';
+import {
+  dropImport, dropSavedImport, finishKeptSubmission, importKey, keepImport, keptImport, keptImportsReady,
+} from './keptImports';
 import { unappliedColumnsWarning, unappliedImportColumns } from './qaImportColumns';
 import { keepImportedLog, logTakenBy } from './qaLog';
 import type { Store } from './store';
@@ -108,8 +110,13 @@ export async function clearQaImport(store: Store, key: string) {
 
 async function releaseQaAttempt(store: Store, key: string) {
   const submitted = savedSubmission(key);
-  if (!submitted || await store.releaseImport(submitted.key, { abandon: true })) return ok(undefined);
-  return fail({ kind: 'failed', message: 'Couldn’t clear the previous import. Try again.' });
+  if (!submitted) return ok(undefined);
+  const journalReady = await store.releaseImport(submitted.key, { abandon: true });
+  if (!journalReady || !await dropSavedImport(key)) {
+    return fail({ kind: 'failed', message: 'Couldn’t clear the previous import. Try again.' });
+  }
+  void store.releaseImport(submitted.key);
+  return ok(undefined);
 }
 
 /** Another deal's Q&A log is refused before its file is read (#38). */

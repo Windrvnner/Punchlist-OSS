@@ -551,6 +551,8 @@ export class Store {
     for (const loaded of read.value) {
       const operation = this.parse('op', loaded) as Operation | null;
       if (operation?.idempotencyKey !== key) continue;
+      // A committed import still protects against replay until the kept file is durably gone.
+      if (options.abandon && operation.state === 'succeeded') continue;
       const next = this.retireImportOperation(operation, options.abandon === true);
       if (!next) return false;
       writes.push({ kind: 'op', id: operation.id, data: next, expectedRev: loaded.rev });
@@ -576,7 +578,7 @@ export class Store {
     }
     if (abandon && this.rerun.has(operation.id)) return;
     const released = { ...operation, idempotencyKey: undefined };
-    if (!abandon || operation.state === 'succeeded' || operation.state === 'discarded') return released;
+    if (!abandon || operation.state === 'discarded') return released;
     return { ...released, state: 'discarded', settledAt: this.services.clock.now() };
   }
 
