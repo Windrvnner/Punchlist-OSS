@@ -197,12 +197,12 @@ object goes through the same checks as an array entry. The same whole report is 
 the parsed reply omits its issues or gives them in an unusable form. An incomplete reply leaves a failed attempt
 in the check log. An explicit negative classification is logged as a non-report (#1212).
 
-A cut-off reply keeps its citation-verified complete issues, and the check log records their places with the
-unfinished attempt. The next attempt sends the same whole report and asks for the remaining issues. A completed
-read combines the kept issues with the final reply. A finding retains the original issue signature, including through
-edits and deletion, so retrying an interrupted write can recognize it. A newer draft compares with the last completed
-draft and any verified issues from drafts in between. Overview shows exhausted reads from the persisted attempts
-in Documents, where a single count expands to show the report names (#1212).
+A cut-off reply keeps its complete, citation-verified issues. A reply that names a closed finding without a full
+write-up keeps any verified sibling issues and leaves the read unfinished. The check log records their places, and
+the next attempt sends the same whole report and asks for the remaining issues. A completed read combines the kept
+issues with the final reply. A finding retains its report ID and original issue signature through edits and deletion,
+so a restart can recognize a write that landed before its report checkpoint. A newer draft compares with the last
+completed draft and any verified intervening issues. The deal progress port lists exhausted reads (#1212).
 
 ## Checklist items and links
 

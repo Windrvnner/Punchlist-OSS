@@ -662,8 +662,7 @@ describe('third-party reports at deal scale', () => {
     expect(stateOf([...lines, { cited: { doc: 'd', finding: 'f1' } }]).owed).toEqual([]);
   });
 
-  it('an issue only a closed finding covers is never taken as covered: given with no words it is counted as '
-    + 'not placed, and with no "earlier" the covering one is named', async () => {
+  it('keeps a report with a closed-only reference unfinished and saves a complete sibling issue', async () => {
     const docs = room().filter((d) => d.name === 'Legal Due Diligence Report.pdf');
     const findings = new Map<string, Known & { issue?: Issue }>([
       ['f_closed', { id: 'f_closed', title: 'Two lease parcels lack recorded memoranda', closed: true }],
@@ -692,7 +691,9 @@ describe('third-party reports at deal scale', () => {
     expect([...findings.values()].filter((x) => x.issue).map((x) => [x.title, x.issue!.earlier])).toEqual([
       ['Lease parcels unrecorded', 'f_closed'],
     ]);
-    expect(stateOf(log).read.values().next().value!.unplaced).toBe(1);
+    const state = stateOf(log);
+    expect(state.read.size).toBe(0);
+    expect(state.cuts.get(docs[0].docId)?.issues.map(({ issue }) => issue.title)).toEqual(['Lease parcels unrecorded']);
   });
 
   it('issues the last try gave with no page that opens are counted on the read, '
