@@ -416,3 +416,30 @@ it('checks duplicate removals against the General items held in both versions (#
   expect(app.store.get().firmList[wind].items).toHaveLength(1_881);
   expect(app.store.get().firmList[wind].items[0]?.text).toBe(questions[0]);
 });
+
+it('rechecks a changed prior approval and keeps another row’s wording choice (#56)', async () => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const name = 'Wind';
+  const edited = 'Provide the latest independent energy yield report.';
+  app.store.services.ai.reword = async () => ok([{ at: 120, text: edited, why: '' }]);
+  const items = priorItems(questions, 'offshore wind');
+  const id = await savePriorList('technology', name, items);
+  const session = await technologyReview(questions, name, false, true);
+  session.flipReword(1);
+  session.flipReword(120);
+  const changed = [...items];
+  changed[0] = { ...items[0], text: 'Provide the amended offshore turbine EPC agreement.' };
+  peerChangesList(id, changed);
+  await app.store.refreshSync();
+  await session.bringIn();
+  expect(app.store.get().firmList[id].items[0]).toEqual(changed[0]);
+  session.backToList();
+  await session.next();
+  expect(session.view.listReview.review?.rewords[0].text).toBe(changed[0].text);
+  expect(session.view.listReview.useReword.has(1)).toBe(false);
+  expect(session.view.listReview.useReword.has(120)).toBe(true);
+  await session.bringIn();
+  expect(app.store.get().firmList[id].items[0]).toEqual(changed[0]);
+  expect(app.store.get().firmList[id].items[1]).toEqual({ text: questions[1] });
+  expect(app.store.get().firmList[id].items[120]).toEqual({ text: edited, was: questions[120] });
+});

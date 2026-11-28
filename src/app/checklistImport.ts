@@ -263,8 +263,8 @@ function checklistReviewPlan(
   const earlier = earlierRewordings(items, target.replaces?.items);
   // Reuse a review only for the same items and sections (#821) and the same list and applicable wording (#56).
   const { askReword, askSame } = choices;
-  const choicesKey = JSON.stringify([askReword, askSame, target.id, earlier]);
-  const signature = JSON.stringify([items, target.generalTexts, choicesKey]);
+  const choicesKey = JSON.stringify([askReword, askSame, target.id]);
+  const signature = JSON.stringify([items, target.generalTexts, choicesKey, earlier]);
   const cached = review && askedFor === signature ? review : null;
   const needsCall = cached ? can.sameMeaning && hasMissedDuplicates(cached)
     : (askReword && can.reword) || (askSame && can.sameMeaning);
