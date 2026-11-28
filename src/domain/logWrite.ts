@@ -38,8 +38,8 @@ export interface LogWrite {
    * the same (as the log writes it), and for a cell kept as someone wrote it, what the app had sent before. The next update's `sent`. */
   sent: Record<string, Record<string, string>>;
   /**
-   * Cells only the log changed since the app last wrote them (the app's value is still what it sent): the log's is the
-   * latest, so the app takes it. By question id and field, what the log says. Not written, and not in `kept`.
+   * Cells only the log changed, including a first response where the app has none. The app takes these as the latest.
+   * By question id and field, what the log says. Not written, and not in `kept`.
    */
   taken: Record<string, Record<string, string>>;
 }
@@ -80,10 +80,26 @@ export function logHolds(table: Pick<ReadTable, 'rows'>, mapping: Mapping, quest
   const out: Record<string, Record<string, string>> = {};
   for (const [id, i] of matchRows(table, mapping, questions)) {
     const now: Record<string, string> = {};
-    for (const [k, v] of Object.entries(w.sent[id] ?? {})) { const c = mapping[k as ImportField]; if (k !== 'n' && c != null && String(rows[i][c] ?? '').trim() && v === String(rows[i][c] ?? '')) now[k] = v; }   // only what the file holds, not what an update would fill in
+    for (const [field, value] of Object.entries(w.sent[id] ?? {})) {
+      const column = mapping[field as ImportField];
+      // A proposed take has yet to reach the app, so this import does not establish a shared value.
+      if (field === 'n' || column == null || w.taken[id]?.[field] !== undefined) continue;
+      const cell = String(rows[i][column] ?? '');
+      if (cell.trim() && value === cell) now[field] = value;
+    }
     out[id] = now;
   }
   return out;
+}
+
+// A filled Response cell is the first answer when the app has none and has never written one (#1392).
+function isFirstLogResponse(field: ImportField, app: string, sent: string | undefined, log: string): boolean {
+  return field === 'response' && !app.trim() && sent === undefined && !!log.trim();
+}
+
+// A response taken from the log can later be withdrawn there (#1392).
+function hasLogEdit(field: ImportField, log: string, sent: string): boolean {
+  return !!log.trim() || (field === 'response' && !!sent.trim());
 }
 
 /**
@@ -117,14 +133,18 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
     for (const k of FIELDS) {
       const c = col(k); if (c == null) continue; const v = cellValue(q, k); const has = cell(r, k);
       if (k === 'n') { if (has.trim()) now.n = has; continue; }                       // a row keeps the number the log gave it
-      // a value the app never wrote is skipped; one it cleared after writing it clears the log's too (#39)
-      if (!v.trim() && before[k] === undefined) continue;
-      if (sameAs(k, i, v)) { now[k] = has; continue; }                                 // the log says it already, its own way: kept as the log writes it
+      const firstResponse = isFirstLogResponse(k, v, before[k], has);
+      if (!firstResponse && !v.trim() && before[k] === undefined) continue;
+      if (!firstResponse && sameAs(k, i, v)) {
+        now[k] = has;
+        continue;
+      }
       // the cell still holds what the app last put there, as written or as the import reads it
       const ours = before[k] !== undefined
         && (sameText(has, before[k]) || (!!readAs(k, i) && same(k, readAs(k, i), before[k])));
       // someone changed it in the log; where the app still holds what it last sent, only the log changed: the app takes it
-      if (has.trim() && !ours && before[k] !== undefined && (sameText(v, before[k]) || same(k, v, before[k]))) {
+      if (firstResponse || (!ours && before[k] !== undefined && hasLogEdit(k, has, before[k])
+        && (sameText(v, before[k]) || same(k, v, before[k])))) {
         (out.taken[q.id] ??= {})[k] = has;
         now[k] = has;
         continue;

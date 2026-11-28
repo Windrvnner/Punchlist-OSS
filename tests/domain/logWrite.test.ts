@@ -1,6 +1,6 @@
 // What the app writes back into a counterparty's own Q&A log: the questions it adds and the answers it adds, and nothing else.
 import { describe, it, expect } from 'vitest';
-import { logWrite } from '../../src/domain/logWrite';
+import { logHolds, logWrite } from '../../src/domain/logWrite';
 import { suggestMapping } from '../../src/domain/importExport';
 import type { Question } from '../../src/domain/model';
 import { writtenAsMeant } from '../../src/domain/sheets';
@@ -282,7 +282,13 @@ describe('a response cleared in the app (#39)', () => {
     expect(written.kept).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
     expect(written.keptText.q1.response).toBe(edit(answers[0]));
   });
-  it('leaves a filled cell alone when the app never wrote a response there', () => {
+  it('does not rewrite a filled cell when the app never wrote a response there', () => {
     expect(logWrite(logOf(0), map3, questions, new Map()).steps).toEqual([]);
   });
+});
+
+it('seeds last-written tracking only for cells the app already holds', () => {
+  const question = q(1, 'What is the minimum DSCR covenant?');
+  const held = logHolds(table, map, [question]);
+  expect(held[question.id]).toEqual({ text: question.text });
 });

@@ -202,10 +202,12 @@ describe('an edit kept aside in the log\'s folder', () => {
     refuse();
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value).toMatchObject({ status: 'written', unmerged: 0 });
     const log = path.join(folder, FILE); expect(lines(log)[3]).toBe(`3,${text(3)},sroe on 3,`); expect(kept(folder)).toEqual([expect.stringMatching(/\.kept$/)]);
+    expect(q(3).response).toBe('sroe on 3');
     write(log, fs.readFileSync(log, 'utf8').replace(`3,${text(3)},sroe on 3,`, `3,${text(3)},,`));   // ldoe clears sroe's answer in Excel
     await store.dispatch(SetResponse, { dealId, questionId: q(4).id, response: 'Answer 4' });
     const again = await exportQaLog(store, dealId); expect(again.ok && again.value).toMatchObject({ status: 'written', kept: [] });
     expect(lines(log)[3]).toBe(`3,${text(3)},,`); expect(kept(folder)).toHaveLength(1);
+    expect(q(3).response).toBe('');
     vi.mocked(fs.writeFileSync).mockRestore();                                         // the archive takes it now
     const third = await exportQaLog(store, dealId); expect(third.ok && third.value).toMatchObject({ status: 'written', unmerged: 0 });   // it was merged in full
     expect(lines(log)[3]).toBe(`3,${text(3)},,`); expect(kept(folder)).toEqual([]);
