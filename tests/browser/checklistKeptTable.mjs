@@ -23,8 +23,14 @@ export async function openKeptChecklist(page, name, sheets, { failures = {}, map
           };
           parts.put(choices, ['checklist', 'choices']);
         }
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onabort = () => { db.close(); reject(tx.error); };
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onabort = () => {
+          db.close();
+          reject(tx.error);
+        };
       };
     });
   }, { name, sheets, mapping });

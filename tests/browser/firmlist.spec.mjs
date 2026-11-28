@@ -356,7 +356,9 @@ await checkStaleReviewKeyboard(start, say);
 { // The list splits while its review is open: Choose… is offered there, and Back returns to the review with its check marks
   const { ctx, page } = await start();
   await bring(page, solar, 'sector', 'Solar');
-  await page.click('#fl-import'); await page.setInputFiles('#cl-file', solar); await page.waitForSelector('#cl-next');
+  await page.click('#fl-import');
+  await page.setInputFiles('#cl-file', solar);
+  await page.waitForSelector('#cl-next');
   await page.click('[data-layer=sector]'); await page.fill('#cl-name', 'Solar'); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
   await page.click('[data-remove]'); const checked = await page.$$eval('[data-remove]:checked', (b) => b.length); await page.focus('#cl-go');
   await page.evaluate(async () => { const l = Object.values(store.get().firmList).find((x) => x.name === 'Solar'); await __peer.edit(l.id, { items: [...l.items, { text: 'Spare inverters held on site' }] }); });

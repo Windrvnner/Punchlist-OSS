@@ -76,7 +76,9 @@ export async function checkEmptyChecklistShelf(start, say, read) {
       empty.zone === 160 && empty.dialog >= 360 && empty.icon
         && empty.words === 'Drop a checklist here, or choose a file…' && empty.sections === 0 && !empty.count,
       JSON.stringify(empty));
-    await page.setInputFiles('#fl-file', solar); await page.waitForSelector('#cl-next'); await read(page);
+    await page.setInputFiles('#fl-file', solar);
+    await page.waitForSelector('#cl-next');
+    await read(page);
     const opened = { title: await page.textContent('.imdlg h2'), source: await page.textContent('.imfile') };
     say(`a file chosen there opens Import a checklist with it read (${size[0]})`,
       opened.title === 'Import a Checklist' && opened.source.startsWith('Solar checklist.docx'),
