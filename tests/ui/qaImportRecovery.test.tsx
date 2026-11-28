@@ -411,3 +411,94 @@ it.each(['start over', 'replace'] as const)(
     }
   },
 );
+
+it.each([
+  ['KeepQaLog', false],
+  ['RecordQaLogExport', false],
+  ['KeepQaLog', true],
+  ['RecordQaLogExport', true],
+] as const)('resumes interrupted %s through the import form (restart: %s)', async (command, restart) => {
+  const app = recoveryApp();
+  const dealId = await recoveryDeal(app);
+  await preparedImport(app, dealId);
+  const screen = await openRecoveryApp(app);
+  await act(() => app.store.ui({ dialog: { kind: 'importQa', dealId } }));
+  await vi.waitFor(() => expect(screen.querySelector('#im-go')).not.toBeNull());
+  const restore = failRecoveryWrite(app, (transaction) =>
+    operationWrite(transaction, command, 'succeeded') || operationWrite(transaction, command, 'failed'),
+  'Log and settlement refused');
+  try {
+    await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+    await vi.waitFor(() => expect(screen.textContent).toContain('Log and settlement refused'));
+    expect(Object.keys(app.store.get().questions)).toHaveLength(2);
+    const [original] = app.store.interruptedOps();
+    expect(original.command).toBe(command);
+    expect(screen.querySelector('.intop-covered')).not.toBeNull();
+    restore();
+    if (restart) {
+      app.store.closing();
+      await app.repo.close();
+      const restarted = recoveryApp(app.saved);
+      try {
+        await restarted.store.boot();
+        const recovered = await openRecoveryApp(restarted);
+        await act(() => recovered.querySelector<HTMLButtonElement>('.intop .tundo')!.click());
+        await vi.waitFor(() => expect(recovered.querySelector('#im-go')).not.toBeNull());
+        expect(restarted.store.get().ops[original.id].state).toBe('interrupted');
+        await finishLogRetry(restarted, dealId, recovered, original.id);
+      } finally {
+        restarted.store.closing();
+        await restarted.repo.close();
+      }
+    } else {
+      await finishLogRetry(app, dealId, screen, original.id);
+    }
+  } finally {
+    restore();
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+async function finishLogRetry(app: RecoveryApp, dealId: string, screen: HTMLElement, id: string) {
+  await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+  await vi.waitFor(() => expect(screen.querySelector('#im-go')).toBeNull());
+  expect(app.store.get().deals[dealId].qaLogs[0].last).toBeDefined();
+  expect(Object.keys(app.store.get().questions)).toHaveLength(2);
+  expect(screen.querySelector('.intop')).toBeNull();
+  expect(app.store.get().ops[id].state).toBe('succeeded');
+}
+
+const receiptSteps = ['ImportQuestions', 'KeepQaLog', 'RecordQaLogExport'] as const;
+it.each(receiptSteps)('refreshes a committed %s after its receipt is lost', async (command) => {
+  const app = recoveryApp();
+  const dealId = await recoveryDeal(app);
+  const key = importKey.qa(dealId);
+  await preparedImport(app, dealId);
+  const screen = await openImport(app, dealId);
+  const transaction = app.repo.transaction.bind(app.repo);
+  app.repo.transaction = async (write) => {
+    const saved = await transaction(write);
+    if (saved.ok && write.writes.some(({ kind }) => kind !== 'op') && operationWrite(write, command, 'succeeded')) {
+      app.repo.transaction = transaction;
+      return { ok: false, error: { kind: 'failed', message: 'Receipt was lost' } };
+    }
+    return saved;
+  };
+  try {
+    const submit = () => act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+    await submit();
+    await vi.waitFor(() => expect(screen.textContent).toContain('Receipt was lost'));
+    await submit();
+    await vi.waitFor(() => expect(keptImport(key)).toBeUndefined());
+    const state = app.store.get();
+    expect(Object.keys(state.questions)).toHaveLength(2);
+    const last = state.deals[dealId].qaLogs[0]?.last;
+    expect(Object.keys(last?.sent ?? {})).toHaveLength(2);
+    expect(app.store.interruptedOps()).toHaveLength(0);
+  } finally {
+    app.repo.transaction = transaction;
+    app.store.closing();
+    await app.repo.close();
+  }
+});
