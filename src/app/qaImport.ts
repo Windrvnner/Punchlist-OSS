@@ -1,4 +1,4 @@
-import { Operation } from '../domain/model';
+import type { Operation } from '../domain/model';
 import { fail, ok, type Result } from '../domain/result';
 import {
   parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
@@ -9,6 +9,7 @@ import {
   dropImport, dropSavedImport, finishKeptSubmission, importKey, keepImport, keptImport, keptImportsReady,
 } from './keptImports';
 import { unappliedColumnsWarning, unappliedImportColumns } from './qaImportColumns';
+import { dialogReportsFailure, findQaImportStep, resumeQaImportStep, stillRunningImport } from './qaImportJournal';
 import { keepImportedLog, logTakenBy } from './qaLog';
 import type { Store } from './store';
 import { readImportFile, type ImportPreview, type ImportTable } from './transfer';
@@ -36,7 +37,6 @@ interface Submission {
 }
 
 const submitting = new Set<string>();
-const dialogReportsFailure = { quietRefusal: () => true };
 
 /** Checks that what was kept is still a whole Q&A import, so a damaged or older entry starts a fresh one. */
 export function keptQaImport(key: string): QaKept | null {
@@ -177,7 +177,7 @@ export async function submitQaImport(
   store: Store, dealId: string, current: QaKept, rows: ImportRow[],
 ): Promise<SubmissionResult> {
   const key = importKey.qa(dealId);
-  if (submitting.has(key)) return stillRunning();
+  if (submitting.has(key)) return stillRunningImport();
   submitting.add(key);
   try {
     const saved = savedSubmission(key);
@@ -223,7 +223,7 @@ function savedSubmission(key: string): Submission | null {
 
 export function isCorrelatedQaImport(op: Operation | undefined):
   op is Operation & { dealId: string; idempotencyKey: string } {
-  return op?.command === 'ImportQuestions' && !!op.dealId && !!op.idempotencyKey?.startsWith('qa-import:');
+  return op?.command === ImportQuestions.name && !!op.dealId && !!op.idempotencyKey?.startsWith('qa-import:');
 }
 
 /** The interrupted action reopens its complete import instead of retrying only the rows (#270). */
@@ -255,33 +255,19 @@ async function chooseSubmission(store: Store, saved: Submission | null, current:
   if (!saved) return ok(next);
   const snapshot = (value: Submission) => [value.choices, value.table.sheet, value.table.headerRow];
   if (JSON.stringify(snapshot(saved)) === JSON.stringify(snapshot(next))) return ok(saved);
-  const found = await findSubmission(store, saved.key);
+  const found = await findQaImportStep(store, saved.key, ImportQuestions.name);
   if (!found.ok) return found;
   if (!found.value && !saved.done) return ok(next);
   return ok({ restore: { table: { ...saved.table, bytes }, choices: saved.choices } });
 }
 
-async function findSubmission(store: Store, key: string) {
-  const read = await store.services.repo.list('op');
-  if (!read.ok) return read;
-  const matching = read.value.flatMap((loaded) => {
-    const parsed = Operation.safeParse(loaded.envelope.data);
-    return parsed.success && parsed.data.idempotencyKey === key ? [parsed.data] : [];
-  }).filter((operation) => operation.state !== 'discarded');
-  return ok(matching.sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0]);
-}
-
-/** A committed Append is never sent again after its reply was lost. */
 async function resumeSubmission(store: Store, dealId: string, submission: Submission) {
   if (submission.done) return ok(undefined);
-  const found = await findSubmission(store, submission.key);
-  if (!found.ok) return found;
-  const operation = found.value;
-  if (operation?.state === 'succeeded') return ok(undefined);
-  if (operation) {
-    const result = await store.retryOp(operation.id, dialogReportsFailure);
-    return result ?? stillRunning();
-  }
+  const write = () => importFreshRows(store, dealId, submission);
+  return resumeQaImportStep(store, submission.key, ImportQuestions.name, write);
+}
+
+async function importFreshRows(store: Store, dealId: string, submission: Submission) {
   const { choices, rows } = submission;
   // Rows not yet in the journal are refused if another deal has made the file its log since they were kept (#926).
   const taken = logTakenBy(store, dealId, choices.path);
@@ -289,10 +275,6 @@ async function resumeSubmission(store: Store, dealId: string, submission: Submis
   return store.dispatch(ImportQuestions, {
     dealId, mode: choices.mode, rows, answerResponded: choices.answered, accepted: choices.accepted ?? [],
   }, { ...dialogReportsFailure, idempotencyKey: submission.key });
-}
-
-function stillRunning() {
-  return fail({ kind: 'rejected', message: 'This import is still running. Retry after it finishes.' });
 }
 
 /** Finish the original file choice after row recovery, rather than importing the rows again. */

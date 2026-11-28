@@ -535,11 +535,33 @@ export class Store {
    * Pending and interrupted operations are never removed, nor a save that could not be written (pending in the journal),
    * nor a deal's last import while it can be undone.
    */
-  /** The retained import still needs its success identity if its reply or log-link step was interrupted. */
+  /** Keep the journal outcome while a retained import may still refer to it. */
   private canPrune(operation: Operation, kept: Set<string>, lastImports: Set<string>) {
     return operation.state !== 'pending' && operation.state !== 'interrupted'
       && !this.unwritten.has(operation.id) && !kept.has(operation.id) && !lastImports.has(operation.id)
-      && !(operation.state === 'succeeded' && operation.idempotencyKey?.startsWith('qa-import:'));
+      && !operation.idempotencyKey?.startsWith('qa-import:');
+  }
+
+  /** A receipt can reach the journal without reaching the window that sent the import. */
+  async refreshCommittedImportStep(operation: Operation): Promise<Result<void>> {
+    const { id, dealId, resultRevs } = operation;
+    const applied = resultRevs && Object.entries(resultRevs).every(([recordId, rev]) => this.revOf(recordId) === rev);
+    if (dealId && !applied) {
+      const loaded = await this.reloadImportStepRecords(operation.command, dealId);
+      if (!loaded) {
+        return fail({ kind: 'unreachable', message: 'The saved import could not be read. Retry to finish.' });
+      }
+    }
+    this.unsettledHere.delete(id);
+    this.unwritten.delete(id);
+    this.set({ ...this.state, ops: { ...this.state.ops, [id]: operation } });
+    return ok(undefined);
+  }
+
+  private async reloadImportStepRecords(command: string, dealId: string) {
+    if (command !== 'ImportQuestions') return this.reloadRecord('deal', dealId);
+    await this.loadDealRecords(dealId);
+    return this.state.dealLoad[dealId] === 'loaded';
   }
 
   /** Retire an import correlation after completion, or discard its unfinished action when the file is cleared. */
@@ -551,8 +573,8 @@ export class Store {
     for (const loaded of read.value) {
       const operation = this.parse('op', loaded) as Operation | null;
       if (operation?.idempotencyKey !== key) continue;
-      // A committed import still protects against replay until the kept file is durably gone.
-      if (options.abandon && operation.state === 'succeeded') continue;
+      // Keep the outcome linked until the kept file is durably gone.
+      if (options.abandon && ['succeeded', 'discarded'].includes(operation.state)) continue;
       const next = this.retireImportOperation(operation, options.abandon === true);
       if (!next) return false;
       writes.push({ kind: 'op', id: operation.id, data: next, expectedRev: loaded.rev });
@@ -569,7 +591,7 @@ export class Store {
     return true;
   }
 
-  /** Clear the correlation without touching a live write or the Undo of a committed import. */
+  /** Retire unfinished work without touching a live write or releasing its correlation early. */
   private retireImportOperation(operation: Operation, abandon: boolean): Operation | undefined {
     if (operation.state === 'interrupted' && !abandon) return;
     if (operation.state === 'pending') {
@@ -577,9 +599,8 @@ export class Store {
       if (!abandon || (this.isLive(operation) && !failedHere)) return;
     }
     if (abandon && this.rerun.has(operation.id)) return;
-    const released = { ...operation, idempotencyKey: undefined };
-    if (!abandon || operation.state === 'discarded') return released;
-    return { ...released, state: 'discarded', settledAt: this.services.clock.now() };
+    if (!abandon) return { ...operation, idempotencyKey: undefined };
+    return { ...operation, state: 'discarded', settledAt: this.services.clock.now() };
   }
 
   private pruning = false;
