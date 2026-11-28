@@ -253,7 +253,7 @@ class Answering {
    */
   private async reply(turnNumber: number, last: boolean, share: ChangeShare): Promise<Record<string, unknown> | null> {
     const { kit, question, run } = this;
-    const { files, listing, got } = await kit.send(run.whole, run.spansDeals, share, kit.cleanDrafts);
+    const { files, listing, got } = await kit.send(run.whole, run.spansDeals, share);
     run.attached(got);
     const turn = this.turnOf(turnNumber, last, files, listing);
     this.turnNow = turn;

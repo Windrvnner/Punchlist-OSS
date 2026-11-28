@@ -76,7 +76,6 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
-import { withStoredCleanDrafts } from './agentBatches';
 import { AI_DRAFTED, questionIdsIn, questionsForIds, responseHeader } from './qaRow';
 import { citesUnsent, docHandle, docsUnusable, namesOnlyShown, sentAs, unknownIds, unknownInPairs } from './recordIds';
 import type { DealDoc, Looked, Unusable } from './agentKit';
@@ -1588,7 +1587,7 @@ export function nodeAi(o: AiOptions) {
    * draft's tracked changes are listed as `share` leaves them (#1381). `spansDeals`: the prompt spans several deals,
    * so each document is named with its deal (#1162).
    */
-  async function send(sent: Sent[], spansDeals: boolean, share: ChangeShare, cleanDrafts?: AgentKit['cleanDrafts']):
+  async function send(sent: Sent[], spansDeals: boolean, share: ChangeShare):
     Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
     const idOf = (s: Sent) => docHandle(s, spansDeals);
@@ -1597,8 +1596,10 @@ export function nodeAi(o: AiOptions) {
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
-      for (const s of withStoredCleanDrafts(mine, ids, cleanDrafts?.(dealId))) {
-        const id = ids[s.rec.docId]; if (!id) continue; files.push(id); got.push(s);
+      const available = mine.filter((s) => ids[s.rec.docId]);
+      for (const s of available) {
+        files.push(ids[s.rec.docId]);
+        got.push(s);
         const rec = o.docs.records(dealId).find((r) => r.docId === s.rec.docId) ?? s.rec;          // a Word file's pages are counted when it is first sent, just now
         lines.push(`${idOf(s)}: ${where(rec)}${rec.pages ? ` (${rec.pages} pages)` : ''}`);
         // a draft's pages show its tracked changes as markup: say so, and send the changes themselves, read from the
@@ -1610,7 +1611,7 @@ export function nodeAi(o: AiOptions) {
         }
         const k = kindsOf(dealId);
         const against = k.against.get(rec.docId) ?? 'own';
-        if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, against, idOf));
+        if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, available, k.pairs.get(rec.docId) ?? null, against, idOf));
         // another project's document (docs/other-project-documents-design.md): read, never a main source
         else if (k.precedents.has(rec.docId)) {
           lines.push(`  ${idOf(s)} is another project's document, not this deal's. Its terms are never this deal's: `

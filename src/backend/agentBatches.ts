@@ -44,13 +44,3 @@ function withCleanDraft(doc: DealDoc, cleanDrafts: AgentKit['cleanDrafts'],
   const clean = cleans.get(doc.rec.docId);
   return clean ? [{ dealId: doc.dealId, rec: clean }] : [];
 }
-
-/** A chat read can send a paired blackline only when its clean draft is available (#1213). */
-export function withStoredCleanDrafts(docs: DealDoc[], stored: Record<string, string>,
-  pairs?: Map<string, DocRecord>): DealDoc[] {
-  if (!pairs) return docs;
-  return docs.filter((doc) => {
-    const clean = pairs.get(doc.rec.docId);
-    return !clean || !!stored[clean.docId];
-  });
-}
