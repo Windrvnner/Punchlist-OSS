@@ -284,7 +284,9 @@ async function makeTheLog(store: Store, dealId: string, submission: Submission) 
   if (submission.done) return ok(undefined);
   await store.loadDeal(dealId, { gaps: false });
   const { table, choices } = submission;
-  const { sheet, headerRow, rows } = table;
-  const log = { path: choices.path, sheet, headerRow, mapping: choices.mapping, make: choices.makeLog, rows };
+  const { sheet, headerRow, columns, cols, rows } = table;
+  const log = {
+    path: choices.path, sheet, headerRow, columns, cols, mapping: choices.mapping, make: choices.makeLog, rows,
+  };
   return keepImportedLog(store, dealId, log, submission.key);
 }
