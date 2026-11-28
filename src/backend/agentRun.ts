@@ -39,6 +39,10 @@ export class AgentRun {
   whole: Sent[] = [];
   /** what each tool found, in order: what the main session is told it has done so far */
   readonly done: string[] = [];
+  /** the result of the read whose files have yet to be attached */
+  private readResult: number | undefined;
+  /** ids the model can request in a read after the files were deferred or unavailable */
+  private readonly readTargets = new Set<string>();
   /** the searches made in this run, so that the same one is not made twice */
   readonly searched = new Set<string>();
   /** what the main session has learned so far, as it last wrote it */
@@ -169,46 +173,68 @@ export class AgentRun {
       // quote is found; only when nothing matches is the model's wrapping quote or bracket taken off
       const said = name.trim();
       const unwrapped = said.replace(/^["'`[]+|["'`\]]+$/g, '');
-      const doc = this.opened.find((x) => this.idOf(x) === name)
-        ?? this.byPath(said, recs) ?? this.byPath(unwrapped, recs);
+      const open = this.opened.find((x) => this.idOf(x) === name);
+      const doc = open ?? (this.canRequest(name)
+        ? recs.find((x) => this.idOf(x) === name)
+        : this.byPath(said, recs) ?? this.byPath(unwrapped, recs));
       if (doc) picked.push(doc);
       else missing.push(unwrapped);
     }
-    const attached = this.readBatch(picked, width);
+    const deferred = this.readBatch(picked, width);
     const notFound = missing.length
-      ? `\nNot found: ${missing.join('; ')}. Name a document by its id or its path as listed.`
+      ? `Not found: ${missing.join('; ')}. Name a document by its id or its unique path as listed.`
       : '';
-    return `${attached}${notFound}`;
+    return [deferred, notFound].filter(Boolean).join('\n');
   }
 
   /** attach the first batch of resolved documents and report any that still need a read */
   readBatch(picked: DealDoc[], width: number): string {
     const unique = [...new Map(picked.map((doc) => [dealDocKey(doc), doc])).values()];
     const batch = batchesOf(unique, this.kit.cleanDrafts, width)[0]?.recs ?? [];
-    this.whole = batch.map(({ dealId, rec }) => this.open(dealId, rec));
+    this.whole = batch;
+    this.readResult = this.done.length;
+    const deferred = unique.filter((doc) => !batch.some((picked) => sameDoc(doc, picked)));
+    return deferred.length
+      ? `Ask to read the remaining documents by id in another batch.\n${this.readList(deferred)}` : '';
+  }
+
+  /** Only files the send returned may enter the citation list, count and read steps (#12, #1213). */
+  attached(got: Sent[]): void {
+    const missing = this.whole.filter((s) => !got.includes(s));
+    if (missing.length) this.whole = this.whole.filter((s) => got.includes(s));
+    const result = this.readResult;
+    if (result === undefined) return;
+    this.readResult = undefined;
     for (const s of this.whole) {
+      this.open(s.dealId, s.rec);
       const pages = s.rec.pages ? `${s.rec.pages} pages` : '';
       this.steps.push({ kind: 'read', text: `Reviewed ${s.rec.name}`, result: pages, done: true });
     }
-    const attached = this.whole.length
-      ? `You asked to read ${this.whole.map((s) => this.idOf(s)).join(', ')}: they are attached to this message.`
+    const attached = this.whole.length ? `Attached for reading ${this.whole.map((s) => this.idOf(s)).join(', ')}.`
       : 'No document was attached.';
-    const deferred = unique.filter((doc) => !batch.some((sent) => sameDoc(doc, sent)));
-    if (!deferred.length) return attached;
-    const names = deferred.map((doc) => `- ${this.readPath(doc)}`);
-    return `${attached}\nAsk to read the remaining documents in another batch.\n${names.join('\n')}`;
+    const unavailable = missing.length ? `These files could not be attached.\n${this.readList(missing)}` : '';
+    this.done[result] = [attached, this.done[result], unavailable].filter(Boolean).join('\n');
   }
 
-  /** a document named by its whole path or its whole file name, in any case; anything else is not found */
+  /** whether a tool result gave the model an id to request in another read */
+  canRequest(handle: unknown): boolean {
+    return typeof handle === 'string' && this.readTargets.has(handle);
+  }
+
+  /** name an unread file by its existing id, even when another file has the same display path */
+  private readList(docs: DealDoc[]): string {
+    return docs.map((doc) => {
+      const handle = this.idOf(doc);
+      this.readTargets.add(handle);
+      return `- ${handle} (${this.kit.where(doc.rec)})`;
+    }).join('\n');
+  }
+
+  /** a unique document named by its whole path or its whole file name, in any case */
   private byPath(said: string, recs: DealDoc[]): DealDoc | undefined {
     const low = said.toLowerCase();
-    return recs.find((doc) => this.readPath(doc).toLowerCase() === low)
-      ?? recs.find(({ rec }) => this.kit.where(rec).toLowerCase() === low || rec.name.toLowerCase() === low);
-  }
-
-  /** the path for another read, qualified when two deals could have the same path */
-  private readPath(doc: DealDoc): string {
-    const path = this.kit.where(doc.rec);
-    return this.spansDeals ? `${doc.dealId}/${path}` : path;
+    const matches = recs.filter(({ rec }) =>
+      this.kit.where(rec).toLowerCase() === low || rec.name.toLowerCase() === low);
+    return matches.length === 1 ? matches[0] : undefined;
   }
 }
