@@ -202,25 +202,44 @@ describe('first-turn attachments use the same batches as the read tool (#1213)',
       expect(result).toMatchObject({ ok: true, value: { sources: [{ docId: selected.docId, loc: 'p. 2' }] } });
     });
 
-  it('names an unavailable clean draft and does not count or cite either half of the pair', async () => {
+  it('names an unavailable clean draft and counts the files actually sent', async () => {
     const clean = doc(8, 'Credit Agreement.pdf');
     const blackline = doc(9, 'Credit Agreement (blackline).pdf');
     const s = setupIn([clean, blackline, first[0]], [
       { tool: 'read', docs: [blackline.name, first[0].name] },
       { text: 'The facility is secured. [1]', sources: [{ doc: clean.docId, page: 2 }] },
-      { text: 'I only have the term sheet. [1]', sources: [{ doc: first[0].docId, page: 1 }] },
+      { text: 'The term sheet sets the terms. [1]', sources: [{ doc: first[0].docId, page: 1 }] },
     ], Infinity, NO_HELP, {}, [clean.docId]);
     const result = await s.ai.answer({ ...ask('Summarize.'), runId: 'unavailable-draft' });
-    expect(sentNames(s.turns[1])).toEqual([first[0].name]);
-    expect(s.turns[1].prompt).toContain(`vdr/${clean.name}`);
-    expect(s.turns[1].prompt).toContain(`vdr/${blackline.name}`);
+    expect(sentNames(s.turns[1])).toEqual([blackline.name, first[0].name]);
+    expect(s.turns[1].prompt).toContain(`These files could not be attached.\n- ${clean.docId} (vdr/${clean.name})`);
+    expect(s.turns[1].prompt).toContain(`its clean draft is vdr/${clean.name}, which is not given here`);
     expect(names(s.turns[1])).not.toContain(clean.name);
-    expect(names(s.turns[1])).not.toContain(blackline.name);
     expect(result).toMatchObject({ ok: true, value: {
-      sources: [{ docId: first[0].docId, loc: 'p. 1' }], research: { read: { docs: 1, of: 3 } },
+      sources: [{ docId: first[0].docId, loc: 'p. 1' }], research: { read: { docs: 2, of: 3 } },
     } });
     if (result.ok) expect(result.value.research?.steps.filter(({ kind }) => kind === 'read'))
-      .toEqual([expect.objectContaining({ text: `Reviewed ${first[0].name}` })]);
+      .toEqual([blackline, first[0]].map(({ name }) => expect.objectContaining({ text: `Reviewed ${name}` })));
+  });
+
+  it('reads a blackline after the kept conversation has received its clean draft', async () => {
+    const clean = doc(8, 'Credit Agreement.pdf');
+    const blackline = doc(9, 'Credit Agreement (blackline).pdf');
+    const unavailable: string[] = [];
+    const s = setupIn([clean, blackline], [
+      { tool: 'read', docs: [clean.name] },
+      { toJSON() {
+        unavailable.push(clean.docId);
+        return { tool: 'read', docs: [blackline.name] };
+      } },
+      { text: 'The ratio changed. [1]', sources: [{ doc: blackline.docId, page: 2 }] },
+    ], Infinity, NO_HELP, {}, unavailable, 'native');
+    const result = await s.ai.answer(ask('Summarize.'));
+    expect(sentNames(s.turns[1])).toEqual([clean.name]);
+    expect(sentNames(s.turns[2])).toEqual([blackline.name]);
+    expect(result).toMatchObject({ ok: true, value: {
+      sources: [{ docId: blackline.docId, loc: 'p. 2', reading: true }], research: { read: { docs: 2, of: 2 } },
+    } });
   });
 });
 
