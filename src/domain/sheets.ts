@@ -4,7 +4,8 @@
  * Everything here is pure: which sheet and heading row an import uses, and the workbook an export is written as.
  */
 import { CsvCells } from './csvCells';
-import { findHeaderRow, suggestMapping } from './importExport';
+import { suggestChecklistColumns } from './checklistImport';
+import { findHeaderRow, hasQuestionHeading } from './importExport';
 import type { SheetPreview } from '../ports';
 import { fail, ok } from './result';
 import { decodeText, encodingOf } from './textEncoding';
@@ -63,20 +64,33 @@ export type ReadTable = { columns: string[]; cols: number[]; rows: string[][]; l
 /** `date`: the value is a date, YYYY-MM-DD; a writer that can goes on to write it as a date in the column's own date format, else as that text */
 export type SheetEdit = { kind: 'rows'; after: number; count: number } | { kind: 'cell'; row: number; col: number; value: string | number; date?: true };
 
+export interface SpreadsheetReadOptions {
+  sheet?: string;
+  headerRow?: number;
+  /** Use checklist heading names for automatic selection. A Q&A read uses its own names by default. */
+  headings?: 'checklist';
+}
+
 /**
- * The table an import reads from a file's sheets. Which sheet: the one asked for; otherwise the first that has a question
- * heading; otherwise the first with anything in it. Which row holds the headings: the one asked for, otherwise found
- * (findHeaderRow). Rows above it are titles and padding; columns with neither a heading nor a value are left out. Blank
- * rows are dropped, and each kept row remembers its row number in the sheet, so an error can point at it.
+ * Choose the requested sheet or the first with a recognized heading for the import, then the first nonempty sheet.
+ * Use the requested heading row or find one by the same headings. Leave out titles, padding, and columns with neither
+ * a heading nor a value. Each kept row remembers its sheet row number so errors can point to it.
  */
-export function tableFrom(all: Sheet[], opts?: { sheet?: string; headerRow?: number }): ReadTable | null {
+export function tableFrom(all: Sheet[], opts?: SpreadsheetReadOptions): ReadTable | null {
   const grids = new Map(all.map((s) => [s.name, used(s.grid)] as const));
   const sheets = all.map((s) => s.name).filter((n) => grids.get(n));
   if (!sheets.length) return null;
-  const sheet = opts?.sheet && sheets.includes(opts.sheet) ? opts.sheet : sheets.find((n) => { const g = grids.get(n)!; return suggestMapping(g.table[findHeaderRow(g.table)]).text != null; }) ?? sheets[0];
+  const isHeading = opts?.headings === 'checklist'
+    ? (row: string[]) => suggestChecklistColumns(row).item != null
+    : hasQuestionHeading;
+  const sheet = opts?.sheet && sheets.includes(opts.sheet)
+    ? opts.sheet
+    : sheets.find((name) => grids.get(name)!.table.some(isHeading)) ?? sheets[0];
   const { table, first } = grids.get(sheet)!;
   const width = Math.max(...table.map((r) => r.length)); const square = table.map((r) => [...r, ...Array(width - r.length).fill('')]);
-  const h = opts?.headerRow != null ? Math.max(0, Math.min(square.length - 1, Math.round(opts.headerRow) - first)) : findHeaderRow(square);
+  const h = opts?.headerRow != null
+    ? Math.max(0, Math.min(square.length - 1, Math.round(opts.headerRow) - first))
+    : findHeaderRow(square, isHeading);
   const header = square[h];
   const kept = square.slice(h + 1).map((r, i) => ({ r, line: first + h + 1 + i })).filter((x) => x.r.some((c) => c.trim()));
   const keep = header.map((c, ci) => !!c.trim() || kept.some((x) => !!x.r[ci]?.trim()));
@@ -209,7 +223,7 @@ export function isWorkbook(b: Uint8Array): boolean {
 }
 
 /** A .csv read as text: raw strings, no number or date guessing. One sheet. */
-export function readCsv(bytes: Uint8Array, opts?: { sheet?: string; headerRow?: number }) {
+export function readCsv(bytes: Uint8Array, opts?: SpreadsheetReadOptions) {
   if (isWorkbook(bytes)) {
     const message = 'That file is a workbook saved with a .csv name. Rename it to .xlsx and try again';
     return fail({ kind: 'invalid' as const, message });

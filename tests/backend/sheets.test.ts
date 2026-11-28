@@ -7,6 +7,7 @@ import { exportDocument, spreadsheetDocument, parseCsv, sheetPart, tableFrom } f
 import { libreOfficeSheets } from '../../src/backend/spreadsheets';
 import { questionsSheet, prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { Question } from '../../src/domain/model';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { hasOffice as has, soffice } from './officePrerequisites';
 import { cachedWorkbook } from './workbookCache';
 
@@ -68,6 +69,28 @@ describe.skipIf(!has)('spreadsheets through LibreOffice', () => {
     const t = tableFrom(all)!;
     expect(t.sheet).toBe('Q&A log'); expect(t.columns).toEqual(['No.', 'Question', 'Received']);
     expect(t.rows[0]).toEqual(['1', 'Line one\nline two, with a comma', '11/02/2026']); expect(t.lines).toEqual([2, 3]);
+  }, 60_000);
+
+  it('finds checklist headings in a workbook with a Q&A sheet first (#1393)', async () => {
+    const rows = portfolioQuestions().slice(0, 2_000).map((item, at) =>
+      [at < 1_000 ? 'Existing assets' : 'Development pipeline', item]);
+    const titles = [['Portfolio requirements'], ['For lender review'], ['Diligence scope'],
+      ['Include executed documents'], ['Investment committee materials']];
+    const file = await fileOf('xlsx', [
+      ['Lender Q&A', [['Query', 'Response'], ['Who holds the land lease?', 'The project company.']]],
+      ['Requirements', [...titles, ['Section', 'Requirement'], ...rows]],
+    ]);
+    const codec = libreOfficeSheets(lo);
+    const bytes = new Uint8Array(fs.readFileSync(file));
+    const checklist = await codec.read(bytes, 'book.xlsx', { headings: 'checklist' });
+    expect(checklist).toMatchObject({
+      ok: true, value: { sheet: 'Requirements', headerRow: 6, lastRow: 2_006, columns: ['Section', 'Requirement'] },
+    });
+    expect(checklist.ok && checklist.value.rows).toEqual(rows);
+    const qa = await codec.read(bytes, 'book.xlsx');
+    expect(qa).toMatchObject({
+      ok: true, value: { sheet: 'Lender Q&A', headerRow: 1, columns: ['Query', 'Response'] },
+    });
   }, 60_000);
 
   it('reads a .xlsb (LibreOffice reads the format but can\'t write it, so the file is kept with the tests)', async () => {

@@ -6,6 +6,7 @@
  */
 import type { Store } from './store';
 import type { SheetPreview } from '../ports';
+import type { SpreadsheetReadOptions } from '../domain/sheets';
 import { IMPORT_FIELDS } from '../domain/importExport';
 import {
   type State, dealQuestions, dealFindings, findingWorkstreams, FIRM,
@@ -133,7 +134,7 @@ export type ImportLocation = { sheet?: string; headerRow?: number };
 
 /** Read (or re-read) a file's bytes with the person's choice of sheet and heading row. */
 export async function readImportBytes(
-  store: Store, name: string, bytes: Uint8Array, opts?: ImportLocation,
+  store: Store, name: string, bytes: Uint8Array, opts?: SpreadsheetReadOptions,
 ): Promise<Result<ImportTable>> {
   const t = await store.services.sheets.read(bytes, name, opts);
   if (!t.ok) return t;

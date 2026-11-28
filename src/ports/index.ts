@@ -6,7 +6,7 @@
  */
 import type { Result } from '../domain/result';
 import type { RecordKind, Envelope, Source, Folder, AuditEntry } from '../domain/model';
-import type { SheetEdit } from '../domain/sheets';
+import type { ReadTable, SheetEdit, SpreadsheetReadOptions } from '../domain/sheets';
 import type { KeptAsk } from '../domain/keptMerge';
 
 /**
@@ -564,11 +564,11 @@ export interface FileSystem {
 /** Spreadsheets in and out, and the deal memo out. In the app LibreOffice does them all (backend/spreadsheets); the browser stand-in reads and writes CSV. */
 export interface SpreadsheetCodec {
   /**
-   * `lines[i]` is the sheet row number of `rows[i]` (the header is row 1 of a sheet that starts at the top); blank rows are
-   * left out of `rows`. `opts.sheet` and `opts.headerRow` (a sheet row number) are the person's own choice; without them
-   * the reader picks the sheet and finds the heading row, and reports both so the person can see and change them.
+   * `lines[i]` gives the sheet row number of `rows[i]`. Blank rows are omitted.
+   * Without explicit sheet or heading-row choices, the reader selects them and reports them for review.
    */
-  read(bytes: Uint8Array, fileName: string, opts?: { sheet?: string; headerRow?: number }): Promise<Result<{ columns: string[]; /** the sheet column of each column */ cols?: number[]; rows: string[][]; lines?: number[]; sheets?: string[]; sheet?: string; headerRow?: number; lastRow?: number; previews?: SheetPreview[] }>>;
+  read(bytes: Uint8Array, fileName: string, opts?: SpreadsheetReadOptions):
+    Promise<Result<Partial<ReadTable> & Pick<ReadTable, 'columns' | 'rows'>>>;
   /** an export: the file's bytes, and the kind of file they make */
   write(sheetName: string, rows: (string | number)[][]): Promise<Result<{ bytes: Uint8Array; ext: 'xlsx' | 'csv' }>>;
   /** Optional: a document's text as lines, for a list brought in from a Word file, an OpenDocument or RTF text, or a PDF. Without it only spreadsheets and plain text can be brought in. */

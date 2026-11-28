@@ -12,13 +12,11 @@ export const IMPORT_FIELDS = [['n', 'Number'], ['text', 'Question'], ['askedBy',
 export type ImportField = typeof IMPORT_FIELDS[number][0];
 export type Mapping = Record<ImportField, number | null>;
 
-/**
- * Which row of a sheet holds the column headings. A log often sits under a title and some padding, so this is the first
- * row, anywhere in the sheet, with a heading we recognize as the question column; failing that the first row. It is a
- * starting point only: the dialog shows it and the person can change it.
- */
-export function findHeaderRow(table: string[][]): number {
-  const headingRow = table.findIndex((row) => suggestMapping(row).text != null);
+export const hasQuestionHeading = (row: string[]): boolean => suggestMapping(row).text != null;
+
+/** Find the first recognized heading row anywhere on the sheet, or start at the first row. */
+export function findHeaderRow(table: string[][], isHeading = hasQuestionHeading): number {
+  const headingRow = table.findIndex(isHeading);
   return headingRow < 0 ? 0 : headingRow;
 }
 
