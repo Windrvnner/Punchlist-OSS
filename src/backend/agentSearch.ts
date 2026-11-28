@@ -5,7 +5,7 @@
  */
 import { int, prose, strings } from './lenient';
 import { pageOf, rankRecords, type Page } from './recordSearch';
-import { batchesOf } from './agentFolder';
+import { batchesOf } from './agentBatches';
 import { qaRow, qaText } from './qaRow';
 import type { AgentRun } from './agentRun';
 import { foundAt, withPlaces } from './agentRun';

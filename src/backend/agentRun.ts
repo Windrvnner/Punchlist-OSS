@@ -10,12 +10,10 @@ import type { AgentKit, AgentQuestion, DealDoc, Run, Sent } from './agentKit';
 import { oneLine } from './agentPrompts';
 import { questionIdsIn } from './qaRow';
 import { docHandle } from './recordIds';
+import { sameDoc } from './agentBatches';
 
 /** a document's key across deals, as a folder read keeps what it has read */
 export const dealDocKey = (doc: { dealId: string; rec: DocRecord }) => `${doc.dealId}|${doc.rec.docId}`;
-/** whether two documents are the same document of the same deal */
-export const sameDoc = (a: { dealId: string; rec: DocRecord }, b: { dealId: string; rec: DocRecord }) =>
-  a.dealId === b.dealId && a.rec.docId === b.rec.docId;
 /** whether a source cites this document */
 export const cites = (source: Source, doc: Sent) => source.dealId === doc.dealId && source.docId === doc.rec.docId;
 /** a source as a step shows it: where it is and the words it quotes */
