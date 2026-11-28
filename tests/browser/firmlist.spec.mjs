@@ -2,19 +2,15 @@
 // Runs on the mock services, whose rewording and duplicate check stand in for the fast model.
 import { launchChrome } from './chrome.mjs';
 import {
+  checkChecklistFileFormats, checkEmptyChecklistShelf, general, itemSheet, solar, uploadSheet,
+} from './checklistFileFormats.mjs';
+import {
   checkChooseColumns, checkHeadingRecovery, checkHeadingRow, checkKeptHeading, checkMouseStep, checkPendingSheetStep,
   headingWorkbook,
 } from './headingRow.mjs';
 import { checkDuplicateRetries, checkSheetReadDuringRetry } from './firmlistRetries.mjs';
-import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'firmlist-'));
-const csv = path.join(dir, 'Solar checklist.csv');
-fs.writeFileSync(csv, ['Area,Requirement,Owner', 'Interconnection,Interconnection agreement executed; conditions to energization identified,AM', 'Interconnection,Network upgrade costs allocated and capped,AM',
-  'Equipment,Inverter supply / LTSA in place,SL', 'Land,Site control covers the whole array and the gen-tie,PN', 'Interconnection,interconnection agreement executed; conditions to energization identified.,AM'].join('\n'));
-const general = path.join(dir, 'General.csv');
-fs.writeFileSync(general, ['Checklist item', 'Insurance is in place', 'Site control covers the whole array and the gen-tie'].join('\n'));
 const browser = await launchChrome();
 
 async function start(size = [1280, 736], scheme = 'dark') {
@@ -26,13 +22,17 @@ async function start(size = [1280, 736], scheme = 'dark') {
 }
 async function bring(page, file, layer, name, beforeGo = async () => {}) {
   await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open');
-  await page.waitForSelector('#fl-import'); await page.click('#fl-import'); await page.setInputFiles('#cl-file', file); await page.waitForSelector('#cl-next');
+  await page.click('#fl-import');
+  await uploadSheet(page, file);
+  await page.waitForSelector('#cl-next');
   await page.click(`[data-layer=${layer}]`); if (name) await page.fill('#cl-name', name);
   await page.click('#cl-next'); await page.waitForSelector('#cl-go'); await beforeGo(); await page.click('#cl-go'); await page.waitForSelector('#fl-count');
 }
 /** waits for the model's reading of the list to finish */
 const read = (page) => page.waitForFunction(() => !/^Asking/.test(document.querySelector('#cl-line')?.textContent ?? 'Asking'), null, { timeout: 30000 });
 const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().items).filter((i) => i.dealId === d).map((i) => [i.text, i.off]).sort(), id);
+
+await checkChecklistFileFormats(start, say);
 
 { // #380: the columns-by-hand fallback keeps the typed row separate from the accepted checklist preview.
   const { ctx, page } = await start();
@@ -66,7 +66,7 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   await bring(page, general, 'broad', '');
   const afterGeneral = await itemsOf(page, id);
   await page.keyboard.press('Escape');
-  await bring(page, csv, 'technology', 'Solar', async () => {
+  await bring(page, solar, 'technology', 'Solar', async () => {
     const seen = await page.evaluate(() => ({ rewords: document.querySelectorAll('#cl-rewords [data-reword]').length, pairs: document.querySelectorAll('#cl-pairs .rv-pair').length, checked: document.querySelectorAll('#cl-rewords input:checked, #cl-pairs input:checked').length, general: [...document.querySelectorAll('#cl-pairs .tag')].map((t) => t.textContent) }));
     say('review: suggestions and duplicates are listed, none checked, a match in the general list cannot be checked', seen.rewords >= 2 && seen.pairs === 2 && seen.checked === 0 && seen.general.includes('General'), JSON.stringify(seen));
     await page.click('#cl-rewords [data-reword="2"]'); await page.click('#cl-pairs [data-remove="4"]');
@@ -85,7 +85,7 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   say('only what was checked is reworded or removed', JSON.stringify(lists[1]) === JSON.stringify(['technology', 'Solar', ['Interconnection agreement executed; conditions to energization identified', 'Network upgrade costs allocated and capped', 'Inverter supply and long-term service agreement in place.', 'Site control covers the whole array and the gen-tie']]), JSON.stringify(lists));
   await page.keyboard.press('Escape');
   // the same file brought in again: the rewording taken last time comes back checked, so the old wording is not added beside it
-  await bring(page, csv, 'technology', 'Solar', async () => {
+  await bring(page, solar, 'technology', 'Solar', async () => {
     const again = await page.evaluate(() => ({
       checked: [...document.querySelectorAll('#cl-rewords input:checked')].map((i) => i.dataset.reword),
       tip: document.querySelector('#cl-rewords [data-reword="2"]')?.closest('label')?.title,
@@ -123,10 +123,17 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
 
 { // The New deal form picks from the firm's lists, with search once there are many; changing a list offers to turn off the old one's items
   const { ctx, page } = await start();
-  const one = (name, rows) => { const f = path.join(dir, `${name}.csv`); fs.writeFileSync(f, ['Item', ...rows].join('\n')); return f; };
-  await bring(page, one('LNG', ['LNG supply agreement executed', 'Marine terminal permits in place', 'Insurance is in place']), 'technology', 'LNG'); await page.keyboard.press('Escape');
-  await bring(page, one('CCGT', ['Air permit issued', 'Insurance is in place']), 'technology', 'CCGT'); await page.keyboard.press('Escape');
-  for (const t of ['Biomass', 'Geothermal', 'Hydro', 'Nuclear', 'Offshore wind', 'Onshore wind', 'Solar']) { await bring(page, one(t, [`${t} study reviewed`]), 'technology', t); await page.keyboard.press('Escape'); }
+  const lng = itemSheet('LNG', [
+    'LNG supply agreement executed', 'Marine terminal permits in place', 'Insurance is in place',
+  ]);
+  await bring(page, lng, 'technology', 'LNG');
+  await page.keyboard.press('Escape');
+  await bring(page, itemSheet('CCGT', ['Air permit issued', 'Insurance is in place']), 'technology', 'CCGT');
+  await page.keyboard.press('Escape');
+  for (const name of ['Biomass', 'Geothermal', 'Hydro', 'Nuclear', 'Offshore wind', 'Onshore wind', 'Solar']) {
+    await bring(page, itemSheet(name, [`${name} study reviewed`]), 'technology', name);
+    await page.keyboard.press('Escape');
+  }
   await page.click('#new-deal'); await page.waitForSelector('#nd-name, #add-new'); if (await page.$('#add-new')) await page.click('#add-new'); await page.fill('#nd-name', 'Coho'); await page.click('#nd-technology > button'); await page.waitForSelector('#nd-technology-menu input');
   const searchFirst = await page.evaluate(() => document.activeElement?.matches('#nd-technology-menu input'));
   await page.keyboard.type('ln'); const shown = await page.$$eval('#nd-technology-menu .scroll [data-pick]', (b) => b.map((x) => x.dataset.pick));
@@ -169,10 +176,12 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
 
 { // The Checklist is grouped by list, then section, then subsection, read from the file's Section and Subsection columns
   const { ctx, page, id } = await start();
-  const f = path.join(dir, 'Sections.csv');
-  fs.writeFileSync(f, ['Section,Sub-section,Item', 'Finance,Model,The model is audited', ',,Reserves are funded', ',Funding,Equity is committed', 'Legal,,Approvals are in place'].join('\n'));
+  const f = { name: 'Sections.ods', grid: [
+    ['Section', 'Sub-section', 'Item'], ['Finance', 'Model', 'The model is audited'], ['', '', 'Reserves are funded'],
+    ['', 'Funding', 'Equity is committed'], ['Legal', '', 'Approvals are in place'],
+  ] };
   await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import');
-  await page.setInputFiles('#cl-file', f); await page.waitForSelector('#cl-next'); await read(page);
+  await uploadSheet(page, f); await page.waitForSelector('#cl-next'); await read(page);
   const head = await page.$$eval('.imprev th', (t) => t.map((x) => x.textContent));
   const rows = await page.$$eval('.imprev tbody tr', (t) => t.map((r) => [...r.cells].map((c) => c.textContent).join('/')));
   say('the import reads a Sub-section column, carries a section filled in once down to the rows under it, and previews it', JSON.stringify(head) === '["Section","Subsection","Item"]' && JSON.stringify(rows) === JSON.stringify(['Finance/Model/The model is audited', 'Finance/Model/Reserves are funded', 'Finance/Funding/Equity is committed', 'Legal//Approvals are in place']), JSON.stringify({ head, rows }));
@@ -255,9 +264,9 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   const item = (i) => `Deliver the ${w(i)}xa ${w(i)}yb ${w(i)}zc report`; const again = (i) => `The ${w(i)}zc ${w(i)}xa ${w(i)}yb report, deliver it`;
   // 300 rows: 270 items, repeats of the first 10 at 270 to 279, and 10 items at 280 to 289 repeated at 290 to 299
   const rows = [...Array.from({ length: 270 }, (_, i) => item(i)), ...Array.from({ length: 10 }, (_, i) => again(i)), ...Array.from({ length: 10 }, (_, i) => item(400 + i)), ...Array.from({ length: 10 }, (_, i) => again(400 + i))];
-  const f = path.join(dir, 'Missed.csv'); fs.writeFileSync(f, ['Item', ...rows].join('\n'));
+  const f = itemSheet('Missed', rows);
   await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import');
-  await page.setInputFiles('#cl-file', f); await page.waitForSelector('#cl-next'); await page.click('[data-layer=broad]');
+  await uploadSheet(page, f); await page.waitForSelector('#cl-next'); await page.click('[data-layer=broad]');
   await page.evaluate(() => { window.__sameMissed = 20; }); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
   const first = await page.evaluate(() => ({ pairs: document.querySelectorAll('#cl-pairs .rv-pair').length, missed: document.querySelector('#cl-missed')?.textContent ?? '', retry: document.querySelector('#cl-retry')?.textContent ?? '', tip: document.querySelector('#cl-retry')?.title ?? '' }));
   say('the items not compared are counted beside the duplicates found, with Retry beside them', first.pairs === 10 && /could not be reached for 20 items$/.test(first.missed) && first.retry === 'Retry' && first.tip === 'Ask about them again', JSON.stringify(first));
@@ -282,7 +291,7 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   const fresh = await start(); const p2 = fresh.page;
   await p2.click('#u-menu'); await p2.waitForSelector('#s-checklist-open'); await p2.click('#s-checklist-open'); await p2.waitForSelector('#fl-import'); await p2.click('#fl-import');
   // the list is read before the service goes down: only the duplicate check is to fail
-  await p2.setInputFiles('#cl-file', f); await p2.waitForSelector('#cl-next'); await read(p2); await p2.click('[data-layer=broad]');
+  await uploadSheet(p2, f); await p2.waitForSelector('#cl-next'); await read(p2); await p2.click('[data-layer=broad]');
   await p2.evaluate(() => { window.__down = true; }); await p2.click('#cl-next'); await p2.waitForSelector('#cl-go');
   const failed = await p2.evaluate(() => ({ pairs: document.querySelectorAll('#cl-pairs .rv-pair').length, head: [...document.querySelectorAll('.rv-h')].map((h) => h.textContent).join(' | ') }));
   await p2.evaluate(() => { window.__down = false; }); await p2.click('#cl-retry'); await p2.waitForFunction(() => document.querySelectorAll('#cl-pairs .rv-pair').length > 0);
@@ -301,9 +310,10 @@ await checkSheetReadDuringRetry(start, say);
   const { ctx, page, id } = await start();
   const W = ['lender', 'insurance', 'interconnection', 'permit', 'easement', 'offtake', 'warranty', 'reserve', 'survey', 'turbine', 'inverter', 'substation', 'hedge', 'audit', 'zoning', 'transmission'];
   const unique = Array.from({ length: 2200 }, (_, i) => `${W[i % 16]} ${W[(i * 7 + 3) % 16]} schedule ${i + 1} delivered${i % 9 === 0 ? ' / LTSA reviewed' : ''}`);
-  const big = path.join(dir, 'Big.csv'); fs.writeFileSync(big, ['Section,Item', ...[...unique, ...unique.slice(0, 200)].map((t, i) => `Part ${Math.floor(i / 100) + 1},${t}`)].join('\n'));
+  const rows = [...unique, ...unique.slice(0, 200)].map((text, index) => [`Part ${Math.floor(index / 100) + 1}`, text]);
+  const big = { name: 'Big.ods', grid: [['Section', 'Item'], ...rows] };
   await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import');
-  await page.setInputFiles('#cl-file', big); await page.waitForSelector('#cl-next'); await read(page);
+  await uploadSheet(page, big); await page.waitForSelector('#cl-next'); await read(page);
   const mapStep = await page.evaluate(() => ({ line: document.querySelector('#cl-line').textContent, buttons: [...document.querySelectorAll('.imdlg .xfoot .btn')].map((b) => b.textContent), file: document.querySelector('.imfile').textContent, note: !!document.querySelector('#cl-namenote') }));
   // why Next is off shows on hover, not only in its title
   await page.click('[data-layer=technology]'); const unnamed = await page.evaluate(() => { const b = document.querySelector('#cl-next'); const r = b.getBoundingClientRect(); const hover = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('[title]')?.getAttribute('title'); return hover === b.title ? b.title : `hover: ${hover}`; }); await page.fill('#cl-name', 'Solar');
@@ -332,14 +342,17 @@ await checkSheetReadDuringRetry(start, say);
 
 { // One list changed on two PCs at once: only its row asks for a choice, the others stay as they are, and keeping a version ends it
   const { ctx, page } = await start();
-  await bring(page, general, 'broad'); await page.keyboard.press('Escape'); await bring(page, csv, 'sector', 'Solar');
+  await bring(page, general, 'broad'); await page.keyboard.press('Escape'); await bring(page, solar, 'sector', 'Solar');
   const sid = await page.evaluate(async () => { const l = Object.values(store.get().firmList).find((x) => x.name === 'Solar');
     await __peer.edit(l.id, { items: [...l.items.slice(1), ...l.items.slice(0, 1), { text: 'Spare inverters held on site' }] }); return l.id; });
   await page.waitForSelector('[data-choose]');
   const row = await page.evaluate(() => [...document.querySelectorAll('.fl-row')].map((r) => [r.dataset.list, r.querySelector('.cf')?.textContent ?? '', r.querySelector('.linkb').textContent]));
   say('only the list changed on two PCs shows Two versions and Choose…; the general list keeps Replace…', JSON.stringify(row) === JSON.stringify([['', '', 'Replace…'], ['Solar', 'Two versions', 'Choose…']]), JSON.stringify(row));
   // importing that list again says so at Next, before any review is made
-  await page.click('#fl-import'); await page.setInputFiles('#cl-file', csv); await page.waitForSelector('#cl-next'); await read(page);
+  await page.click('#fl-import');
+  await uploadSheet(page, solar);
+  await page.waitForSelector('#cl-next');
+  await read(page);
   await page.click('[data-layer=sector]'); await page.fill('#cl-name', 'solar');
   const next = await page.$eval('#cl-next', (b) => ({ disabled: b.disabled, why: b.title }));
   say('Next waits, saying why, when the list picked is in two versions', next.disabled && next.why === 'The Solar list has two versions. Choose one first', JSON.stringify(next));
@@ -362,8 +375,8 @@ await checkSheetReadDuringRetry(start, say);
 
 { // The list splits while its review is open: Choose… is offered there, and Back returns to the review with its check marks
   const { ctx, page } = await start();
-  await bring(page, csv, 'sector', 'Solar');
-  await page.click('#fl-import'); await page.setInputFiles('#cl-file', csv); await page.waitForSelector('#cl-next');
+  await bring(page, solar, 'sector', 'Solar');
+  await page.click('#fl-import'); await uploadSheet(page, solar); await page.waitForSelector('#cl-next');
   await page.click('[data-layer=sector]'); await page.fill('#cl-name', 'Solar'); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
   await page.click('[data-remove]'); const checked = await page.$$eval('[data-remove]:checked', (b) => b.length); await page.focus('#cl-go');
   await page.evaluate(async () => { const l = Object.values(store.get().firmList).find((x) => x.name === 'Solar'); await __peer.edit(l.id, { items: [...l.items, { text: 'Spare inverters held on site' }] }); });
@@ -415,7 +428,10 @@ await checkSheetReadDuringRetry(start, say);
         + '<div class="cf-set"><div class="cf-line"><span class="cf-now">Signed in</span>'
         + '<button type="button" class="btn sm">Sign Out</button></div></div></div>');
       const desktop = fits(); document.querySelector('#s-shared').remove(); document.querySelector('#s-signin').remove(); return browser && desktop; });
-    await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import'); await page.setInputFiles('#cl-file', csv); await page.waitForSelector('#cl-next');
+    await page.click('#s-checklist-open');
+    await page.click('#fl-import');
+    await uploadSheet(page, solar);
+    await page.waitForSelector('#cl-next');
     const fits = await page.evaluate(() => { const d = document.querySelector('.imdlg'); const r = d.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && d.scrollWidth <= d.clientWidth + 1; });
     say(`Settings fits without scrolling, and the import dialog fits across · ${size.join('x')} ${scheme}`, settings && fits, JSON.stringify({ settings, fits }));
     await ctx.close();
@@ -490,9 +506,9 @@ async function bulkWording(page) {
   });
   rows[7] += '; the access indemnity is signed';
   rows.push(rows[0]);   // offered for removal, with no wording suggestion
-  const f = path.join(dir, 'Wording.csv'); fs.writeFileSync(f, ['Item', ...rows].join('\n'));
+  const f = itemSheet('Wording', rows);
   await openChecklistImport(page);
-  await page.setInputFiles('#cl-file', f); await page.waitForSelector('#cl-next'); await page.click('[data-layer=broad]');
+  await uploadSheet(page, f); await page.waitForSelector('#cl-next'); await page.click('[data-layer=broad]');
   await page.evaluate(() => { window.__fail = { reword: true }; }); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
   const failed = await page.evaluate(() => ({ head: document.querySelector('.rv-h').textContent, retry: document.querySelector('#cl-reword-retry')?.textContent ?? '', tip: document.querySelector('#cl-reword-retry')?.title ?? '', rows: document.querySelectorAll('#cl-rewords .rv-row').length }));
   say('wording that failed says Not asked, with Retry beside it', /^Not asked/.test(failed.head) && failed.retry === 'Retry' && failed.tip === 'Ask for them again' && failed.rows === 0, JSON.stringify(failed));
@@ -538,60 +554,23 @@ async function bulkWording(page) {
   const { ctx, page } = await start();
   await bring(page, general, 'broad', ''); await page.keyboard.press('Escape');
   const lists = async () => { await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); };
-  await lists(); await page.click('#fl-import'); await page.setInputFiles('#cl-file', csv); await page.waitForSelector('#cl-next'); await read(page);
+  await lists();
+  await page.click('#fl-import');
+  await uploadSheet(page, solar);
+  await page.waitForSelector('#cl-next');
+  await read(page);
   await page.click('[data-layer=technology]'); await page.fill('#cl-name', 'Solar'); await page.keyboard.press('Escape'); await page.waitForSelector('.imdlg', { state: 'detached' });
   await lists(); await page.click('.fl-row[data-list=""] .linkb'); await page.waitForSelector('#cl-paste');
   const replace = { file: !!(await page.$('#cl-next')), title: await page.textContent('.imdlg h2') };
   await page.keyboard.press('Escape'); await lists(); await page.click('#fl-import'); await page.waitForSelector('#cl-next');
   const kept = { name: await page.inputValue('#cl-name'), source: await page.textContent('.imfile') };
   say('Replace… opens on its own list, and Import a List… comes back as it was left', !replace.file
-    && kept.name === 'Solar' && kept.source.startsWith('Solar checklist.csv'), JSON.stringify({ replace, kept }));
+    && kept.name === 'Solar' && kept.source.startsWith('Solar checklist.ods'), JSON.stringify({ replace, kept }));
   say('no errors on the page', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
 
-{ // No lists yet: one drop area with the import icon stands in for the empty sections
-  for (const [size, scheme] of [[[1280, 736], 'dark'], [[1024, 640], 'light']]) {
-    const { ctx, page } = await start(size, scheme);
-    const open = async () => {
-      await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open');
-      await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import');
-    };
-    await open();
-    const empty = await page.evaluate(() => {
-      const zone = document.querySelector('#fl-drop'); const dialog = zone?.closest('.dlg');
-      return {
-        zone: zone?.offsetHeight, dialog: dialog?.offsetHeight,   // as laid out, not mid-way through the opening scale
-        icon: !!zone?.querySelector('svg'), words: zone?.textContent.trim(),
-        sections: document.querySelectorAll('.fl-sec').length, count: !!document.querySelector('#fl-count'),
-      };
-    });
-    say(`no lists: one 160px drop area with the icon, in a dialog at least 360px tall (${size[0]})`,
-      empty.zone === 160 && empty.dialog >= 360 && empty.icon
-        && empty.words === 'Drop a checklist here, or choose a file…' && empty.sections === 0 && !empty.count,
-      JSON.stringify(empty));
-    await page.setInputFiles('#fl-file', csv); await page.waitForSelector('#cl-next'); await read(page);
-    const opened = { title: await page.textContent('.imdlg h2'), source: await page.textContent('.imfile') };
-    say(`a file chosen there opens Import a checklist with it read (${size[0]})`,
-      opened.title === 'Import a Checklist' && opened.source.startsWith('Solar checklist.csv'), JSON.stringify(opened));
-    // the import under way is kept: a second file on the empty dialog opens it as it was left, the choices in it kept
-    await page.click('[data-layer=technology]'); await page.fill('#cl-name', 'Solar');
-    await page.keyboard.press('Escape'); await page.waitForSelector('.imdlg', { state: 'detached' });
-    await open(); await page.setInputFiles('#fl-file', general); await page.waitForSelector('#cl-next');
-    const kept = { name: await page.inputValue('#cl-name'), source: await page.textContent('.imfile') };
-    say(`an import under way is never replaced by a file dropped on the empty dialog (${size[0]})`,
-      kept.name === 'Solar' && kept.source.startsWith('Solar checklist.csv'), JSON.stringify(kept));
-    await page.click('#cl-next'); await page.waitForSelector('#cl-go'); await page.click('#cl-go');
-    await page.waitForSelector('#fl-count');
-    say(`with a list, the layers and the count come back (${size[0]})`,
-      !(await page.$('#fl-drop')) && (await page.$$('.fl-sec')).length === 4, await page.textContent('#fl-count'));
-    await page.click('#fl-import'); await page.waitForSelector('#cl-drop');
-    const iconFirst = !!(await page.$('#cl-drop > svg + div'));
-    say(`the import's own drop area has the icon above its words (${size[0]})`, iconFirst);
-    say(`no errors on the page (${size[0]})`, page.errors.length === 0, JSON.stringify(page.errors));
-    await ctx.close();
-  }
-}
+await checkEmptyChecklistShelf(start, say, read);
 
-await browser.close(); fs.rmSync(dir, { recursive: true, force: true });
+await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);
