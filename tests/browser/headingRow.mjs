@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { itemDocument } from './checklistFileFormats.mjs';
+import { openKeptChecklist } from './checklistKeptTable.mjs';
 
 // Build the import at deal scale from the existing technology checklist and the project's separate sites.
 const items = [...fs.readFileSync(new URL('../fixtures/pastedList.ts', import.meta.url), 'utf8')
@@ -30,7 +32,10 @@ export async function headingWorkbook(page, prefix, { supplementOnly = false, he
     : [headings, rows[0], headings, ...rows.slice(1)];
   const supplement = { name: 'Supplement', grid: [[], [], [], headings, rows.at(-1)] };
   const sheets = supplementOnly ? [supplement] : [{ name: 'Main', grid }, supplement];
-  await page.setInputFiles(`#${prefix}-file`, await spreadsheetFile(page, name, sheets));
+  if (qa) await page.setInputFiles(`#${prefix}-file`, await spreadsheetFile(page, name, sheets));
+  else await openKeptChecklist(page, name, sheets, {
+    failures: { readList: true }, mapping: { item: 1, section: 0 },
+  });
   return { lastRow: grid.length, first: rows[0][1], next: rows[1][1], other: rows.at(-1)[1] };
 }
 
@@ -252,11 +257,15 @@ export async function checkKeptHeading(page, prefix, fixture, reopen) {
   await page.reload();
   await reopen();
   const afterReload = await kept();
-  // A new file can have the same name, sheet and heading as the old import.
   await page.click(`#${prefix}-back`);
-  if (prefix === 'cl') await page.evaluate(() => { window.__fail = { readList: true }; });
+  if (prefix === 'cl') {
+    const wording = 'Confirm the executed easement and access rights.';
+    await page.setInputFiles('#cl-file', itemDocument('Updated checklist', [wording]));
+    await page.locator('.imprev').getByText(wording, { exact: true }).waitFor();
+    return { afterClose, afterReload, replaced: !await field.count() && !await page.locator(unused).count() };
+  }
+  // A new Q&A file can have the same name, sheet and heading as the old import.
   await headingWorkbook(page, prefix, { supplementOnly: true });
-  if (prefix === 'cl') await page.click('#cl-bycolumns');
   const replaced = await field.inputValue() === '4' && !(await page.locator(unused).isVisible());
   return { afterClose, afterReload, replaced };
 }
@@ -278,4 +287,29 @@ export async function checkManualLayout(page, fixture) {
   await page.fill('#im-header', '1');
   await ready(page, 'im');
   return manualLayout;
+}
+
+// The columns-by-hand fallback keeps the typed row separate from the accepted checklist preview (#380).
+export async function checkChecklistHeadings(start, say) {
+  const { ctx, page } = await start();
+  const open = async () => {
+    await page.click('#u-menu');
+    await page.click('#s-checklist-open');
+    await page.click('#fl-import');
+  };
+  const titled = await headingWorkbook(page, 'cl', { headingAtSix: true });
+  const autoDetected = await checkChooseColumns(page, titled, 6);
+  const fixture = await headingWorkbook(page, 'cl');
+  const detectorFailed = await checkChooseColumns(page, fixture, 1, 'The file is locked');
+  await page.click('[data-layer=broad]');
+  const recovery = await checkHeadingRecovery(page, 'cl', fixture);
+  const mouseStep = await checkMouseStep(page, 'cl', fixture);
+  const pendingSheetStep = await checkPendingSheetStep(page, 'cl');
+  const { invalid, ...checks } = await checkHeadingRow(page, 'cl', fixture, '#cl-asksame');
+  const kept = await checkKeptHeading(page, 'cl', fixture, open);
+  const result = { ...checks, ...recovery, ...kept, mouseStep, pendingSheetStep, autoDetected, detectorFailed };
+  say('checklist heading-row edits preserve typed text and the accepted preview',
+    fixture.lastRow >= 2000 && invalid.every(Boolean) && Object.values(result).every(Boolean) && !page.errors.length,
+    JSON.stringify({ invalid, ...result, errors: page.errors }));
+  await ctx.close();
 }

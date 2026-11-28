@@ -33,8 +33,8 @@ export async function readList(
   return ok(again.ok ? fillUnplaced(lines, reading, readingOf(again.value, cellRows)) : reading);
 }
 
-/** The files a list can be brought in from: spreadsheets, documents and plain text. */
-const FILE_EXTENSIONS = ['.ods', '.docx', '.docm', '.doc', '.odt', '.rtf', '.pdf', '.txt', '.text', '.md'];
+/** The files a list can be brought in from: documents and plain text. */
+const FILE_EXTENSIONS = ['.docx', '.docm', '.doc', '.odt', '.rtf', '.pdf', '.txt', '.text', '.md'];
 export const LIST_ACCEPT = FILE_EXTENSIONS.join(',');
 const PLAIN = /\.(txt|text|md)$/;
 
@@ -60,32 +60,25 @@ export const pastedLines = (text: string): string[] =>
 const pastedCellRows = (text: string): number[] =>
   textLines(text).flatMap((line, i) => (pastedCells(line) ? [i + 1] : []));
 
-/**
- * A chosen file as a source for the model: a spreadsheet as its table (`table`, every row from the top of the sheet, so
- * that nothing above a heading row is passed over), anything else as its text. Nothing is changed.
- */
+/** The lines of a chosen document or text file, for the model. Nothing is changed. */
 export async function readListFile(
   store: Store,
   file: { name: string; arrayBuffer(): Promise<ArrayBuffer> },
-): Promise<Result<{ table: ImportTable } | { lines: string[] }>> {
+): Promise<Result<{ lines: string[] }>> {
   const name = file.name.toLowerCase();
   if (!FILE_EXTENSIONS.some((extension) => name.endsWith(extension))) {
-    const message = 'Choose a Word document, PDF, OpenDocument file, RTF, or text file';
+    const message = 'Choose a Word document, PDF, OpenDocument text document, RTF, or text file';
     return fail({ kind: 'invalid', message });
   }
   let bytes: Uint8Array;
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }
-  if (name.endsWith('.ods')) {
-    const read = await readImportBytes(store, file.name, bytes, { headerRow: 1 });
-    return read.ok ? ok({ table: read.value }) : read;
-  }
   let text: string;
   // by byte-order mark, else UTF-8, else Windows-1252, as a CSV is read (#382)
   if (PLAIN.test(name)) {
     try { text = decodeText(bytes); } catch (e) { return fail({ kind: 'invalid', message: (e as Error).message }); }
   } else {
     const sheets = store.services.sheets;
-    if (!sheets.text) return fail({ kind: 'invalid', message: 'Only spreadsheets and text files can be read here' });
+    if (!sheets.text) return fail({ kind: 'invalid', message: 'Only text files can be read here' });
     const r = await sheets.text(bytes, file.name);
     if (!r.ok) return r;
     text = r.value;
@@ -113,12 +106,9 @@ function mappedTable(table: ImportTable): MappedChecklistTable {
 
 export async function loadChecklistSource(
   store: Store, file: ChecklistFile,
-): Promise<Result<MappedChecklistTable | { text: ChecklistText }>> {
+): Promise<Result<ChecklistText>> {
   const read = await readListFile(store, file);
-  if (!read.ok) return read;
-  return 'table' in read.value
-    ? ok(mappedTable(read.value.table))
-    : ok({ text: { name: file.name, lines: read.value.lines } });
+  return read.ok ? ok({ name: file.name, lines: read.value.lines }) : read;
 }
 
 /** When reading with the model, keep rows above any heading so they can be tied out too. */

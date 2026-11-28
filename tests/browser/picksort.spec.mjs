@@ -3,7 +3,7 @@
 // "Phase 10") as a person reads them. At deal scale: 2,000 questions from 30 parties, 40 technology lists.
 // SHOTS=dir also saves screenshots of the lists, dark and light, at 1280x736 and 1024x640.
 import { launchChrome } from './chrome.mjs';
-import { spreadsheetFile } from './headingRow.mjs';
+import { openKeptChecklist } from './checklistKeptTable.mjs';
 import fs from 'node:fs'; import path from 'node:path';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const SHOTS = process.env.SHOTS; if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
@@ -158,11 +158,7 @@ for (const [size, scheme] of [[[1280, 736], 'dark'], [[1280, 736], 'light'], [[1
         await shot(page, 'firm-lists', scheme, size);
     const grid = [['Area', 'Requirement', 'Owner'],
       ['Grid', 'Interconnection agreement executed', 'AM'], ['Land', 'Site control in place', 'PN']];
-    const file = await spreadsheetFile(page, 'List.ods', [{ name: 'Sheet1', grid }]);
-    // the column picks are the fallback when the model cannot read the list: Choose columns from the not-read line
-    await page.evaluate(() => { window.__fail = { readList: true }; });
-    await page.click('#fl-import');
-    await page.setInputFiles('#cl-file', file);
+    await openKeptChecklist(page, 'List.ods', [{ name: 'Sheet1', grid }], { failures: { readList: true } });
     await page.click('#cl-bycolumns');
     await page.waitForSelector('[data-clmap="item"]');
     await page.evaluate(() => { window.__fail = {}; });

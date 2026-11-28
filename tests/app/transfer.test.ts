@@ -17,7 +17,6 @@ import { exportQuestions, exportFindings, readImportFile, previewImport } from '
 import { readListFile } from '../../src/app/listRead';
 import { search, loadAllForSearch } from '../../src/app/search';
 import { prepareImport, suggestMapping, TEXT_MAX } from '../../src/domain/importExport';
-import { checklistSpreadsheet } from '../fixtures/checklistSpreadsheet';
 
 const COMMANDS = [CreateDeal, CreateQuestion, EditQuestionField, SetResponse, SetQuestionStatus, CreateFinding, ReviewFinding, ImportQuestions, RevertImport, RecoverDrafts, RequestDraft, ApplyDraft, AcceptDraft];
 for (const c of COMMANDS) registry.set(c.name, c);
@@ -231,19 +230,18 @@ describe('files of any size are read (#1060)', () => {
 
   it('reads a checklist file over 20 MB', async () => {
     const { store } = make();
-    store.services.sheets = checklistSpreadsheet;
     const bytes = bigLog();
     expect(bytes.length).toBeGreaterThan(20 * 1024 * 1024);
-    const back = await readListFile(store, fileOf('list.ods', bytes));
+    const back = await readListFile(store, fileOf('list.txt', bytes));
     if (!back.ok) throw new Error(back.error.message);
-    expect('table' in back.value && back.value.table.rows.length).toBe(2500);
+    expect(back.value.lines).toHaveLength(2501);
   }, 30_000);
 
   it('a file that cannot be opened says so', async () => {
     const { store } = make();
     const arrayBuffer = async (): Promise<ArrayBuffer> => { throw new Error('gone'); };
     const qa = await readImportFile(store, { name: 'log.csv', arrayBuffer });
-    const checklist = await readListFile(store, { name: 'list.ods', arrayBuffer });
+    const checklist = await readListFile(store, { name: 'list.txt', arrayBuffer });
     for (const back of [qa, checklist]) {
       expect(back.ok ? '' : back.error.message).toBe('The file could not be opened');
     }

@@ -42,7 +42,7 @@ describe('a plain-text list in any encoding a text editor or Excel saves (#382)'
 });
 
 describe('checklist source formats', () => {
-  it.each(['xlsx', 'XLSM', 'xlsb', 'xls', 'csv'])('refuses a .%s before reading it', async (extension) => {
+  it.each(['xlsx', 'XLSM', 'xlsb', 'xls', 'csv', 'ods'])('refuses a .%s before reading it', async (extension) => {
     const arrayBuffer = vi.fn(async () => new ArrayBuffer(0));
     const source = { name: `Checklist.${extension}`, arrayBuffer };
     const read = vi.fn(async () => ({ ok: true as const, value: { columns: ['Item'], rows: [['Review the lease']] } }));
@@ -53,13 +53,13 @@ describe('checklist source formats', () => {
     expect(LIST_ACCEPT.split(',')).not.toContain(`.${extension.toLowerCase()}`);
   });
 
-  it('passes a Word checklist to the document text reader', async () => {
+  it.each(['docx', 'odt'])('passes a .%s checklist to the document text reader', async (extension) => {
     const bytes = Uint8Array.of(1, 2);
-    const name = 'Checklist.docx';
+    const name = `Checklist.${extension}`;
     const text = vi.fn(async () => ({ ok: true as const, value: 'Site control\nReview the signed lease' }));
     const result = await readListFile({ services: { sheets: { text } } } as never, file(name, bytes));
     expect(text).toHaveBeenCalledWith(bytes, name);
     expect(result).toEqual({ ok: true, value: { lines: ['Site control', 'Review the signed lease'] } });
-    expect(LIST_ACCEPT.split(',')).toContain('.docx');
+    expect(LIST_ACCEPT.split(',')).toContain(`.${extension}`);
   });
 });
