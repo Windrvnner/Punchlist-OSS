@@ -2,6 +2,7 @@
  * Step 3 of the third-party reports sweep (reports.ts). Each issue becomes a finding unless a finding on the deal
  * already covers it. A cutoff keeps verified issues so the next attempt can ask for the rest of the whole report.
  */
+import { createHash } from 'node:crypto';
 import type { DocRecord } from './documents';
 import type { Cited } from './agent';
 import type { Source } from '../domain/model';
@@ -115,6 +116,11 @@ const placement = (s: Source) => JSON.stringify([reportPlace(s), s.quote ?? ''])
 const atPlaces = (key: string, sources: Source[]) => JSON.stringify([key, ...sources.map(placement).sort()]);
 const issueId = (issue: ReadIssue) => issue.finding ?? issue.covered ?? '';
 
+function issueSignature(title: string, body: string[], sources: Source[]) {
+  const parts = [reportTitleKey(title), body, ...sources.map(placement).sort()];
+  return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+}
+
 /** One read of one report, in one call: what it has found. */
 class ReportRead {
   issues: ReadIssue[];
@@ -142,20 +148,20 @@ class ReportRead {
     this.issues = resume?.issues.filter((row) => !row.still).map((row) => row.issue) ?? [];
     this.advisor = resume?.advisor ?? '';
     for (const row of resume?.issues ?? []) {
-      this.rememberPlaces(row.issue, row.sources);
+      this.remember(row);
       if (row.issue.finding) this.reserved.add(row.issue.finding);
     }
   }
 
-  private rememberPlaces(issue: ReadIssue, sources: Source[]) {
+  private remember({ issue, sources, signature }: KeptReportIssue) {
     this.seen.add(atPlaces(issueId(issue), sources));
-    this.seen.add(atPlaces(reportTitleKey(issue.title), sources));
+    if (signature) this.seen.add(signature);
   }
 
-  private keep(issue: ReadIssue, sources: Source[], still?: true) {
+  private keep(row: KeptReportIssue) {
     if (!this.retaining) return;
-    this.rememberPlaces(issue, sources);
-    this.kept.push({ issue, sources, ...(still ? { still } : {}) });
+    this.remember(row);
+    this.kept.push(row);
   }
 
   private get verifying() { return this.retaining || !!this.resume; }
@@ -197,7 +203,7 @@ class ReportRead {
     if (this.verifying) this.dropped.delete(id);
     if (this.seen.has(atPlaces(id, places))) return true;
     await this.cite(id, places);
-    this.keep(was, places, true);
+    this.keep({ issue: was, sources: places, still: true });
     return true;
   }
 
@@ -213,17 +219,17 @@ class ReportRead {
     const own = isOwn(this.k, this.rec.docId, f);
     const issue = own ? { title: f.title, finding: f.id } : { title: f.title, covered: f.id };
     this.issues.push(issue);
-    this.keep(issue, places);
+    this.keep({ issue, sources: places });
   }
 
   /** Continue the existing title ordinals, including a finding written before its cutoff was logged. */
-  private idFor(title: string, places: Source[], known: Known[]) {
+  private idFor(title: string, body: string[], places: Source[], known: Known[]) {
     const key = this.verifying ? reportTitleKey(title) : title;
     let nth = (this.titles.get(key) ?? 0) + 1;
     for (;;) {
       const id = this.k.idFor(this.rec.docId, title, nth);
       const had = this.verifying ? known.find((finding) => finding.id === id) : undefined;
-      if (!this.reserved.has(id) && (!had || samePlaces(had, places))) {
+      if (!this.reserved.has(id) && (!had || sameIssue(had, body, places))) {
         this.titles.set(key, nth);
         return id;
       }
@@ -237,12 +243,14 @@ class ReportRead {
     const fitted = k.fit(prose(row.body).join(PARAGRAPH_SEAM), row.sources as Cited[], this.s.sent);
     // an issue stands on a page of the report a person can open, as any finding does
     if (!fitted.text || !fitted.sources.length) { this.unplaced++; return true; }
-    if (this.seen.has(atPlaces(reportTitleKey(title), fitted.sources))) return true;
-    const id = this.idFor(title, fitted.sources, known);
+    const body = k.fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()));
+    const signature = this.retaining || this.resume ? issueSignature(title, body, fitted.sources) : undefined;
+    if (signature && this.seen.has(signature)) return true;
+    const id = this.idFor(title, body, fitted.sources, known);
     const issue: Issue = {
       title,
       workstream: k.workstreamOf(row.workstream),
-      body: k.fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim())),
+      body,
       sources: fitted.sources,
     };
     // a closed finding on the same issue is named, by its id: with none named, the one given as covering it
@@ -251,15 +259,15 @@ class ReportRead {
     if (!(await k.raise(id, issue))) return false;
     const saved = { title, finding: id };
     this.issues.push(saved);
-    this.keep(saved, fitted.sources);
+    this.keep({ issue: saved, sources: fitted.sources, signature });
     return true;
   }
 
   /** each row of a reply, in order. False when a finding could not be written */
-  async takeAll(rows: Record<string, unknown>[], known: Known[]) {
+  async takeAll(rows: unknown[], known: Known[]) {
     let saved = true;
     for (const row of rows) {
-      if (!row || typeof row !== 'object' || (this.verifying && !isObject(row))) {
+      if (!isObject(row)) {
         if (this.verifying) this.miss();
         continue;
       }
@@ -306,8 +314,8 @@ class ReportRead {
   }
 }
 
-function samePlaces(finding: Known, places: Source[]) {
-  if (!finding.sources) return false;
+function sameIssue(finding: Known, body: string[], places: Source[]) {
+  if (!finding.sources || JSON.stringify(finding.body) !== JSON.stringify(body)) return false;
   const have = new Set(finding.sources.map(placement));
   return places.every((place) => have.has(placement(place)));
 }
@@ -329,10 +337,14 @@ const notReport = (reply: Record<string, unknown>) => reply.report === false && 
 /** Keep the existing single-row form. Only an explicit empty list says the report raises no issues (#1212). */
 function reportIssueRows(reply: Record<string, unknown>): Record<string, unknown>[] | null {
   const issues = reply.issues;
-  if (Array.isArray(issues)) return issues;
-  if (!isObject(issues)) return null;
-  const covered = typeof issues.covered === 'string' && issues.covered !== '';
-  return titleOf(issues) || covered || tagNumber(issues.still, 'E') !== null ? [issues] : null;
+  if (Array.isArray(issues)) return issues.every(issueRow) ? issues : null;
+  return issueRow(issues) ? [issues] : null;
+}
+
+function issueRow(row: unknown): row is Record<string, unknown> {
+  if (!isObject(row)) return false;
+  const covered = typeof row.covered === 'string' && row.covered !== '';
+  return !!titleOf(row) || covered || tagNumber(row.still, 'E') !== null;
 }
 
 /** the report's issues from the model in one call; a reply cut off at the length limit comes back with `cut` */
@@ -400,7 +412,7 @@ async function keepCut(r: ReportRead, reply: Record<string, unknown> | null, kno
   if (reply) {
     r.retaining = true;
     r.hearAdvisor(reply);
-    await r.takeAll(reportIssueRows(reply) ?? [], known);
+    await r.takeAll(listOf(reply.issues), known);
   }
   return r.cutoff();
 }

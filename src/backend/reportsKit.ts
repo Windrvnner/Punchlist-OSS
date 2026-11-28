@@ -26,22 +26,24 @@ export async function knownFindings(repo: Repository, dealId: string): Promise<K
   if (!held.ok) throw failed(held);
   const notes = await repo.list('tombstone', dealId);
   if (!notes.ok) throw failed(notes);
-  type Finding = { id: string; title?: unknown; status?: string; sources?: Source[] };
+  type Finding = { id: string; title?: unknown; status?: string; sources?: Source[]; body?: string[] };
   const live: Known[] = [];
   for (const l of held.value) {
     const d = l.envelope.data as Finding;
     if (typeof d.title !== 'string') continue;
-    live.push({ id: d.id, title: d.title, sources: d.sources, ...(d.status === 'closed' ? { closed: true } : {}) });
+    live.push({
+      id: d.id, title: d.title, sources: d.sources, body: d.body, ...(d.status === 'closed' ? { closed: true } : {}),
+    });
   }
   // a finding a person deleted: an issue it covers is not raised again
-  type Note = { kind?: string; snapshot?: { id?: unknown; title?: unknown; sources?: Source[] } };
+  type Note = { kind?: string; snapshot?: { id?: unknown; title?: unknown; sources?: Source[]; body?: string[] } };
   const gone: Known[] = [];
   for (const l of notes.value) {
     const d = l.envelope.data as Note;
     const { id, title } = d.snapshot ?? {};
     const isFinding = (d.kind ?? 'finding') === 'finding';
     if (isFinding && typeof id === 'string' && typeof title === 'string') {
-      gone.push({ id, title, sources: d.snapshot?.sources, deleted: true });
+      gone.push({ id, title, sources: d.snapshot?.sources, body: d.snapshot?.body, deleted: true });
     }
   }
   return [...live, ...gone];
