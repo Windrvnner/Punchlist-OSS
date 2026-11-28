@@ -60,7 +60,7 @@ import { ok, fail, type Result } from '../domain/result';
 import type { ModelThread, Research } from '../ports';
 import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
-import { strings, prose, list as listOf } from './lenient';
+import { isObject, readJson, strings, prose, list as listOf } from './lenient';
 import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY, withFewerChanges, type ChangeShare } from './limits';
 import { control, SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
@@ -93,6 +93,29 @@ const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […], "offer": {…}}';
 /** the fields a turn's reply is read for */
 const REPLY_KEYS = ['tool', 'text'];
+
+/** A listed retry id can be a read argument. The reply's prose and citations still require opened documents. */
+function forDocumentCheck(text: string, canRequest: (value: unknown) => boolean): string {
+  const reply = readJson(text, REPLY_KEYS);
+  const tool = reply?.tool;
+  const checkArgs = (args: Record<string, unknown>) => {
+    const docs = listOf(args.docs);
+    const remaining = docs.filter((value) => !canRequest(value));
+    return remaining.length < docs.length ? { ...args, docs: remaining } : args;
+  };
+  if (reply && typeof tool === 'string' && tool.trim().toLowerCase() === 'read') {
+    const checked = checkArgs(reply);
+    return checked === reply ? text : JSON.stringify(checked);
+  }
+  // Native tools come as a list of calls. Only a read's docs argument can name a deferred document.
+  if (!text.startsWith('[') || !Array.isArray(tool)) return text;
+  const checked = tool.map((call) => {
+    if (!isObject(call) || call.name !== 'read' || !isObject(call.args)) return call;
+    const args = checkArgs(call.args);
+    return args === call.args ? call : { ...call, args };
+  });
+  return checked.some((call, index) => call !== tool[index]) ? JSON.stringify(checked) : text;
+}
 
 export function chatAgent(kit: AgentKit, opts: AgentOptions = {}) {
   const limits: Limits = {
@@ -230,9 +253,8 @@ class Answering {
    */
   private async reply(turnNumber: number, last: boolean, share: ChangeShare): Promise<Record<string, unknown> | null> {
     const { kit, question, run } = this;
-    const { files, listing, got } = await kit.send(run.whole, run.spansDeals, share);
-    // a document that cannot be opened on this PC was not read
-    if (got.length < run.whole.length) run.whole = got;
+    const { files, listing, got } = await kit.send(run.whole, run.spansDeals, share, kit.cleanDrafts);
+    run.attached(got);
     const turn = this.turnOf(turnNumber, last, files, listing);
     this.turnNow = turn;
     return kit.talk
@@ -290,7 +312,8 @@ class Answering {
    */
   private namesUnopenedDoc(text: string): boolean {
     const { kit, run } = this;
-    return docsUnusable(run.opened, run.spansDeals, REPLY_KEYS, kit.where, undefined, run.gone)(text);
+    const checked = forDocumentCheck(text, (value) => run.canRequest(value));
+    return docsUnusable(run.opened, run.spansDeals, REPLY_KEYS, kit.where, undefined, run.gone)(checked);
   }
 
   /** the turn's whole prompt; `history`: with the conversation's last messages and its transcript */
