@@ -60,6 +60,36 @@ async function heldLayout() {
 
 const updated = ok({ sheet: 'Updated review', headerRow: 0, fields: { text: 'Question', response: 'Response' } });
 
+const accepted = { line: 2, text: 'Provide the execution copy', questionId: 'q_01HZZZZZZZZZZZZZZZZ0000001' };
+
+it.each([false, true])('clears a match when a proposal changes sheets (manual picks: %s, #1210)', async (pick) => {
+  const { layout, table, answer } = await heldLayout();
+  layout.acceptMatch(table, accepted);
+  if (pick) layout.pick('response', 2);
+  expect(layout.view.accepted).toEqual([accepted]);
+  const asked = layout.ask(table);
+  answer(updated);
+  expect(await asked).toBe('');
+  expect(layout.view.table?.sheet).toBe('Updated review');
+  layout.acceptMatch(table, accepted); // a button still rendered for the previous sheet
+  expect(layout.view.accepted).toEqual([]);
+});
+
+it('keeps matches on the same sheet and ignores an overtaken sheet read (#1210)', async () => {
+  const { layout, table, holdReads, releaseRead } = await heldLayout();
+  layout.acceptMatch(table, accepted);
+  holdReads();
+  const old = layout.reread({ sheet: 'Updated review' });
+  const current = layout.reread({ sheet: 'Initial review', headerRow: 2 });
+  releaseRead();
+  await Promise.all([old, current]);
+  expect(layout.view.table).toMatchObject({ sheet: 'Initial review', headerRow: 2 });
+  expect(layout.view.accepted).toEqual([accepted]);
+  layout.replace({ ...table, bytes: new Uint8Array(4) });
+  layout.acceptMatch(table, accepted);
+  expect(layout.view.accepted).toEqual([]);
+});
+
 describe('a layout proposal', () => {
   it('lands and clears the error while nothing overtook it', async () => {
     const held = await heldLayout();

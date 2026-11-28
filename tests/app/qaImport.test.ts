@@ -11,6 +11,7 @@ import {
 import { previewImport, proposeLayout, readImportBytes, type ImportTable } from '../../src/app/transfer';
 import { QaImportLayout } from '../../src/app/qaImportLayout';
 import { SetResponse } from '../../src/app/commands/questions';
+import { ImportQuestions, UndoLastImport } from '../../src/app/commands/importQuestions';
 import { TakeFromQaLog } from '../../src/app/commands/qaLogs';
 import { logOf, updateQaLog } from '../../src/app/qaLog';
 import { dealQuestions, qaChanged, qaKept, qaVersions } from '../../src/app/state';
@@ -300,6 +301,73 @@ it('makes a consolidated log the deal\'s Q&A log unless the person chose otherwi
 });
 
 const logHeadings = ['No.', 'Question', 'Submitted by', 'Response'];
+
+function lenderReviewSheets() {
+  const originals = portfolioQuestions().slice(0, 2_000).map((text, at) => [
+    String(at + 1), text, 'Lender A', 'See the executed agreement',
+  ]);
+  const updates = originals.map(([number, text, party, response], at) => at < 120
+    ? [number, text.toLowerCase().slice(0, -1), party, 'Execution copy is under review']
+    : [number, text, party, response]);
+  const secondLender = updates.map((row, at) => at < 120
+    ? [row[0], row[1], 'Lender B', 'Awaiting confirmation'] : row);
+  return [
+    { name: 'Consolidated', grid: [logHeadings, ...originals] },
+    { name: 'Lender A', grid: [logHeadings, ...updates] },
+    { name: 'Lender B', grid: [logHeadings, ...secondLender] },
+  ];
+}
+
+it('keeps 120 accepted matches off the other sheet of a 2,000-question workbook (#1210)', async () => {
+  await useKeptPort();
+  const app = recoveryApp(undefined, [UndoLastImport]);
+  const sheets = lenderReviewSheets();
+  app.store.services.sheets = {
+    ...app.store.services.sheets,
+    read: async (_bytes, _filename, location) => ok(tableFrom(sheets, location)!),
+  };
+  try {
+    const dealId = await recoveryDeal(app);
+    const bytes = new Uint8Array();
+    const read = async (sheet: string) => {
+      const result = await readImportBytes(app.store, NAME, bytes, { sheet });
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value;
+    };
+    const baseline = await read('Consolidated');
+    const originalRows = prepareQaImport(baseline, baseline.mapping).prepared.rows;
+    expect((await app.store.dispatch(ImportQuestions, {
+      dealId, mode: 'append', rows: originalRows, answerResponded: false,
+    })).ok).toBe(true);
+    const original = dealQuestions(app.store.get(), dealId);
+    expect(original).toHaveLength(2_000);
+    const first = await read('Lender A');
+    const layout = new QaImportLayout(app.store, first, first.mapping, () => {});
+    const preview = (table: ImportTable) => previewImport(app.store, dealId, 'merge',
+      prepareQaImport(table, table.mapping).prepared.rows, false, layout.view.accepted);
+    const dry = preview(first);
+    if (!dry.ok) throw new Error(dry.error.message);
+    expect(dry.value.suggestions).toHaveLength(120);
+    for (const match of dry.value.suggestions) layout.acceptMatch(first, match);
+    expect(preview(first)).toMatchObject({ ok: true, value: { created: 0, updated: 120 } });
+
+    await layout.reread({ sheet: 'Lender B' });
+    const { table, mapping, accepted } = layout.view;
+    if (!table || !mapping) throw new Error('No layout');
+    const { prepared } = prepareQaImport(table, mapping);
+    expect(prepared.rows).toHaveLength(2_000);
+    expect(preview(table)).toMatchObject({ ok: true, value: { created: 120, updated: 0, suggestions: [] } });
+    const choices: QaChoices = { ...choicesFor(table, null), mode: 'merge', answered: false, accepted };
+    expect(await submitQaImport(app.store, dealId, { table, choices }, prepared.rows)).toEqual(ok(undefined));
+    expect(dealQuestions(app.store.get(), dealId)).toHaveLength(2_120);
+    expect(original.map(({ id }) => app.store.get().questions[id])).toEqual(original);
+    expect((await app.store.dispatch(UndoLastImport, { dealId })).ok).toBe(true);
+    expect(dealQuestions(app.store.get(), dealId)).toEqual(original);
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});
 
 async function importPortfolioLog(app: ReturnType<typeof recoveryApp>, dealId: string, rows: string[][]) {
   app.store.services.fs.pathFor = () => PATH;
