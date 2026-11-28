@@ -125,7 +125,10 @@ for (const [w, h] of [[1280, 736], [1024, 640]]) {
       sent[q.id] = { text: q.text, response: q.response, askedBy: q.askedBy, workstream: q.workstream, priority: q.priority, status: q.status };
       if (both(q.n)) { kept[q.id] = { response: LOG, ...(two % 5 === 1 ? { status: 'Open' } : {}) }; two++; } else if (q.n % 10 === 3 && chg < CHANGED) { changed[q.id] = { priority: 'Low' }; chg++; }
     }
-    await run('KeepQaLog', { dealId: d, log: { name: 'Q&A log', file: 'Q&A log.xlsx', folder: 'X:\\Deals\\Proseware', sheet: 'Log', headerRow: 1, mapping: {} } });
+    await run('KeepQaLog', { dealId: d, log: {
+      name: 'Q&A log', file: 'Q&A log.xlsx', folder: 'X:\\Deals\\Proseware', sheet: 'Log', headerRow: 1,
+      headers: [], mapping: {},
+    } });
     await run('RecordQaLogExport', {
       dealId: d,
       name: 'Q&A log',

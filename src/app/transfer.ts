@@ -115,6 +115,7 @@ export interface ImportTable {
   columns: string[];
   /** Source positions, before the reader leaves out unused columns. Older kept imports may omit them. */
   cols?: number[];
+  columnCount?: number;
   rows: string[][];
   lines?: number[];
   mapping: Mapping;
@@ -138,11 +139,11 @@ export async function readImportBytes(
   const t = await store.services.sheets.read(bytes, name, opts);
   if (!t.ok) return t;
   if (!t.value.columns.length) return fail({ kind: 'invalid', message: 'The file has no rows' });
-  const { columns, cols, rows, lines, sheets = [], sheet = '', headerRow = 1, previews = [] } = t.value;
+  const { columns, cols, columnCount, rows, lines, sheets = [], sheet = '', headerRow = 1, previews = [] } = t.value;
   const lastRow = t.value.lastRow ?? rows.length + 1;
   return ok({
-    name, columns, cols, rows, lines, mapping: suggestMapping(columns), bytes, sheets, sheet, headerRow, lastRow,
-    previews,
+    name, columns, cols, columnCount, rows, lines, mapping: suggestMapping(columns), bytes, sheets, sheet,
+    headerRow, lastRow, previews,
   });
 }
 

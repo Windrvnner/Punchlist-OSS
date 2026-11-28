@@ -89,6 +89,8 @@ export const QaLog = z.object({
   folder: z.string().min(1),
   sheet: z.string(),
   headerRow: z.number().int().positive(),
+  headers: z.array(z.object({ label: z.string(), column: z.number().int().nonnegative() })),
+  columnCount: z.number().int().positive().optional(),
   mapping: z.record(z.string(), z.number().int().nonnegative().nullable()),
   last: z.object({
     archive: z.string(), at: z.string(), by: z.string(), sent: z.record(z.string(), z.record(z.string(), z.string())),

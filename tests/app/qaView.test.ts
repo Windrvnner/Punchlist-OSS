@@ -64,7 +64,8 @@ function fixture(): State {
   state.conflicts[foreign.id] = conflict(foreign, 'question');
   state.dealLoad[DEAL] = 'loaded';
   state.deals[DEAL] = Deal.parse({ ...RECORD, id: DEAL, name: 'Renewable portfolio', qaLogs: [{
-    name: 'Q&A', file: 'Consolidated Q&A.csv', folder: 'Portfolio', sheet: 'Log', headerRow: 1, mapping: {},
+    name: 'Q&A', file: 'Consolidated Q&A.csv', folder: 'Portfolio', sheet: 'Log', headerRow: 1,
+    headers: [], mapping: {},
     last: {
       archive: 'Previous Q&A.csv', at: AT, by: 'Deal team', sent: {},
       changed: { [qid(18)]: { priority: 'Low' }, [qid(19)]: { priority: 'Medium' }, [qid(20)]: { priority: '' } },

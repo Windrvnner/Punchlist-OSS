@@ -37,7 +37,8 @@ async function fixture(size = 216) {
   expect(await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: imported.rows }, { quiet: true }))
     .toMatchObject({ ok: true });
   expect(await keepImportedLog(store, dealId, {
-    path: `X:\\Deals\\Portfolio\\${NAME}`, sheet: 'Log', headerRow: 1, mapping: MAPPING, make: true, rows,
+    path: `X:\\Deals\\Portfolio\\${NAME}`, sheet: 'Log', headerRow: 1, columns: COLUMNS,
+    mapping: MAPPING, make: true, rows,
   })).toMatchObject({ ok: true });
   const questions = dealQuestions(store.get(), dealId);
   expect(questions).toHaveLength(size);

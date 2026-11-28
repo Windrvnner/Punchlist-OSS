@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  addedAnswer, addedQuestion, book, csv, launch, logFolder, prepareFiles, room, seedDeals, server,
+  addedAnswer, addedQuestion, book, csv, insertWorkbookNotes, launch, logFolder, prepareFiles, room, seedDeals, server,
 } from './qaLogRecoverySetup.mjs';
 
 async function update(page, dealId) {
@@ -79,6 +79,31 @@ async function checkRecovery(page, dealId, log) {
   assert.deepEqual(result.value.rows, [['1', log.question, log.answer], ['2', addedQuestion, addedAnswer]]);
 }
 
+async function checkMovedResponse(page, dealId) {
+  const response = 'The facility was commissioned on May 18.';
+  const previousWrite = await page.evaluate(async ({ dealId, response }) => {
+    const question = Object.values(store.get().questions).find((row) => row.dealId === dealId && row.n === 1);
+    const previous = store.get().deals[dealId].qaLogs[0].last.at;
+    const input = { dealId, questionId: question.id, response };
+    const result = await store.dispatch(store.commandNamed('SetResponse'), input);
+    if (!result.ok) throw new Error(result.error.message);
+    return previous;
+  }, { dealId, response });
+  insertWorkbookNotes();
+  await update(page, dealId);
+  const outcome = await page.waitForFunction(({ dealId, previousWrite }) => {
+    const state = store.get();
+    const failure = state.ui.toasts.find(({ text }) => text.startsWith('Q&A log not updated'));
+    return failure?.text ?? state.deals[dealId].qaLogs[0].last.at !== previousWrite;
+  }, { dealId, previousWrite });
+  assert.equal(await outcome.jsonValue(), true);
+  const result = await page.evaluate(({ folder, file, sheet }) =>
+    window.punchlist.call('qaLogs', 'read', [{ folder, file }, { sheet, headerRow: 1 }]),
+  { folder: logFolder, ...book });
+  assert(result.ok, JSON.stringify(result));
+  assert.deepEqual(result.value.rows[0], ['1', book.question, 'Leave in Notes', response]);
+}
+
 let desktop;
 try {
   const original = prepareFiles();
@@ -98,6 +123,7 @@ try {
   await ageAsides(desktop.app, [first, second]);
   await checkRecovery(desktop.page, csvDeal, csv);
   await checkRecovery(desktop.page, bookDeal, book);
+  await checkMovedResponse(desktop.page, bookDeal);
   console.log('PASS desktop-qalog-recovery');
 } finally {
   await desktop?.app.close().catch(() => undefined);
