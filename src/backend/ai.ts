@@ -1335,7 +1335,7 @@ export function nodeAi(o: AiOptions) {
   /**
    * The chat's document search as fixed pages (#1102): the keyword ranking as `top` gives it with no room set, only the
    * documents that answer to a word of the query, best first, across deals in turn as `folderList` takes them. A page
-   * of it is cut as a folder read's batches are (agentFolder.ts `batchesOf`).
+   * of it is cut as a folder read's batches are (agentBatches.ts `batchesOf`).
    */
   async function searchRanking(deals: string[], query: string): Promise<DealDoc[]> {
     const per = await Promise.all(deals.map(async (dealId) =>
