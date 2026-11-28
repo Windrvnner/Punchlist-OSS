@@ -297,17 +297,16 @@ it('holds Next, duplicates and wording while a worksheet read runs, whatever els
     const items = questions.map((text) => ({ text }));
     const plan = session.plan(items, target, OPTIONS, null, '')!;
     const events = { started: vi.fn(), finished: vi.fn() };
-
     const read = rereadChecklistTable(store, requests, table, { sheet: 'Supplement' }, false, events);
     requests.newToken();
     expect(requests.tableReadPending()).toBe(true);
     await session.next(plan, show);
-    await session.duplicates({ items, rewords: [], pairs: [], asked: { reword: 'off', same: 'failed' } }, [], show);
-    await session.wording({ items, rewords: [], pairs: [], asked: { reword: 'failed', same: 'off' } }, show);
+    const review = { ...plan, destination: '', destinationItems: null, generalTexts: [], rewords: [], pairs: [] };
+    await session.duplicates({ ...review, asked: { reword: 'off', same: 'failed' } }, [], show);
+    await session.wording({ ...review, asked: { reword: 'failed', same: 'off' } }, show);
     expect(show).not.toHaveBeenCalled();
     expect(reword).not.toHaveBeenCalled();
     expect(sameMeaning).not.toHaveBeenCalled();
-
     await vi.waitFor(() => expect(releases).toHaveLength(1));
     releases[0]();
     await read;

@@ -8,7 +8,7 @@ import {
   checkChooseColumns, checkHeadingRecovery, checkHeadingRow, checkKeptHeading, checkMouseStep, checkPendingSheetStep,
   headingWorkbook,
 } from './headingRow.mjs';
-import { checkDuplicateRetries, checkSheetReadDuringRetry } from './firmlistRetries.mjs';
+import { checkDuplicateRetries, checkSheetReadDuringRetry, checkStaleReviewKeyboard } from './firmlistRetries.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -305,7 +305,7 @@ await checkChecklistFileFormats(start, say);
 
 await checkDuplicateRetries(start, say);
 await checkSheetReadDuringRetry(start, say);
-
+await checkStaleReviewKeyboard(start, say);
 { // A list of deal size (2,400 rows, alike in wording, 200 of them repeated) is reviewed and brought in within seconds, counted in en-US
   const { ctx, page, id } = await start();
   const W = ['lender', 'insurance', 'interconnection', 'permit', 'easement', 'offtake', 'warranty', 'reserve', 'survey', 'turbine', 'inverter', 'substation', 'hedge', 'audit', 'zoning', 'transmission'];

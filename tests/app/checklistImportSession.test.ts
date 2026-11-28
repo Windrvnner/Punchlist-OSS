@@ -5,7 +5,7 @@ import { ChecklistImportSession } from '../../src/app/checklistImportSession';
 import { importKey, initializeKeptImports, keptImport, keptImportsReady, saveImport } from '../../src/app/keptImports';
 import { readImportBytes } from '../../src/app/transfer';
 import { registry } from '../../src/app/commands/undo';
-import { RestoreList } from '../../src/app/commands/checklist';
+import { BringInList, RestoreList } from '../../src/app/commands/checklist';
 import { listId } from '../../src/domain/checklist';
 import { fail, ok } from '../../src/domain/result';
 import { checklistSpreadsheet } from '../fixtures/checklistSpreadsheet';
@@ -27,13 +27,66 @@ afterEach(async () => {
   app.store.closing();
   await app.repo.close();
 });
-function open() {
+function open(initial: ConstructorParameters<typeof ChecklistImportSession>[1] = {}) {
   app.store.ui({ firmChecklist: { step: 'import' } });
-  const session = new ChecklistImportSession(app.store, {});
+  const session = new ChecklistImportSession(app.store, initial);
   sessions.push(session);
   void session.start();
   return session;
 }
+
+it('keeps draft wording choices when identical offers become saved approvals (#56)', async () => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const offers = questions.slice(0, 120).map((text, at) => ({
+    at, text: `${text} Include supporting records.`, why: '',
+  }));
+  const split = { ...offers[0], also: ['Provide the latest independent energy yield report.'] };
+  const destination = { layer: 'technology' as const, name: 'Wind' };
+  const id = listId(destination.layer, destination.name);
+  expect((await app.store.dispatch(BringInList, {
+    list: { ...destination, items: questions.map((text) => ({ text })), file: 'Prior requests.csv', fileDate: '' },
+  })).ok).toBe(true);
+  app.store.services.ai.readList = async ({ lines }) => ok({
+    lines: lines.map((_, index) => ({ n: index + 1, k: 'item' })),
+  });
+  app.store.services.ai.reword = async () => ok([split, ...offers.slice(1)]);
+
+  const draft = open();
+  draft.setLayer(destination.layer);
+  draft.setName(destination.name);
+  draft.setAskReword(true);
+  draft.setAskSame(false);
+  draft.setPaste(questions.join('\n'));
+  await draft.pasted();
+  await draft.next();
+  expect(draft.view.listReview.review?.rewords).toHaveLength(120);
+  draft.flipReword(0);
+  draft.flipReword(0);
+  draft.flipReword(1);
+  draft.backToList();
+  draft.close();
+
+  const replacement = open({ ...destination, fresh: true });
+  replacement.setAskReword(true);
+  replacement.setAskSame(false);
+  replacement.setPaste(questions.join('\n'));
+  await replacement.pasted();
+  await replacement.next();
+  replacement.setAllWording(true);
+  await replacement.bringIn();
+  expect(app.store.get().firmList[id].items).toHaveLength(2_001);
+
+  const reopened = open();
+  await reopened.next();
+  expect(reopened.view.listReview.review?.rewords[0]).toMatchObject({ text: split.text, also: split.also });
+  expect(reopened.view.listReview.useReword.has(0)).toBe(false);
+  expect(reopened.view.listReview.useReword).toEqual(new Set([1]));
+  await reopened.bringIn();
+  const saved = app.store.get().firmList[id].items;
+  expect(saved).toHaveLength(2_000);
+  expect(saved[0]).toEqual({ text: questions[0] });
+  expect(saved[1]).toEqual({ text: offers[1].text, was: questions[1] });
+});
 
 async function reviewPortfolio() {
   const { ai } = app.store.services;
