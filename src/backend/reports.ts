@@ -66,47 +66,59 @@ function addSorted(verdict: Map<string, boolean | null>, sorted: NonNullable<Rep
   }
 }
 
+const citeKey = (doc: string, finding: string) => `${doc}\u0000${finding}`;
+type CutOwed = Owed & { doc: string; cut: true };
+
+function readAttempts(lines: ReportLine[]) {
+  const tries = new Map<string, number>();
+  const cuts = new Map<string, ReportCut>();
+  const cutOwed: CutOwed[] = [];
+  for (const { tried } of lines) {
+    if (!tried) continue;
+    const key = `${tried.step}:${tried.doc}`;
+    tries.set(key, (tries.get(key) ?? 0) + 1);
+    if (!tried.cut) continue;
+    addCut(cuts, tried.doc, tried.cut);
+    for (const owe of tried.cut.owe ?? []) cutOwed.push({ ...owe, doc: tried.doc, cut: true });
+  }
+  return { tries, cuts, cutOwed };
+}
+
+function pendingPages(lines: ReportLine[], reads: ReadLine[], cutOwed: CutOwed[]) {
+  const cited = new Set<string>();
+  const paidPlaces = new Set<string>();
+  for (const { cited: paid, cutCited } of lines) {
+    if (paid) cited.add(citeKey(paid.doc, paid.finding));
+    if (!cutCited) continue;
+    const key = citeKey(cutCited.doc, cutCited.finding);
+    for (const place of cutCited.places) paidPlaces.add(JSON.stringify([key, place]));
+  }
+  const fromReads = reads.flatMap(({ doc, owe }) =>
+    (owe ?? []).filter((o) => !cited.has(citeKey(doc, o.finding))).map((o) => ({ doc, ...o })),
+  );
+  const fromCuts = cutOwed.flatMap((o) => {
+    const key = citeKey(o.doc, o.finding);
+    const sources = o.sources.filter((s) => !paidPlaces.has(JSON.stringify([key, reportPlace(s)])));
+    return sources.length ? [{ ...o, sources }] : [];
+  });
+  return [...fromReads, ...fromCuts];
+}
+
 /** what the check log says so far: each document's verdict, each report read, the pages owed, and the tries */
 export function stateOf(lines: ReportLine[]) {
   const verdict = new Map<string, boolean | null>();
   const read = new Map<string, ReadLine>();
-  const tries = new Map<string, number>();
-  const cuts = new Map<string, ReportCut>();
-  const cited = new Set<string>();
-  const paidPlaces = new Set<string>();
-  const cutOwed: Array<Owed & { doc: string; cut: true }> = [];
-  /** every read line written: two PCs that read one report at once each owe their own pages */
   const reads: ReadLine[] = [];
-  const citeKey = (doc: string, finding: string) => `${doc}\u0000${finding}`;
-  for (const l of lines) {
-    if (l.sorted) addSorted(verdict, l.sorted);
-    if (l.looked) verdict.set(l.looked.doc, l.looked.report);
-    if (l.read) reads.push(l.read);
-    if (l.read && !read.has(l.read.doc)) read.set(l.read.doc, l.read);   // the first read written counts, on every PC
-    if (l.cited) cited.add(citeKey(l.cited.doc, l.cited.finding));
-    if (l.cutCited) {
-      const key = citeKey(l.cutCited.doc, l.cutCited.finding);
-      for (const place of l.cutCited.places) paidPlaces.add(JSON.stringify([key, place]));
-    }
-    if (l.tried) {
-      const key = `${l.tried.step}:${l.tried.doc}`;
-      tries.set(key, (tries.get(key) ?? 0) + 1);
-      if (l.tried.cut) {
-        const { doc, cut } = l.tried;
-        addCut(cuts, doc, cut);
-        for (const o of cut.owe ?? []) cutOwed.push({ ...o, doc, cut: true });
-      }
-    }
+  for (const line of lines) {
+    if (line.sorted) addSorted(verdict, line.sorted);
+    if (line.looked) verdict.set(line.looked.doc, line.looked.report);
+    if (!line.read) continue;
+    // The first read counts. A concurrent read can still owe pages of its own.
+    reads.push(line.read);
+    if (!read.has(line.read.doc)) read.set(line.read.doc, line.read);
   }
-  /** pages owed to findings by reads written, and not added yet */
-  const legacyOwed = reads.flatMap((r) =>
-    (r.owe ?? []).filter((o) => !cited.has(citeKey(r.doc, o.finding))).map((o) => ({ doc: r.doc, ...o })),
-  );
-  const owed = [...legacyOwed, ...cutOwed.flatMap((o) => {
-    const key = citeKey(o.doc, o.finding);
-    const sources = o.sources.filter((s) => !paidPlaces.has(JSON.stringify([key, reportPlace(s)])));
-    return sources.length ? [{ ...o, sources }] : [];
-  })];
+  const { tries, cuts, cutOwed } = readAttempts(lines);
+  const owed = pendingPages(lines, reads, cutOwed);
   const triesOf = (step: 'look' | 'read', doc: string) => tries.get(`${step}:${doc}`) ?? 0;
   return { verdict, read, owed, cuts, tries: triesOf };
 }
