@@ -330,6 +330,15 @@ function CoreDocumentRow({ core }: { core: FolderProgress['core'] }) {
   </div>;
 }
 
+function IncompleteReportReads({ reports }: { reports: NonNullable<FolderProgress['reportReads']> }) {
+  return <details class="incomplete-reports">
+    <summary>{reports.label}</summary>
+    <ul aria-label="Reports with incomplete reads" tabIndex={0}>
+      {reports.documents.map(({ docId, name }) => <li key={docId}>{name}</li>)}
+    </ul>
+  </details>;
+}
+
 /**
  * The deal's folders, how far each has been indexed, and how many of its documents have been read once indexed.
  * The dark part of a line is what has been read. Core documents are chosen across the whole deal.
@@ -357,6 +366,7 @@ function Documents({ deal: d }: { deal: Deal }) {
       </span>
     </div>
     <div class="dcrows" id="ov-docs">
+      {progress.reportReads && <IncompleteReportReads reports={progress.reportReads} />}
       {display.map((row) => <FolderDocumentRow key={row.key} row={row} progress={progress} />)}
       <CoreDocumentRow core={core} />
       {alsoIn.map(({ deal: match, docs, of }) => {

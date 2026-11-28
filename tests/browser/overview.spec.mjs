@@ -2,9 +2,53 @@
 // This suite does not choose a page first: it tests what happens when nothing has been chosen.
 import { launchChrome } from './chrome.mjs';
 import { openDelete } from './dealMenu.mjs';
+import fs from 'node:fs/promises';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, ok ? '' : note); };
 const browser = await launchChrome();
+const REPORT_NAMES = [
+  'Independent Engineer Report.pdf', 'Insurance Consultant Report.pdf', 'Environmental Impact Assessment.pdf',
+  'Grid Connection Study.pdf', 'Legal Due Diligence Report.pdf', 'Geotechnical Investigation Report.pdf',
+  'Wetland Delineation Report.pdf', 'Market Advisor Report.pdf', 'Tax Counsel Report.pdf',
+  'Energy Yield Assessment.pdf', 'Transmission Planning Study.pdf', 'Financial Model Audit Report.pdf',
+];
+
+async function checkIncompleteReports(page, dealId, tag) {
+  await page.evaluate(async ([dealId, names]) => {
+    const ai = store.services.ai;
+    const progress = ai.progress.bind(ai);
+    ai.progress = async (id) => {
+      const result = await progress(id);
+      if (!result.ok || id !== dealId) return result;
+      const incompleteReports = names.map((name, index) => ({ docId: 'report-' + index, name }));
+      return { ok: true, value: { ...result.value, incompleteReports } };
+    };
+    store.ui({ toasts: [] });
+    await store.refreshProgress(dealId);
+  }, [dealId, REPORT_NAMES]);
+  const group = page.locator('#ov-docs .incomplete-reports');
+  await group.waitFor();
+  const summary = group.locator('summary');
+  const list = group.locator('ul');
+  const position = await group.boundingBox();
+  const collapsed = !(await list.isVisible()) && (await summary.textContent()) === '12 incomplete report reads';
+  const shots = 'out/report-read-shots';
+  await fs.mkdir(shots, { recursive: true });
+  await page.screenshot({ path: `${shots}/${tag}-collapsed.png`, animations: 'disabled' });
+  await summary.press('Enter');
+  const contents = await list.locator('li').allTextContents();
+  const scroll = await list.evaluate((el) => {
+    const bounds = el.getBoundingClientRect();
+    return el.scrollHeight > el.clientHeight && bounds.height <= 148 && bounds.bottom <= innerHeight;
+  });
+  say(`incomplete-reports-${tag}`, collapsed && position.height === 37 && scroll && await noOverflow(page)
+    && JSON.stringify(contents) === JSON.stringify(REPORT_NAMES), JSON.stringify({ collapsed, position, scroll }));
+  await page.mouse.move(2, 160);
+  await page.screenshot({ path: `${shots}/${tag}-expanded.png`, animations: 'disabled' });
+  await summary.press('Enter');
+  say(`incomplete-reports-collapse-${tag}`, !(await list.isVisible()));
+}
+
 async function fresh(scheme = 'light', w = 1280, h = 736, locale = 'en-US') {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme, locale });
   const page = await ctx.newPage();
@@ -315,6 +359,7 @@ for (const scheme of ['light', 'dark']) for (const [w, h] of [[1280, 736], [1024
       inView: document.querySelector('.gaps li') ? document.querySelector('.gaps li').getBoundingClientRect().top < innerHeight - 20 && document.querySelector('#ov-docs .dcrow').getBoundingClientRect().top < innerHeight - 20 : false,
       colors: [bg(document.querySelector('#ov-findings .pbar b')), bg(document.querySelector('.dcrow .fbar .rv')), bg(document.querySelector('.dcrow .fbar .ix')), bg(document.querySelector('#ov-checklist .pbar b:last-child')), getComputedStyle(document.querySelector('#ov-findings .plab .lo')).color] }; });
   say(`overview-fits-${tag}`, !lay.title && !lay.names && lay.tabsOneRow && lay.headRow && lay.three && lay.headsFit && cols.every((x) => x.fits) && new Set(cols.map((x) => x.barTop)).size === 1 && lay.colsApart && lay.heads && lay.inView && await noOverflow(page) && new Set(lay.colors.slice(0, 3)).size === 3 && lay.colors[3] === lay.colors[2] && lay.colors[4] === lay.colors[0] && lay.colors.every((c) => c !== 'rgba(0, 0, 0, 0)'), JSON.stringify({ lay, cols }));
+  await checkIncompleteReports(page, id, tag);
   await page.click('#ov-checklist .nm'); await page.waitForSelector('#ck-rows .ckrow'); const ck = await page.evaluate(() => ({ filterInside: document.getElementById('ck-filter').getBoundingClientRect().right <= document.querySelector('.ckpage').getBoundingClientRect().right + 1, sameRow: Math.abs(document.getElementById('ck-filter').getBoundingClientRect().top + document.getElementById('ck-filter').getBoundingClientRect().height / 2 - document.querySelector('.ckpage [role=heading]').getBoundingClientRect().top - document.querySelector('.ckpage [role=heading]').getBoundingClientRect().height / 2) < 8, marks: [...document.querySelectorAll('#ck-rows .ckrow')].slice(0, 6).every((r2) => r2.querySelector('.mk').getBoundingClientRect().right <= r2.querySelector('.it').getBoundingClientRect().left) }));
   say(`checklist-fits-${tag}`, ck.filterInside && ck.sameRow && ck.marks && await noOverflow(page), JSON.stringify(ck));
   await page.click('.dtabs a:has-text("Findings")'); await page.waitForSelector('.flagrow'); const fi = await page.evaluate(() => ({ acts: [...document.querySelectorAll('.fhead .btn.act')].map((b) => b.textContent.trim()).join('|'), full: document.querySelector('.flags').getBoundingClientRect().width / document.querySelector('.askslot').getBoundingClientRect().width, gaps: !!document.querySelector('.gaps'), brief: !!document.querySelector('.brieflet') }));

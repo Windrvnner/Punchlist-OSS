@@ -40,16 +40,38 @@ export interface ReportLine {
   read?: ReadLine;
   /** an owed page added to its finding, or no longer needed (the finding is gone) */
   cited?: { doc: string; finding: string };
+  /** Verified citation places owed by a cutoff and since added to the finding. */
+  cutCited?: { doc: string; finding: string; places: string[] };
   /** a look or a read that could not finish for want of a usable reply: after `TRIES` it is not asked again */
-  tried?: { doc: string; step: 'look' | 'read' };
+  tried?: { doc: string; step: 'look' | 'read'; cut?: ReportCut };
 }
 
 export interface ReadIssue { title: string; finding?: string; covered?: string }
+
+/** A kept issue and its verified places in the report. */
+export interface KeptReportIssue {
+  issue: ReadIssue;
+  sources: Source[];
+  still?: true;
+  /** The exact title, body and citations of a new finding kept from a cutoff. */
+  signature?: string;
+}
+
+/** The new issues and outstanding citation writes from a cut-off attempt. */
+export interface ReportCut {
+  advisor: string;
+  issues: KeptReportIssue[];
+  owe?: Owed[];
+}
+
+export const reportTitleKey = (title: string) => title.toLowerCase().replace(/\s+/g, ' ');
+export const reportPlace = (source: Source) => JSON.stringify([source.docId, source.loc]);
 
 /** a finding on the deal, as a report's issues are compared with it */
 export interface Known {
   id: string;
   title: string;
+  signature?: string;
   closed?: boolean;
   /** a person deleted it: an issue it covers is not raised again */
   deleted?: boolean;
@@ -61,6 +83,7 @@ export interface Issue {
   workstream: string;
   body: string[];
   sources: Source[];
+  signature?: string;
   /** a closed finding on the same issue: a person settled that one, and the advisor raises it again */
   earlier?: string;
 }
@@ -91,14 +114,20 @@ export interface ReportKit {
   /** of these keys, the ones this PC now holds: none another PC is working on */
   claim: (keys: string[]) => Promise<string[]>;
   release: (keys: string[]) => Promise<void>;
+  /** Continue a report that recorded an unfinished attempt and still has another try. */
+  again?: () => void;
   /** a document's path from the data room's own folder, as the model is shown it */
   where: (rec: DocRecord) => string;
   models: { fast: string; standard: string };
   /**
-   * one call, its reply read as JSON; null when it cannot be read. Throws when the service fails, or with
-   * `code: 'cutoff'` and `partial` when the reply was cut off
+   * Read a reply as JSON. The initial parsed reply is sent back once if `correction` gives a reason.
+   * Returns null when it cannot be read. Throws on service failure or with `code: 'cutoff'` and `partial` on a cut.
    */
-  ask: (input: AskInput, keys: string[]) => Promise<Record<string, unknown> | null>;
+  ask: (
+    input: AskInput,
+    keys: string[],
+    correction?: (reply: Record<string, unknown>) => string | undefined,
+  ) => Promise<Record<string, unknown> | null>;
   /**
    * a reply naming an id it was not shown (the documents sent, and with `shown` those ids), or citing a document it
    * was not given, as `ask` refuses it (#1162)

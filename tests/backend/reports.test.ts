@@ -20,7 +20,7 @@ import type { DocRecord } from '../../src/backend/documents';
 import type { Sent, Cited } from '../../src/backend/agent';
 import type { Unusable } from '../../src/backend/agentKit';
 import { paths } from './fixtures/relecloudRoom';
-import { setup, deal, val, itemsIn, OK, Mem, clauseChanges, wasLines, type Call } from './reviewKit';
+import { setup, deal, val, itemsIn, OK, Mem, clauseChanges, wasLines, checkLines, type Call } from './reviewKit';
 import { fromStoreName } from '../../src/backend/storeKeeper';
 import type { Finding } from '../../src/domain/model';
 
@@ -339,10 +339,9 @@ describe('third-party reports at deal scale', () => {
     ]);
   });
 
-  it('a reply cut off at the length limit writes nothing, and is read again by the '
-    + 'next sweep', async () => {
+  it('a cutoff saves the verified prefix and leaves the report unfinished for the next sweep (#1212)', async () => {
     const docs = room().filter((d) => d.name === 'Independent Engineer Report.pdf');
-    const { k, findings, calls } = kit(docs, {
+    const { k, findings, calls, log } = kit(docs, {
       answer: ({ kind, prompt, name }) => {
         if (kind !== 'report') return undefined;
         const r = readReply(prompt, name);
@@ -350,8 +349,58 @@ describe('third-party reports at deal scale', () => {
       },
     });
     await sweep(k);
-    expect(raisedTitles(findings).length).toBe(0);
-    expect(calls.filter((c) => c.kind === 'report').length).toBe(1);
+    expect(raisedTitles(findings)).toEqual(ISSUES['Independent Engineer Report.pdf'].slice(0, 6));
+    expect(stateOf(log).read.has(docs[0].docId)).toBe(false);
+    await sweep(k);
+    expect(calls.at(-1)?.prompt).toContain('remaining issues');
+    expect(calls.at(-1)?.prompt).toContain(ISSUES['Independent Engineer Report.pdf'][5]);
+    expect(calls.filter((c) => c.kind === 'report').length).toBe(2);
+  });
+
+  it('keeps an earlier draft issue that the cutoff verified as still raised (#1212)', async () => {
+    const report = room().find((doc) => doc.name === 'Independent Engineer Report.pdf')!;
+    const before = 'doc_111111111111111111111111';
+    const earlier = new Map([[report.docId, [before]]]);
+    const issue = { title: 'Substation completion behind schedule', finding: 'f_substation' };
+    const log: ReportLine[] = [{ read: { doc: before, advisor: 'the engineer', issues: [issue] } }];
+    let first = true;
+    const { k, marks } = kit([report], {
+      log, earlier,
+      answer: ({ kind }) => {
+        if (kind !== 'report') return undefined;
+        if (!first) return { issues: [], dropped: ['E1'] };
+        first = false;
+        const still = { still: 'E1', sources: [{ doc: report.docId, page: 17 }] };
+        return Object.assign(new Error('cut'), { code: 'cutoff', partial: { issues: [still, {}] } });
+      },
+    });
+    await sweep(k);
+    await sweep(k);
+    expect(stateOf(log).read.get(report.docId)?.issues).toEqual([issue]);
+    expect(marks).toEqual([]);
+  });
+
+  it('compares a new draft with both the last completed draft and verified intervening issues (#1212)', async () => {
+    const report = room().find((doc) => doc.name === 'Independent Engineer Report.pdf')!;
+    const complete = 'doc_111111111111111111111111';
+    const cut = 'doc_222222222222222222222222';
+    const permit = { title: 'The stormwater permit has expired', finding: 'f_permit' };
+    const switchgear = { title: 'The switchgear test report is missing', finding: 'f_switchgear' };
+    const log: ReportLine[] = [
+      { read: { doc: complete, advisor: 'the engineer', issues: [permit] } },
+      { tried: { doc: cut, step: 'read', cut: { advisor: 'the engineer', issues: [{
+        issue: switchgear, sources: [{ docId: cut, doc: 'Engineer Report v2.pdf', loc: 'p. 8' }],
+      }] } } },
+    ];
+    const { k, marks } = kit([report], {
+      log, earlier: new Map([[report.docId, [cut, complete]]]),
+      answer: ({ kind, prompt }) => kind === 'report'
+        ? { issues: [], dropped: [...prompt.matchAll(/^(E\d+): /gm)].map((match) => match[1]) }
+        : undefined,
+    });
+    await sweep(k);
+    expect(marks.map(({ id }) => id).sort()).toEqual([permit.finding, switchgear.finding].sort());
+    expect(stateOf(log).read.get(report.docId)?.from).toBe(complete);
   });
 
   it('a read that fails writes nothing; the next sweep reads it again', async () => {
@@ -780,6 +829,132 @@ function setupReports(
   };
   return { ...s, reportCalls };
 }
+
+async function sweepReply(
+  reply: (call: Call) => unknown,
+  options: { repair?: object; sweeps?: number } = {},
+) {
+  const report = room().find((doc) => doc.name === 'Independent Engineer Report.pdf')!;
+  const shared = new Mem();
+  const reader = setupReports(() => ({}), { d1: [report] }, {
+    shared,
+    installId: 'pc1',
+    reports: (call) => call.files.length ? reply(call) : sortReply(call.prompt),
+    fix: () => options.repair ?? {},
+  });
+  try {
+    await deal(reader.repo);
+    for (let sweep = 0; sweep < (options.sweeps ?? 1); sweep++) {
+      val(await reader.ai.firstPass('d1'));
+      await reader.ai.settled();
+    }
+    const lines: ReportLine[] = checkLines(shared).flatMap((line) => line.report ? [line.report] : []);
+    return {
+      report,
+      state: stateOf(lines),
+      reads: reader.reportCalls.filter((call) => call.files.length),
+      repairs: reader.fixCalls,
+      findings: val(await reader.repo.list('finding', 'd1')).map((line) => line.envelope.data as Finding),
+    };
+  } finally {
+    await reader.ai.close();
+  }
+}
+
+describe('advisor report reply shape (#1212)', () => {
+  it.each([
+    { report: true }, { issues: null }, { issues: 'Missing inverter warranty' }, { issues: {} },
+    { advisor: 'Independent engineer' }, {}, { report: null }, { report: false, issues: null },
+    { report: true, issues: [null, {}] },
+    { issues: [{ title: 'The inverter warranty is missing' }] },
+    { issues: [{ still: 'E42' }] },
+  ])('sends a thin reply back once and leaves it unread if still thin (%j)', async (reply) => {
+    const { report, state, reads, repairs, findings } = await sweepReply(() => reply);
+    expect(reads).toHaveLength(2);
+    expect(reads[1].prompt).toContain('provide an issues array');
+    expect(reads[1].files).toEqual(reads[0].files);
+    expect(repairs).toHaveLength(0);
+    expect(state.tries('read', report.docId)).toBe(1);
+    expect(state.read.has(report.docId)).toBe(false);
+    expect(state.verdict.get(report.docId)).toBe(true);
+    expect(findings).toHaveLength(0);
+  });
+
+  it.each(['{"issues":[]}', '[]', '{"advisor":"Aside"}\n{"issues":[]}'])(
+    'saves an explicit empty list in one read (%s)', async (reply) => {
+      const { report, state, reads, repairs } = await sweepReply(() => reply);
+      expect(reads).toHaveLength(1);
+      expect(repairs).toHaveLength(0);
+      expect(state.read.get(report.docId)?.issues).toEqual([]);
+    },
+  );
+
+  it('keeps the explicit non-report classification', async () => {
+    const { report, state, reads, repairs } = await sweepReply(() => ({ report: false }));
+    expect(reads).toHaveLength(1);
+    expect(repairs).toHaveLength(0);
+    expect(state.verdict.get(report.docId)).toBe(false);
+    expect(state.read.has(report.docId)).toBe(false);
+  });
+
+  it('can finish on a later sweep after both replies were thin', async () => {
+    let calls = 0;
+    const reply = () => ++calls <= 2 ? { report: true } : { issues: [] };
+    const { report, state, reads } = await sweepReply(reply, { sweeps: 2 });
+    expect(reads).toHaveLength(3);
+    expect(state.tries('read', report.docId)).toBe(1);
+    expect(state.read.get(report.docId)?.issues).toEqual([]);
+  });
+
+  it('keeps an existing single-issue object with its verified report page', async () => {
+    const title = 'The inverter warranty ends before debt maturity';
+    const { report, state, reads, findings } = await sweepReply(({ prompt }) => {
+      const reply = readReply(prompt, '', [title]);
+      return { ...reply, issues: reply.issues[0] };
+    });
+    expect(reads).toHaveLength(1);
+    expect(findings.map((finding) => finding.title)).toEqual([title]);
+    expect(findings[0].sources).toMatchObject([{ docId: report.docId, loc: 'p. 10' }]);
+    expect(state.read.get(report.docId)?.issues).toEqual([{ title, finding: findings[0].id }]);
+  });
+
+  it('writes a finding from the corrected reply with the report page', async () => {
+    const title = 'The inverter warranty ends before debt maturity';
+    const { report, state, reads, findings } = await sweepReply(({ prompt }) => (
+      prompt.includes('provide an issues array') ? readReply(prompt, '', [title]) : { report: true }
+    ));
+    expect(reads).toHaveLength(2);
+    expect(findings.map((finding) => finding.title)).toEqual([title]);
+    expect(findings[0].sources).toMatchObject([{ docId: report.docId, loc: 'p. 10' }]);
+    expect(state.read.get(report.docId)?.issues).toEqual([{ title, finding: findings[0].id }]);
+  });
+
+  it.each([{ report: true }, { issues: [] }])('uses only format repair for unreadable replies (%j)', async (repair) => {
+    const { report, state, reads, repairs } = await sweepReply(() => 'Unreadable reply.', { repair });
+    expect(reads).toHaveLength(1);
+    expect(repairs).toHaveLength(1);
+    expect(repairs[0].files).toHaveLength(0);
+    if ('issues' in repair) {
+      expect(state.read.get(report.docId)?.issues).toEqual([]);
+    } else {
+      expect(state.read.has(report.docId)).toBe(false);
+      expect(state.tries('read', report.docId)).toBe(1);
+    }
+  });
+
+  it.each([false, true])('keeps known-id validation and its existing retries (corrected: %s)', async (corrected) => {
+    const { report, state, reads, repairs, findings } = await sweepReply(({ prompt }) => (
+      corrected && !prompt.includes('provide an issues array')
+        ? { report: true }
+        : { issues: [{ covered: 'f_unknown', sources: [{ doc: reportId(prompt), page: 4 }] }] }
+    ));
+    expect(reads).toHaveLength(corrected ? 4 : 3);
+    expect(repairs).toHaveLength(0);
+    expect(state.read.has(report.docId)).toBe(false);
+    expect(state.tries('read', report.docId)).toBe(1);
+    expect(findings).toHaveLength(0);
+  });
+});
 
 describe('third-party reports by their permanent ids (#1162)', () => {
   it('the sort lists each file by its docId, and a reply naming an id it was not shown is refused', async () => {

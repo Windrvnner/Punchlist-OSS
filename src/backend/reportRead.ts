@@ -1,16 +1,17 @@
 /**
- * Step 3 of the third-party reports sweep (reports.ts): the standard model reads one report through for the issues it
- * raises, in one call, and each issue becomes a finding, unless a finding on the deal already covers it.
+ * Step 3 of the third-party reports sweep (reports.ts). Each issue becomes a finding unless a finding on the deal
+ * already covers it. A cutoff keeps verified issues so the next attempt can ask for the rest of the whole report.
  */
+import { createHash } from 'node:crypto';
 import type { DocRecord } from './documents';
 import type { Cited } from './agent';
 import type { Source } from '../domain/model';
-import { list as listOf, readJson, isObject, strings, tagNumber, prose, PARAGRAPH_SEAM } from './lenient';
+import { list as listOf, readJson, readCutJson, isObject, strings, tagNumber, prose, PARAGRAPH_SEAM } from './lenient';
 import { unknownIds } from './recordIds';
 import { withFewerChanges } from './limits';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
-  isCut, yes,
+  type ReportCut, type KeptReportIssue, isCut, reportPlace, reportTitleKey,
 } from './reportTypes';
 
 /** sentences of one paragraph, written out for the model */
@@ -82,13 +83,24 @@ function replyAsk(id: string, before: ReadIssue[] | undefined) {
 }
 
 /** where a read has got to, as the prompt needs it */
-interface ReadAt { k: ReportKit; s: SentDoc; before?: ReadLine }
+interface ReadAt { k: ReportKit; s: SentDoc; before?: ReadLine; resume?: ReportCut }
+
+function resumeAsk(resume: ReportCut | undefined) {
+  if (!resume) return '';
+  const kept = resume.issues.map(({ issue, sources }) => {
+    const places = sources.map(({ loc, quote }) => quote ? `${loc} "${quote}"` : loc).join(', ');
+    return `${issue.finding ?? issue.covered}: ${issue.title} (${places})`;
+  });
+  return '\n\nThe previous reply was cut off. Give the remaining issues from the entire report. '
+    + 'Include issues before the cutoff that are not listed below. Omit only the exact issues already kept here:'
+    + (kept.length ? `\n${kept.join('\n')}` : ' none.');
+}
 
 /** the prompt that reads a report's issues */
 export function readAsk(r: ReadAt, known: Known[]) {
   const id = r.s.sent[0].rec.docId;
   const body = issuesAsk(r.k, id) + knownAsk(id, known) + earlierAsk(id, r.before?.issues);
-  return `Documents:\n${r.s.listing}\n\n${body}${replyAsk(id, r.before?.issues)}`;
+  return `Documents:\n${r.s.listing}\n\n${body}${replyAsk(id, r.before?.issues)}${resumeAsk(r.resume)}`;
 }
 
 /** a finding this report raised: its id is the one `idFor` gives the report and its title */
@@ -100,10 +112,26 @@ function isOwn(k: ReportKit, doc: string, f: Known) {
 /** the title as the model wrote it; a blank one is none (#1215) */
 const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string' && row.title.trim() ? row.title : '');
 
+const placement = (s: Source) => JSON.stringify([reportPlace(s), s.quote ?? '']);
+const atPlaces = (key: string, sources: Source[]) => JSON.stringify([key, ...sources.map(placement).sort()]);
+const issueId = (issue?: ReadIssue) => issue?.finding ?? issue?.covered ?? '';
+
+const earlierIssue = (row: Record<string, unknown>, before?: ReadLine) =>
+  before?.issues[(tagNumber(row.still, 'E') ?? 0) - 1];
+
+function issueSignature(title: string, body: string[], sources: Source[]) {
+  const parts = [title, body, ...sources.map(placement).sort()];
+  return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+}
+
 /** One read of one report, in one call: what it has found. */
 class ReportRead {
-  issues: ReadIssue[] = [];
-  advisor = '';
+  issues: ReadIssue[];
+  advisor: string;
+  kept: KeptReportIssue[] = [];
+  retaining = false;
+  private seen = new Set<string>();
+  private reserved = new Set<string>();
   /** findings of the earlier draft's issues this draft no longer raises */
   dropped = new Set<string>();
   /** how many issues of each title the report has given: another of the same title gets its own finding id */
@@ -118,7 +146,33 @@ class ReportRead {
     readonly rec: DocRecord,
     readonly s: SentDoc,
     readonly before: ReadLine | undefined,
-  ) {}
+    readonly resume?: ReportCut,
+  ) {
+    this.issues = resume?.issues.filter((row) => !row.still).map((row) => row.issue) ?? [];
+    this.advisor = resume?.advisor ?? '';
+    for (const row of resume?.issues ?? []) {
+      this.remember(row);
+      if (row.issue.finding) this.reserved.add(row.issue.finding);
+    }
+  }
+
+  private remember({ issue, sources, signature }: KeptReportIssue) {
+    this.seen.add(atPlaces(issueId(issue), sources));
+    if (signature) this.seen.add(signature);
+  }
+
+  private keep(row: KeptReportIssue) {
+    if (!this.retaining) return;
+    this.remember(row);
+    this.kept.push(row);
+  }
+
+  private get verifying() { return this.retaining || !!this.resume; }
+
+  private miss() {
+    this.unplaced++;
+    return true;
+  }
 
   /** the places in the report a row cites, kept only where they open */
   placed(row: Record<string, unknown>) {
@@ -134,26 +188,57 @@ class ReportRead {
   /** One row of a reply. False when a finding could not be written: the read is not done, and is asked again. */
   async take(row: Record<string, unknown>, known: Known[]): Promise<boolean> {
     // an issue the earlier draft raised and this one still does: the report's page is added to its finding
-    const was = this.before?.issues[(tagNumber(row.still, 'E') ?? 0) - 1];
-    const stillAt = was?.finding ?? was?.covered;
-    if (stillAt) { await this.cite(stillAt, this.placed(row)); return true; }
+    const was = earlierIssue(row, this.before);
+    const stillAt = issueId(was);
+    if (was && stillAt) return this.still(row, was, stillAt);
     const covering = known.find((f) => f.id === row.covered);
     const title = titleOf(row);
     // one only a closed finding covers is raised again, so it must come written out: as covered only, it has no page
     if (covering?.closed && !covering.deleted && !title) { this.unplaced++; return true; }
     if (covering && !(covering.closed && title)) { await this.covered(row, covering); return true; }
-    if (!title) return true;
+    if (!title) return this.verifying ? this.miss() : true;
     return this.raise(row, title, known, covering);
+  }
+
+  private async still(row: Record<string, unknown>, was: ReadIssue, id: string) {
+    const places = this.placed(row);
+    if (this.verifying && !places.length) return this.miss();
+    if (this.verifying) this.dropped.delete(id);
+    if (this.seen.has(atPlaces(id, places))) return true;
+    await this.cite(id, places);
+    this.keep({ issue: was, sources: places, still: true });
+    return true;
   }
 
   /** an issue a finding already covers raises none, whatever else the reply gives with it */
   async covered(row: Record<string, unknown>, f: Known) {
+    const places = this.placed(row);
+    if (this.verifying && !places.length) { this.miss(); return; }
+    if (this.seen.has(atPlaces(f.id, places))) return;
     // the report is a source of the finding that covers its issue, whoever raised it; a deleted one is left as it is
-    if (!f.deleted) await this.cite(f.id, this.placed(row));
+    if (!f.deleted) await this.cite(f.id, places);
     // a finding this report raised itself, in a read that did not finish, is its own: a later draft that drops it
     // marks it
     const own = isOwn(this.k, this.rec.docId, f);
-    this.issues.push(own ? { title: f.title, finding: f.id } : { title: f.title, covered: f.id });
+    const issue = own ? { title: f.title, finding: f.id } : { title: f.title, covered: f.id };
+    this.issues.push(issue);
+    this.keep({ issue, sources: places, ...(own && f.signature ? { signature: f.signature } : {}) });
+  }
+
+  /** Continue the existing title ordinals, including a finding written before its cutoff was logged. */
+  private idFor(title: string, signature: string, known: Known[]) {
+    const key = reportTitleKey(title);
+    let nth = (this.titles.get(key) ?? 0) + 1;
+    for (;;) {
+      const id = this.k.idFor(this.rec.docId, title, nth);
+      const had = this.verifying ? known.find((finding) => finding.id === id) : undefined;
+      // Legacy findings and deletions keep their existing title ordinal.
+      if (!this.reserved.has(id) && (had?.signature === undefined || had.signature === signature)) {
+        this.titles.set(key, nth);
+        return id;
+      }
+      nth++;
+    }
   }
 
   /** a new issue: a finding of its own */
@@ -162,40 +247,61 @@ class ReportRead {
     const fitted = k.fit(prose(row.body).join(PARAGRAPH_SEAM), row.sources as Cited[], this.s.sent);
     // an issue stands on a page of the report a person can open, as any finding does
     if (!fitted.text || !fitted.sources.length) { this.unplaced++; return true; }
-    const nth = (this.titles.get(title) ?? 0) + 1;
-    this.titles.set(title, nth);
-    const id = k.idFor(this.rec.docId, title, nth);
+    const body = k.fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()));
+    const signature = issueSignature(title, body, fitted.sources);
+    if (this.seen.has(signature)) return true;
+    const id = this.idFor(title, signature, known);
     const issue: Issue = {
       title,
       workstream: k.workstreamOf(row.workstream),
-      body: k.fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim())),
+      body,
       sources: fitted.sources,
+      signature,
     };
     // a closed finding on the same issue is named, by its id: with none named, the one given as covering it
     const was = known.find((f) => f.id === row.earlier) ?? covering;
     if (was?.closed && !was.deleted) issue.earlier = was.id;
     if (!(await k.raise(id, issue))) return false;
-    this.issues.push({ title, finding: id });
+    const saved = { title, finding: id };
+    this.issues.push(saved);
+    this.keep({ issue: saved, sources: fitted.sources, signature });
     return true;
   }
 
   /** each row of a reply, in order. False when a finding could not be written */
-  async takeAll(rows: Record<string, unknown>[], known: Known[]) {
+  async takeAll(rows: unknown[], known: Known[]) {
+    let saved = true;
     for (const row of rows) {
-      if (row && typeof row === 'object' && !(await this.take(row, known))) return false;
+      if (!isObject(row)) {
+        if (this.verifying) this.miss();
+        continue;
+      }
+      if (await this.take(row, known)) continue;
+      if (!this.retaining) return false;
+      saved = false;
     }
-    return true;
+    return saved;
   }
 
   /** what the reply says beside its issues: who wrote the report, and which of the earlier draft's it drops */
   heard(reply: Record<string, unknown>) {
+    this.hearAdvisor(reply);
+    const still = new Set(this.resume?.issues.filter((row) => row.still).map(({ issue }) => issueId(issue)));
+    for (const e of strings(reply.dropped)) {
+      const f = this.before?.issues[(tagNumber(e, 'E') ?? 0) - 1]?.finding;
+      if (f && !still.has(f)) this.dropped.add(f);
+    }
+  }
+
+  hearAdvisor(reply: Record<string, unknown>) {
     const said = reply.advisor;
     const advisor = typeof said === 'string' && said.trim() ? said : '';
     if (advisor && !this.advisor) this.advisor = advisor;
-    for (const e of strings(reply.dropped)) {
-      const f = this.before?.issues[(tagNumber(e, 'E') ?? 0) - 1]?.finding;
-      if (f) this.dropped.add(f);
-    }
+  }
+
+  cutoff(): { cut: ReportCut } {
+    const owe = [...this.owe].map(([finding, sources]) => ({ finding, sources }));
+    return { cut: { advisor: this.advisor, issues: this.kept, ...(owe.length ? { owe } : {}) } };
   }
 
   /** the line to write. What the earlier draft raised and this one still does is carried over, for the next draft */
@@ -224,6 +330,23 @@ export const knownUnusable = (known: Known[], keys: string[]) => (text: string) 
   return unknownIds(named, ids).length > 0;
 };
 
+/** The explicit reply that the document is not a report, as the prompt asks. */
+const notReport = (reply: Record<string, unknown>) => reply.report === false && !('issues' in reply);
+
+/** Keep the existing single-row form. Only an explicit empty list says the report raises no issues (#1212). */
+function reportIssueRows(reply: Record<string, unknown>, before?: ReadLine): Record<string, unknown>[] | null {
+  const issues = reply.issues;
+  if (Array.isArray(issues)) return issues.every((row) => issueRow(row, before)) ? issues : null;
+  return issueRow(issues, before) ? [issues] : null;
+}
+
+function issueRow(row: unknown, before?: ReadLine): row is Record<string, unknown> {
+  if (!isObject(row)) return false;
+  const covered = typeof row.covered === 'string' && row.covered !== '';
+  const drafted = !!titleOf(row) && prose(row.body).length > 0;
+  return drafted || covered || !!issueId(earlierIssue(row, before));
+}
+
 /** the report's issues from the model in one call; a reply cut off at the length limit comes back with `cut` */
 async function ask(r: ReportRead, known: Known[]) {
   const k = r.k;
@@ -235,26 +358,32 @@ async function ask(r: ReportRead, known: Known[]) {
   const unusable = async (text: string) => (await cites(text)) || named(text);
   const input = { kind: 'report', split: true, model: k.models.standard, system: k.system, files: r.s.files, prompt,
     unusable };
+  const correction = (reply: Record<string, unknown>) => notReport(reply) || reportIssueRows(reply, r.before) !== null
+    ? undefined
+    : 'provide an issues array with complete write-ups or valid references. Give an empty array only when the report'
+      + ' raises no issues, or {"report":false} for a non-report';
   try {
-    return { reply: await k.ask(input, keys), cut: false };
+    return { reply: await k.ask(input, keys, correction), cut: false };
   } catch (e) {
     if (!isCut(e)) throw e;
-    return { reply: null, cut: true };
+    const failure = e as { text?: string; partial?: unknown };
+    const partial = failure.text ? readCutJson(failure.text, keys) : failure.partial;
+    const prefix = isObject(partial) && Array.isArray(partial.issues)
+      ? { advisor: partial.advisor, issues: partial.issues.slice(0, -1) }
+      : null;
+    return { reply: prefix && !(await unusable(JSON.stringify(prefix))) ? prefix : null, cut: true };
   }
 }
 
-/** a reply that says the document is not a report by an outside advisor, and gives no issues */
-const notReport = (reply: Record<string, unknown>) => 'report' in reply && !yes(reply.report) && !('issues' in reply);
+export type ReportReadResult = ReadLine | { cut: ReportCut } | 'not' | 'lost' | null;
 
 /**
- * Read one report. Returns the line to write; `'not'` when the model says it is not a report; `'lost'` when this PC
- * cannot send it; or null when the read could not finish (a reply that cannot be read, or one cut off at the length
- * limit, or a finding that could not be written): nothing is written then, and the next sweep reads it again. Throws
- * when the service fails.
+ * A full read finishes the report. A cutoff checkpoints verified issues for the next sweep. An unusable
+ * read returns null, and a report this PC cannot send returns 'lost'. Service failures throw.
  */
 export async function read(
-  k: ReportKit, rec: DocRecord, before: ReadLine | undefined, last: boolean,
-): Promise<ReadLine | 'not' | 'lost' | null> {
+  k: ReportKit, rec: DocRecord, before: ReadLine | undefined, last: boolean, resume?: ReportCut,
+): Promise<ReportReadResult> {
   const known = await k.findings();
   // refused as too long, it is sent again with fewer of its tracked changes listed, while any are (#1381)
   const sentAndAsked = await withFewerChanges(async (share) => {
@@ -262,7 +391,7 @@ export async function read(
     if (!s) {
       return null;
     }
-    const r = new ReportRead(k, rec, s, before);
+    const r = new ReportRead(k, rec, s, before, resume);
     return { r, got: await ask(r, known) };
   });
   // cannot be sent from this PC: left for one that can, not a try
@@ -270,11 +399,23 @@ export async function read(
     return 'lost';
   }
   const { r, got } = sentAndAsked;
+  if (got.cut) return keepCut(r, got.reply, known);
   if (!got.reply) return null;
-  if (notReport(got.reply)) return 'not';
+  if (notReport(got.reply)) return resume ? null : 'not';
+  const issues = reportIssueRows(got.reply, before);
+  if (!issues) return null;
   r.heard(got.reply);
-  if (!(await r.takeAll(listOf(got.reply.issues) as Record<string, unknown>[], known))) return null;
-  return finish(r, last);
+  if (!(await r.takeAll(issues, known))) return null;
+  return finish(r, last && !resume);
+}
+
+async function keepCut(r: ReportRead, reply: Record<string, unknown> | null, known: Known[]) {
+  if (reply) {
+    r.retaining = true;
+    r.hearAdvisor(reply);
+    await r.takeAll(listOf(reply.issues), known);
+  }
+  return r.cutoff();
 }
 
 /**

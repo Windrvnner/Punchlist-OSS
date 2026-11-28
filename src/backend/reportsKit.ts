@@ -8,6 +8,7 @@ import { derivedId } from '../domain/derivedId';
 import type { DocRecord } from './documents';
 import { families, inPrecedents } from './families';
 import type { Known, Issue } from './reports';
+import { reportTitleKey } from './reportTypes';
 
 /** what the finding writes need beside the store */
 export interface FindingWrites {
@@ -25,21 +26,28 @@ export async function knownFindings(repo: Repository, dealId: string): Promise<K
   if (!held.ok) throw failed(held);
   const notes = await repo.list('tombstone', dealId);
   if (!notes.ok) throw failed(notes);
-  type Finding = { id: string; title?: unknown; status?: string };
+  type Finding = { id: string; title?: unknown; status?: string; reportIssueSignature?: string };
   const live: Known[] = [];
   for (const l of held.value) {
     const d = l.envelope.data as Finding;
     if (typeof d.title !== 'string') continue;
-    live.push({ id: d.id, title: d.title, ...(d.status === 'closed' ? { closed: true } : {}) });
+    live.push({
+      id: d.id, title: d.title, signature: d.reportIssueSignature,
+      ...(d.status === 'closed' ? { closed: true } : {}),
+    });
   }
   // a finding a person deleted: an issue it covers is not raised again
-  type Note = { kind?: string; snapshot?: { id?: unknown; title?: unknown } };
+  type Note = { kind?: string; snapshot?: Partial<Finding> };
   const gone: Known[] = [];
   for (const l of notes.value) {
     const d = l.envelope.data as Note;
     const { id, title } = d.snapshot ?? {};
     const isFinding = (d.kind ?? 'finding') === 'finding';
-    if (isFinding && typeof id === 'string' && typeof title === 'string') gone.push({ id, title, deleted: true });
+    if (isFinding && typeof id === 'string' && typeof title === 'string') {
+      gone.push({
+        id, title, signature: d.snapshot?.reportIssueSignature, deleted: true,
+      });
+    }
   }
   return [...live, ...gone];
 }
@@ -65,6 +73,7 @@ export async function raiseFinding(w: FindingWrites, dealId: string, id: string,
     body: f.body, sources: f.sources,
     origin: 'ai', note: '', reviewed: null, updated: false,
     ...(f.earlier ? { earlier: f.earlier } : {}),
+    ...(f.signature ? { reportIssueSignature: f.signature } : {}),
   };
   const index = { dealId, add: [{ kind: 'finding' as const, id }] };
   const wrote = await w.repo.transaction({ writes: [{ kind: 'finding', id, data, expectedRev: null }], index });
@@ -110,7 +119,7 @@ export async function citeFinding(w: FindingWrites, id: string, add: Source[]): 
 
 /** a report's finding's fixed id: the same on every PC for the same deal, report and issue title */
 export const reportFindingId = (dealId: string, doc: string, title: string, n: number) =>
-  derivedId('f', [dealId, 'report', doc, title.toLowerCase().replace(/\s+/g, ' '), String(n)]);
+  derivedId('f', [dealId, 'report', doc, reportTitleKey(title), String(n)]);
 
 /** what tells which of a deal's documents the sweep may read */
 export interface Candidates {
