@@ -10,7 +10,7 @@
 import type { Store } from './store';
 import { localYmd, type QaLog, type Question } from '../domain/model';
 import { dealQuestions, dealTwin, qaChanged, qaKept } from './state';
-import { logWrite, logHolds, matchRows, cellValue, readLogCells, holds } from '../domain/logWrite';
+import { logWrite, logHolds, matchRows, cellValue, readLogCells, holds, type LogWrite } from '../domain/logWrite';
 import {
   KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken,
 } from './commands/qaLogs';
@@ -241,6 +241,42 @@ function comparedValues(qs: Question[], taken: Record<string, Record<string, str
   }));
 }
 
+/** Take against the same questions used to plan the update, even if one was deleted during the save (#1392). */
+async function takeLogEdits(
+  store: Store,
+  dealId: string,
+  questions: Question[],
+  taken: LogWrite['taken'],
+  tracking: Record<'held' | 'now' | 'kept' | 'changed', LogWrite['sent']>,
+) {
+  const before = questions.filter((question) => taken[question.id]);
+  const set = Object.fromEntries(before.map((question) => [
+    question.id, readCells(store, question, taken[question.id]),
+  ]));
+  const expect = comparedValues(questions, taken);
+  const result = await store.dispatch(TakeFromQaLog, { dealId, set, expect }, { quiet: true });
+  if (!result.ok) return result;
+
+  const { held, now, kept, changed } = tracking;
+  for (const previous of before) {
+    const id = previous.id;
+    const question = store.get().questions[id];
+    for (const [field, value] of Object.entries(taken[id])) {
+      if (question && holds(question, field, set[id][field])) {
+        (changed[id] ??= {})[field] = cellValue(previous, field as ImportField);
+        continue;
+      }
+      if (question) (kept[id] ??= {})[field] = value;
+      // Only applied takes become the last-written value. A deleted question can be restored later.
+      const prior = held[id]?.[field];
+      now[id] = { ...now[id] };
+      if (prior === undefined) delete now[id][field];
+      else now[id][field] = prior;
+    }
+  }
+  return result;
+}
+
 /**
  * Bring the deal's log up to date with everything the app holds (logWrite), in the file itself. A failure after the log was
  * saved still says how many kept edits it filed not fully merged.
@@ -330,20 +366,9 @@ async function writeQaLog(store: Store, dealId: string, place?: PlaceKept): Prom
   // what each cell held before. One the app cannot take as it is (an Answered status with no response,
   // say) is left in two versions, its cell recorded as before, so the next update never writes over it.
   const keptText = { ...w.keptText }; const changed: Record<string, Record<string, string>> = {};
-  const was = new Map(qs.filter((q) => w.taken[q.id]).map((q) => [q.id, q] as const));
   if (Object.keys(w.taken).length) {
-    const set = Object.fromEntries(Object.entries(w.taken).map(([id, cells]) => [id, readCells(store, store.get().questions[id], cells)]));
-    const expect = comparedValues(qs, w.taken);
-    const took = await store.dispatch(TakeFromQaLog, { dealId, set, expect }, { quiet: true });
+    const took = await takeLogEdits(store, dealId, qs, w.taken, { held, now, kept: keptText, changed });
     if (!took.ok) return settleThen(took);
-    // taken where the question now says what the log does, read in the app's terms ("Outstanding" as Open)
-    for (const [id, cells] of Object.entries(w.taken)) {
-      const q = store.get().questions[id]; const before = was.get(id); if (!q || !before) continue;
-      for (const [k, v] of Object.entries(cells)) {
-        if (holds(q, k, set[id][k])) (changed[id] ??= {})[k] = cellValue(before, k as ImportField);
-        else { (keptText[id] ??= {})[k] = v; const prior = held[id]?.[k]; now[id] = { ...now[id] }; if (prior === undefined) delete now[id][k]; else now[id][k] = prior; }
-      }
-    }
   }
   // a choice that reached this PC while the file was being saved (made here, or on another PC) answers the update this one
   // replaces: it is counted now, as the next update writes it, rather than asked again

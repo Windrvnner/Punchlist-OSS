@@ -10,7 +10,10 @@ import {
 } from '../../src/app/qaImport';
 import { previewImport, proposeLayout, readImportBytes, type ImportTable } from '../../src/app/transfer';
 import { QaImportLayout } from '../../src/app/qaImportLayout';
-import { dealQuestions } from '../../src/app/state';
+import { SetResponse } from '../../src/app/commands/questions';
+import { TakeFromQaLog } from '../../src/app/commands/qaLogs';
+import { logOf, updateQaLog } from '../../src/app/qaLog';
+import { dealQuestions, qaChanged, qaKept, qaVersions } from '../../src/app/state';
 import { ok } from '../../src/domain/result';
 import { tableFrom } from '../../src/domain/sheets';
 import { suggestMapping } from '../../src/domain/importExport';
@@ -239,6 +242,7 @@ it('keeps a column chosen during a layout proposal and refuses an unapplied one 
   await useKeptPort();
   const app = recoveryApp();
   const sheets = app.store.services.sheets;
+  const read = sheets.read;
   const questions = portfolioQuestions().slice(0, 2_000);
   const book = twoSheetLog(questions);
   sheets.read = async (_bytes, _filename, location) => ok(tableFrom(book, location)!);
@@ -268,6 +272,7 @@ it('keeps a column chosen during a layout proposal and refuses an unapplied one 
     expect(sent).toEqual(ok(undefined));
     expect(dealQuestions(app.store.get(), dealId)).toHaveLength(2_000);
   } finally {
+    sheets.read = read;
     app.store.closing();
     await app.repo.close();
   }
@@ -292,4 +297,104 @@ it('makes a consolidated log the deal\'s Q&A log unless the person chose otherwi
   expect(qaImportMakesLog(null, null, untouched)).toBe(false);
   expect(qaImportMakesLog(two.table, two.mapping, { makeLog: false, touched: true })).toBe(false);
   expect(qaImportMakesLog(one.table, one.mapping, { makeLog: true, touched: true })).toBe(true);
+});
+
+const logHeadings = ['No.', 'Question', 'Submitted by', 'Response'];
+
+async function importPortfolioLog(app: ReturnType<typeof recoveryApp>, dealId: string, rows: string[][]) {
+  app.store.services.fs.pathFor = () => PATH;
+  const picked = await loadQaImport(app.store, dealId, await csvFile([logHeadings, ...rows]));
+  if (!picked.ok) throw new Error(picked.error.message);
+  const { table, path } = picked.value;
+  const choices = choicesFor(table, path, true);
+  const { prepared } = prepareQaImport(table, choices.mapping);
+  expect(await submitQaImport(app.store, dealId, { table, choices }, prepared.rows)).toEqual(ok(undefined));
+}
+
+function portfolioLogRows(response: (at: number) => string) {
+  return portfolioQuestions().map((text, at) => [
+    String(at + 1), text, at % 2 ? 'Contoso' : 'Fabrikam', response(at),
+  ]);
+}
+
+function mockLogUpdate(app: ReturnType<typeof recoveryApp>, rows: string[][]) {
+  const table = tableFrom([{ name: 'Sheet1', grid: [logHeadings, ...rows] }])!;
+  app.store.services.qaLogs!.read = async () => ok({ ...table, stamp: 'edited' });
+  const save = vi.spyOn(app.store.services.qaLogs!, 'save');
+  return save;
+}
+
+it('takes all 25 first responses typed only in a 2,376-question log (#1392)', async () => {
+  await useKeptPort();
+  const app = recoveryApp(undefined, [TakeFromQaLog]);
+  try {
+    const dealId = await recoveryDeal(app);
+    const rows = portfolioLogRows(() => '');
+    await importPortfolioLog(app, dealId, rows);
+    const questions = dealQuestions(app.store.get(), dealId);
+    expect(questions).toHaveLength(2_376);
+    expect(questions.every((question) => question.response === '')).toBe(true);
+
+    const responses = new Map(Array.from({ length: 25 }, (_, at) => [
+      1 + at * 97, at === 0 ? ' \t ' : `  See counsel’s note (section ${at + 1}).\nSigned copy enclosed.  `,
+    ]));
+    const edited = rows.map((row, at) => [...row.slice(0, 3), responses.get(at + 1) ?? '']);
+    const save = mockLogUpdate(app, edited);
+    expect(await updateQaLog(app.store, dealId)).toMatchObject({
+      kind: 'updated', counts: { changed: 25, added: 0, answered: 0, updated: 0 }, versions: 0,
+    });
+    expect(save).not.toHaveBeenCalled();
+
+    const state = app.store.get();
+    const last = logOf(app.store, dealId)!.last!;
+    for (const { id, n } of questions) {
+      const response = responses.get(n);
+      const question = state.questions[id];
+      expect(question.response, `response for Q${n}`).toBe(response ?? '');
+      expect(qaChanged(state, question), `Changed fields for Q${n}`).toEqual(response ? ['response'] : []);
+      expect(last.changed[id]).toEqual(response ? { response: '' } : undefined);
+      expect(last.sent[id].response).toBe(response);
+    }
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+it('keeps both exact responses in 120 conflicts on a 2,376-question log', async () => {
+  await useKeptPort();
+  const app = recoveryApp(undefined, [TakeFromQaLog]);
+  try {
+    const dealId = await recoveryDeal(app);
+    const original = 'The data room holds the draft.';
+    const rows = portfolioLogRows((at) => at < 120 ? original : '');
+    await importPortfolioLog(app, dealId, rows);
+
+    const conflicts = dealQuestions(app.store.get(), dealId).filter(({ n }) => n <= 120);
+    expect(conflicts).toHaveLength(120);
+    const appResponse = 'Counsel is reviewing the draft.';
+    const logResponse = 'The signed copy supersedes the draft.';
+    for (const { id } of conflicts) {
+      expect((await app.store.dispatch(SetResponse, { dealId, questionId: id, response: appResponse })).ok).toBe(true);
+    }
+    const edited = rows.map((row, at) => at < 120 ? [...row.slice(0, 3), logResponse] : row);
+    const save = mockLogUpdate(app, edited);
+    expect(await updateQaLog(app.store, dealId)).toMatchObject({
+      kind: 'updated', counts: { changed: 0, added: 0, answered: 0, updated: 0 }, versions: 120,
+    });
+    expect(save).not.toHaveBeenCalled();
+
+    const state = app.store.get();
+    const last = logOf(app.store, dealId)!.last!;
+    for (const { id } of conflicts) {
+      const question = state.questions[id];
+      expect(question.response).toBe(appResponse);
+      expect(qaVersions(state, question)).toBe('Two versions');
+      expect(qaKept(state, question)).toEqual({ response: logResponse });
+      expect(last.sent[id].response).toBe(original);
+    }
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
 });
