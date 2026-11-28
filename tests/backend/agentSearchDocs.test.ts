@@ -6,12 +6,12 @@
 import { describe, it, expect } from 'vitest';
 import { nodeAi } from '../../src/backend/ai';
 import { StandInService } from '../../src/backend/service';
-import { StoreKeeper } from '../../src/backend/storeKeeper';
+import { fromStoreName, StoreKeeper } from '../../src/backend/storeKeeper';
 import { memRepo, Mem } from '../adapters/memRepo';
 import { tooLong } from '../../src/backend/limits';
 import type { DocRecord } from '../../src/backend/documents';
 
-type Call = { model: string; system?: string; prompt: string };
+type Call = { model: string; system?: string; prompt: string; files: { name: string }[] };
 let t = 0;
 const clock = () => new Date(Date.UTC(2026, 10, 26, 9, 0, 0, t++)).toISOString();
 const doc = (n: number, name: string): DocRecord =>
@@ -38,6 +38,7 @@ function setupIn(
   tools: Record<string, unknown>[],
   refuseOver = Infinity,
   help: Record<string, unknown> = NO_HELP,
+  otherRooms: Record<string, DocRecord[]> = {},
 ) {
   const turns: Call[] = []; const reads: Call[] = []; const picks: Call[] = [];
   const svc = new StandInService(async (c) => {
@@ -50,9 +51,10 @@ function setupIn(
   });
   (svc as { converse?: unknown }).converse = undefined;
   const keeper = new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock });
+  const records = (dealId: string) => otherRooms[dealId] ?? room;
   const docs = {
-    records: () => room,
-    wanted: async (_d: string, ids: string[]) => room.filter((r) => ids.includes(r.docId))
+    records,
+    wanted: async (dealId: string, ids: string[]) => records(dealId).filter((r) => ids.includes(r.docId))
       .map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) })),
   };
   const ai = nodeAi({ service: svc, keeper, repo: memRepo(clock), clock, docs, width: 8, library: [] });
@@ -125,6 +127,56 @@ describe('searching documents from the chat, a page at a time', () => {
     expect((await s.ai.answer(ask('Hello'))).ok).toBe(true);
     expect(s.turns[1].prompt).toContain('Documents: no page 9: there are 4 pages.');
   }, 60_000);
+});
+
+describe('first-turn attachments use the same batches as the read tool (#1213)', () => {
+  const first = [
+    'Term Sheet.pdf', 'Land Lease.pdf', 'Side Letter.pdf', 'Board Minutes.pdf',
+    'Power Purchase Agreement.pdf', 'Environmental Permit.pdf', 'Grid Connection Agreement.pdf',
+  ].map((name, index) => doc(index + 1, name));
+  const attachments = (docs: DocRecord[]) => docs.map((rec) => ({ doc: rec.name, docId: rec.docId }));
+  const sentNames = (call: Call) => call.files.map((file) => fromStoreName(file.name)!.name).sort();
+
+  it('names the blackline for another read before listing it as opened or allowing citations', async () => {
+    const clean = doc(8, 'Credit Agreement.pdf');
+    const blackline = doc(9, 'Credit Agreement (blackline).pdf');
+    const blacklinePath = `vdr/${blackline.name}`;
+    const s = setupIn([...first, clean, blackline], [
+      { tool: 'read', docs: [blacklinePath] },
+      { text: 'The ratio changed. [1] The draft sets it at 1.20x. [2]',
+        sources: [{ doc: blackline.docId, page: 3 }, { doc: clean.docId, page: 4 }] },
+    ]);
+    const result = await s.ai.answer({ ...ask('Summarize.'), attachments: attachments([...first, blackline]),
+      runId: 'read-boundary' });
+    expect(sentNames(s.turns[0])).toEqual(first.map(({ name }) => name).sort());
+    expect(s.turns[0].prompt).toContain(blacklinePath);
+    expect(names(s.turns[0])).not.toContain(blackline.name);
+    expect(names(s.turns[0])).not.toContain(clean.name);
+    expect(sentNames(s.turns[1])).toEqual([blackline.name, clean.name]);
+    expect(result).toMatchObject({ ok: true, value: {
+      sources: [{ docId: blackline.docId, loc: 'p. 3', reading: true }, { docId: clean.docId, loc: 'p. 4' }],
+      research: { read: { docs: 9, of: 9 } },
+    } });
+  });
+
+  it('uses the qualified path to defer a file on Home when a deal has the same path', async () => {
+    const own = 'me_00112233aabbccdd';
+    const credit = doc(10, 'Credit Agreement.pdf');
+    const room = [...first, doc(9, 'Technical Due Diligence.pdf'), credit];
+    const path = `${own}/vdr/${credit.name}`;
+    const s = setupIn(room, [
+      { tool: 'read', docs: [path] },
+      { text: 'The facility is secured. [1]', sources: [{ doc: `${own}/${credit.docId}`, page: 2 }] },
+    ], Infinity, NO_HELP, { d1: [doc(11, credit.name)] });
+    const result = await s.ai.answer({ message: 'Summarize.', history: [], model: 'standard',
+      dealIds: ['d1'], files: own, attachments: attachments(room) });
+    expect(s.turns[0].prompt).toContain(path);
+    expect(sentNames(s.turns[0])).toEqual(room.slice(0, 8).map(({ name }) => name).sort());
+    expect(sentNames(s.turns[1])).toEqual([credit.name]);
+    expect(result).toMatchObject({ ok: true, value: {
+      sources: [{ docId: credit.docId, dealId: own, loc: 'p. 2' }],
+    } });
+  });
 });
 
 describe('what the search helper writes is kept as written', () => {
