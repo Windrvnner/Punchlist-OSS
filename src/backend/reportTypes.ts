@@ -53,6 +53,8 @@ export interface KeptReportIssue {
   issue: ReadIssue;
   sources: Source[];
   still?: true;
+  /** The exact title, body and citations of a new finding kept from a cutoff. */
+  signature?: string;
 }
 
 /** The new issues and outstanding citation writes from a cut-off attempt. */
@@ -70,6 +72,7 @@ export interface Known {
   id: string;
   title: string;
   sources?: Source[];
+  body?: string[];
   closed?: boolean;
   /** a person deleted it: an issue it covers is not raised again */
   deleted?: boolean;
