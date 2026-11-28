@@ -2,12 +2,10 @@
 // Runs on the mock services, whose rewording and duplicate check stand in for the fast model.
 import { launchChrome } from './chrome.mjs';
 import {
-  checkChecklistFileFormats, checkEmptyChecklistShelf, general, itemSheet, solar, uploadSheet,
+  checkChecklistFileFormats, checkEmptyChecklistShelf, general, itemDocument, solar,
 } from './checklistFileFormats.mjs';
-import {
-  checkChooseColumns, checkHeadingRecovery, checkHeadingRow, checkKeptHeading, checkMouseStep, checkPendingSheetStep,
-  headingWorkbook,
-} from './headingRow.mjs';
+import { openKeptChecklist } from './checklistKeptTable.mjs';
+import { checkChecklistHeadings } from './headingRow.mjs';
 import { checkDuplicateRetries, checkSheetReadDuringRetry, checkStaleReviewKeyboard } from './firmlistRetries.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
@@ -23,7 +21,7 @@ async function start(size = [1280, 736], scheme = 'dark') {
 async function bring(page, file, layer, name, beforeGo = async () => {}) {
   await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open');
   await page.click('#fl-import');
-  await uploadSheet(page, file);
+  await page.setInputFiles('#cl-file', file);
   await page.waitForSelector('#cl-next');
   await page.click(`[data-layer=${layer}]`); if (name) await page.fill('#cl-name', name);
   await page.click('#cl-next'); await page.waitForSelector('#cl-go'); await beforeGo(); await page.click('#cl-go'); await page.waitForSelector('#fl-count');
@@ -34,32 +32,7 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
 
 await checkChecklistFileFormats(start, say);
 
-{ // #380: the columns-by-hand fallback keeps the typed row separate from the accepted checklist preview.
-  const { ctx, page } = await start();
-  const open = async () => {
-    await page.click('#u-menu');
-    await page.click('#s-checklist-open');
-    await page.click('#fl-import');
-  };
-  await open();
-  await page.evaluate(() => { window.__fail = { readList: true }; });
-  const titled = await headingWorkbook(page, 'cl', { headingAtSix: true });
-  const autoDetected = await checkChooseColumns(page, titled, 6);
-  await page.click('#cl-back');
-  const fixture = await headingWorkbook(page, 'cl');
-  const detectorFailed = await checkChooseColumns(page, fixture, 1, 'The file is locked');
-  await page.click('[data-layer=broad]');
-  const recovery = await checkHeadingRecovery(page, 'cl', fixture);
-  const mouseStep = await checkMouseStep(page, 'cl', fixture);
-  const pendingSheetStep = await checkPendingSheetStep(page, 'cl');
-  const { invalid, ...checks } = await checkHeadingRow(page, 'cl', fixture, '#cl-asksame');
-  const kept = await checkKeptHeading(page, 'cl', fixture, open);
-  const result = { ...checks, ...recovery, ...kept, mouseStep, pendingSheetStep, autoDetected, detectorFailed };
-  say('checklist heading-row edits preserve typed text and the accepted preview',
-    fixture.lastRow >= 2000 && invalid.every(Boolean) && Object.values(result).every(Boolean) && !page.errors.length,
-    JSON.stringify({ invalid, ...result, errors: page.errors }));
-  await ctx.close();
-}
+await checkChecklistHeadings(start, say);
 
 { // The general list goes to the deal at once; the review offers wording and duplicates, and changes only what is checked
   const { ctx, page, id } = await start();
@@ -123,15 +96,15 @@ await checkChecklistFileFormats(start, say);
 
 { // The New deal form picks from the firm's lists, with search once there are many; changing a list offers to turn off the old one's items
   const { ctx, page } = await start();
-  const lng = itemSheet('LNG', [
+  const lng = itemDocument('LNG', [
     'LNG supply agreement executed', 'Marine terminal permits in place', 'Insurance is in place',
   ]);
   await bring(page, lng, 'technology', 'LNG');
   await page.keyboard.press('Escape');
-  await bring(page, itemSheet('CCGT', ['Air permit issued', 'Insurance is in place']), 'technology', 'CCGT');
+  await bring(page, itemDocument('CCGT', ['Air permit issued', 'Insurance is in place']), 'technology', 'CCGT');
   await page.keyboard.press('Escape');
   for (const name of ['Biomass', 'Geothermal', 'Hydro', 'Nuclear', 'Offshore wind', 'Onshore wind', 'Solar']) {
-    await bring(page, itemSheet(name, [`${name} study reviewed`]), 'technology', name);
+    await bring(page, itemDocument(name, [`${name} study reviewed`]), 'technology', name);
     await page.keyboard.press('Escape');
   }
   await page.click('#new-deal'); await page.waitForSelector('#nd-name, #add-new'); if (await page.$('#add-new')) await page.click('#add-new'); await page.fill('#nd-name', 'Coho'); await page.click('#nd-technology > button'); await page.waitForSelector('#nd-technology-menu input');
@@ -180,8 +153,9 @@ await checkChecklistFileFormats(start, say);
     ['Section', 'Sub-section', 'Item'], ['Finance', 'Model', 'The model is audited'], ['', '', 'Reserves are funded'],
     ['', 'Funding', 'Equity is committed'], ['Legal', '', 'Approvals are in place'],
   ] };
-  await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import');
-  await uploadSheet(page, f); await page.waitForSelector('#cl-next'); await read(page);
+  await openKeptChecklist(page, f.name, [{ name: 'Sheet1', grid: f.grid }]);
+  await page.waitForSelector('#cl-next');
+  await read(page);
   const head = await page.$$eval('.imprev th', (t) => t.map((x) => x.textContent));
   const rows = await page.$$eval('.imprev tbody tr', (t) => t.map((r) => [...r.cells].map((c) => c.textContent).join('/')));
   say('the import reads a Sub-section column, carries a section filled in once down to the rows under it, and previews it', JSON.stringify(head) === '["Section","Subsection","Item"]' && JSON.stringify(rows) === JSON.stringify(['Finance/Model/The model is audited', 'Finance/Model/Reserves are funded', 'Finance/Funding/Equity is committed', 'Legal//Approvals are in place']), JSON.stringify({ head, rows }));
@@ -264,9 +238,11 @@ await checkChecklistFileFormats(start, say);
   const item = (i) => `Deliver the ${w(i)}xa ${w(i)}yb ${w(i)}zc report`; const again = (i) => `The ${w(i)}zc ${w(i)}xa ${w(i)}yb report, deliver it`;
   // 300 rows: 270 items, repeats of the first 10 at 270 to 279, and 10 items at 280 to 289 repeated at 290 to 299
   const rows = [...Array.from({ length: 270 }, (_, i) => item(i)), ...Array.from({ length: 10 }, (_, i) => again(i)), ...Array.from({ length: 10 }, (_, i) => item(400 + i)), ...Array.from({ length: 10 }, (_, i) => again(400 + i))];
-  const f = itemSheet('Missed', rows);
+  const f = itemDocument('Missed', rows);
   await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import');
-  await uploadSheet(page, f); await page.waitForSelector('#cl-next'); await page.click('[data-layer=broad]');
+  await page.setInputFiles('#cl-file', f);
+  await page.waitForSelector('#cl-next');
+  await page.click('[data-layer=broad]');
   await page.evaluate(() => { window.__sameMissed = 20; }); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
   const first = await page.evaluate(() => ({ pairs: document.querySelectorAll('#cl-pairs .rv-pair').length, missed: document.querySelector('#cl-missed')?.textContent ?? '', retry: document.querySelector('#cl-retry')?.textContent ?? '', tip: document.querySelector('#cl-retry')?.title ?? '' }));
   say('the items not compared are counted beside the duplicates found, with Retry beside them', first.pairs === 10 && /could not be reached for 20 items$/.test(first.missed) && first.retry === 'Retry' && first.tip === 'Ask about them again', JSON.stringify(first));
@@ -291,7 +267,10 @@ await checkChecklistFileFormats(start, say);
   const fresh = await start(); const p2 = fresh.page;
   await p2.click('#u-menu'); await p2.waitForSelector('#s-checklist-open'); await p2.click('#s-checklist-open'); await p2.waitForSelector('#fl-import'); await p2.click('#fl-import');
   // the list is read before the service goes down: only the duplicate check is to fail
-  await uploadSheet(p2, f); await p2.waitForSelector('#cl-next'); await read(p2); await p2.click('[data-layer=broad]');
+  await p2.setInputFiles('#cl-file', f);
+  await p2.waitForSelector('#cl-next');
+  await read(p2);
+  await p2.click('[data-layer=broad]');
   await p2.evaluate(() => { window.__down = true; }); await p2.click('#cl-next'); await p2.waitForSelector('#cl-go');
   const failed = await p2.evaluate(() => ({ pairs: document.querySelectorAll('#cl-pairs .rv-pair').length, head: [...document.querySelectorAll('.rv-h')].map((h) => h.textContent).join(' | ') }));
   await p2.evaluate(() => { window.__down = false; }); await p2.click('#cl-retry'); await p2.waitForFunction(() => document.querySelectorAll('#cl-pairs .rv-pair').length > 0);
@@ -312,8 +291,9 @@ await checkStaleReviewKeyboard(start, say);
   const unique = Array.from({ length: 2200 }, (_, i) => `${W[i % 16]} ${W[(i * 7 + 3) % 16]} schedule ${i + 1} delivered${i % 9 === 0 ? ' / LTSA reviewed' : ''}`);
   const rows = [...unique, ...unique.slice(0, 200)].map((text, index) => [`Part ${Math.floor(index / 100) + 1}`, text]);
   const big = { name: 'Big.ods', grid: [['Section', 'Item'], ...rows] };
-  await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import');
-  await uploadSheet(page, big); await page.waitForSelector('#cl-next'); await read(page);
+  await openKeptChecklist(page, big.name, [{ name: 'Sheet1', grid: big.grid }]);
+  await page.waitForSelector('#cl-next');
+  await read(page);
   const mapStep = await page.evaluate(() => ({ line: document.querySelector('#cl-line').textContent, buttons: [...document.querySelectorAll('.imdlg .xfoot .btn')].map((b) => b.textContent), file: document.querySelector('.imfile').textContent, note: !!document.querySelector('#cl-namenote') }));
   // why Next is off shows on hover, not only in its title
   await page.click('[data-layer=technology]'); const unnamed = await page.evaluate(() => { const b = document.querySelector('#cl-next'); const r = b.getBoundingClientRect(); const hover = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('[title]')?.getAttribute('title'); return hover === b.title ? b.title : `hover: ${hover}`; }); await page.fill('#cl-name', 'Solar');
@@ -350,7 +330,7 @@ await checkStaleReviewKeyboard(start, say);
   say('only the list changed on two PCs shows Two versions and Choose…; the general list keeps Replace…', JSON.stringify(row) === JSON.stringify([['', '', 'Replace…'], ['Solar', 'Two versions', 'Choose…']]), JSON.stringify(row));
   // importing that list again says so at Next, before any review is made
   await page.click('#fl-import');
-  await uploadSheet(page, solar);
+  await page.setInputFiles('#cl-file', solar);
   await page.waitForSelector('#cl-next');
   await read(page);
   await page.click('[data-layer=sector]'); await page.fill('#cl-name', 'solar');
@@ -376,7 +356,7 @@ await checkStaleReviewKeyboard(start, say);
 { // The list splits while its review is open: Choose… is offered there, and Back returns to the review with its check marks
   const { ctx, page } = await start();
   await bring(page, solar, 'sector', 'Solar');
-  await page.click('#fl-import'); await uploadSheet(page, solar); await page.waitForSelector('#cl-next');
+  await page.click('#fl-import'); await page.setInputFiles('#cl-file', solar); await page.waitForSelector('#cl-next');
   await page.click('[data-layer=sector]'); await page.fill('#cl-name', 'Solar'); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
   await page.click('[data-remove]'); const checked = await page.$$eval('[data-remove]:checked', (b) => b.length); await page.focus('#cl-go');
   await page.evaluate(async () => { const l = Object.values(store.get().firmList).find((x) => x.name === 'Solar'); await __peer.edit(l.id, { items: [...l.items, { text: 'Spare inverters held on site' }] }); });
@@ -430,7 +410,7 @@ await checkStaleReviewKeyboard(start, say);
       const desktop = fits(); document.querySelector('#s-shared').remove(); document.querySelector('#s-signin').remove(); return browser && desktop; });
     await page.click('#s-checklist-open');
     await page.click('#fl-import');
-    await uploadSheet(page, solar);
+    await page.setInputFiles('#cl-file', solar);
     await page.waitForSelector('#cl-next');
     const fits = await page.evaluate(() => { const d = document.querySelector('.imdlg'); const r = d.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && d.scrollWidth <= d.clientWidth + 1; });
     say(`Settings fits without scrolling, and the import dialog fits across · ${size.join('x')} ${scheme}`, settings && fits, JSON.stringify({ settings, fits }));
@@ -506,9 +486,11 @@ async function bulkWording(page) {
   });
   rows[7] += '; the access indemnity is signed';
   rows.push(rows[0]);   // offered for removal, with no wording suggestion
-  const f = itemSheet('Wording', rows);
+  const f = itemDocument('Wording', rows);
   await openChecklistImport(page);
-  await uploadSheet(page, f); await page.waitForSelector('#cl-next'); await page.click('[data-layer=broad]');
+  await page.setInputFiles('#cl-file', f);
+  await page.waitForSelector('#cl-next');
+  await page.click('[data-layer=broad]');
   await page.evaluate(() => { window.__fail = { reword: true }; }); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
   const failed = await page.evaluate(() => ({ head: document.querySelector('.rv-h').textContent, retry: document.querySelector('#cl-reword-retry')?.textContent ?? '', tip: document.querySelector('#cl-reword-retry')?.title ?? '', rows: document.querySelectorAll('#cl-rewords .rv-row').length }));
   say('wording that failed says Not asked, with Retry beside it', /^Not asked/.test(failed.head) && failed.retry === 'Retry' && failed.tip === 'Ask for them again' && failed.rows === 0, JSON.stringify(failed));
@@ -556,7 +538,7 @@ async function bulkWording(page) {
   const lists = async () => { await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); };
   await lists();
   await page.click('#fl-import');
-  await uploadSheet(page, solar);
+  await page.setInputFiles('#cl-file', solar);
   await page.waitForSelector('#cl-next');
   await read(page);
   await page.click('[data-layer=technology]'); await page.fill('#cl-name', 'Solar'); await page.keyboard.press('Escape'); await page.waitForSelector('.imdlg', { state: 'detached' });
@@ -565,7 +547,7 @@ async function bulkWording(page) {
   await page.keyboard.press('Escape'); await lists(); await page.click('#fl-import'); await page.waitForSelector('#cl-next');
   const kept = { name: await page.inputValue('#cl-name'), source: await page.textContent('.imfile') };
   say('Replace… opens on its own list, and Import a List… comes back as it was left', !replace.file
-    && kept.name === 'Solar' && kept.source.startsWith('Solar checklist.ods'), JSON.stringify({ replace, kept }));
+    && kept.name === 'Solar' && kept.source.startsWith('Solar checklist.docx'), JSON.stringify({ replace, kept }));
   say('no errors on the page', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }

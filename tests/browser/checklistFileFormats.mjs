@@ -1,22 +1,18 @@
-import { spreadsheetFile } from './headingRow.mjs';
+export const solar = itemDocument('Solar checklist', [
+  'Interconnection agreement executed; conditions to energization identified',
+  'Network upgrade costs allocated and capped',
+  'Inverter supply / LTSA in place',
+  'Site control covers the whole array and the gen-tie',
+  'interconnection agreement executed; conditions to energization identified.',
+]);
+export const general = itemDocument('General', [
+  'Insurance is in place', 'Site control covers the whole array and the gen-tie',
+]);
 
-export const solar = { name: 'Solar checklist.ods', grid: [
-  ['Area', 'Requirement', 'Owner'],
-  ['Interconnection', 'Interconnection agreement executed; conditions to energization identified', 'AM'],
-  ['Interconnection', 'Network upgrade costs allocated and capped', 'AM'],
-  ['Equipment', 'Inverter supply / LTSA in place', 'SL'],
-  ['Land', 'Site control covers the whole array and the gen-tie', 'PN'],
-  ['Interconnection', 'interconnection agreement executed; conditions to energization identified.', 'AM'],
-] };
-export const general = { name: 'General.ods', grid: [
-  ['Checklist item'], ['Insurance is in place'], ['Site control covers the whole array and the gen-tie'],
-] };
-
-export async function uploadSheet(page, { name, grid }, selector = '#cl-file') {
-  const file = await spreadsheetFile(page, name, [{ name: 'Sheet1', grid }]);
-  await page.setInputFiles(selector, file);
+export function itemDocument(name, rows) {
+  const mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  return { name: `${name}.docx`, mimeType, buffer: Buffer.from(['Item', ...rows].join('\n')) };
 }
-export const itemSheet = (name, rows) => ({ name: `${name}.ods`, grid: [['Item'], ...rows.map((text) => [text])] });
 
 async function drop(page, target, name, contents) {
   await page.locator(target).evaluate((zone, [name, contents]) => {
@@ -31,7 +27,7 @@ const rejected = (page, name) => page.locator('#cl-error').filter({ hasText: `Co
 
 export async function checkChecklistFileFormats(start, say) {
   const contents = 'Section,Item\nLand,Review the signed lease';
-  for (const extension of ['xlsx', 'csv']) {
+  for (const extension of ['xlsx', 'csv', 'ods']) {
     const { ctx, page } = await start();
     try {
       await page.click('#u-menu');
@@ -53,7 +49,7 @@ export async function checkChecklistFileFormats(start, say) {
       await rejected(page, innerDrop);
       say(`both checklist pickers and drop targets reject .${extension}`,
         !shelf.includes(`.${extension}`) && JSON.stringify(shelf) === JSON.stringify(wizard)
-          && wizard.includes('.docx') && wizard.includes('.ods') && !page.errors.length);
+          && wizard.includes('.docx') && wizard.includes('.odt') && !page.errors.length);
     } finally {
       await ctx.close();
     }
@@ -80,17 +76,20 @@ export async function checkEmptyChecklistShelf(start, say, read) {
       empty.zone === 160 && empty.dialog >= 360 && empty.icon
         && empty.words === 'Drop a checklist here, or choose a file…' && empty.sections === 0 && !empty.count,
       JSON.stringify(empty));
-    await uploadSheet(page, solar, '#fl-file'); await page.waitForSelector('#cl-next'); await read(page);
+    await page.setInputFiles('#fl-file', solar); await page.waitForSelector('#cl-next'); await read(page);
     const opened = { title: await page.textContent('.imdlg h2'), source: await page.textContent('.imfile') };
     say(`a file chosen there opens Import a checklist with it read (${size[0]})`,
-      opened.title === 'Import a Checklist' && opened.source.startsWith('Solar checklist.ods'), JSON.stringify(opened));
+      opened.title === 'Import a Checklist' && opened.source.startsWith('Solar checklist.docx'),
+      JSON.stringify(opened));
     // the import under way is kept: a second file on the empty dialog opens it as it was left, the choices in it kept
     await page.click('[data-layer=technology]'); await page.fill('#cl-name', 'Solar');
     await page.keyboard.press('Escape'); await page.waitForSelector('.imdlg', { state: 'detached' });
-    await open(); await uploadSheet(page, general, '#fl-file'); await page.waitForSelector('#cl-next');
+    await open();
+    await page.setInputFiles('#fl-file', general);
+    await page.waitForSelector('#cl-next');
     const kept = { name: await page.inputValue('#cl-name'), source: await page.textContent('.imfile') };
     say(`an import under way is never replaced by a file dropped on the empty dialog (${size[0]})`,
-      kept.name === 'Solar' && kept.source.startsWith('Solar checklist.ods'), JSON.stringify(kept));
+      kept.name === 'Solar' && kept.source.startsWith('Solar checklist.docx'), JSON.stringify(kept));
     await page.click('#cl-next'); await page.waitForSelector('#cl-go'); await page.click('#cl-go');
     await page.waitForSelector('#fl-count');
     say(`with a list, the layers and the count come back (${size[0]})`,
