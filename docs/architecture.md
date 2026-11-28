@@ -192,6 +192,10 @@ New documents or responses go to the fast model, which says what they could chan
 
 Every issue that an outside advisor raises in a report becomes a finding, whether or not a checklist item covers it (`src/backend/reports.ts`, `reportRead.ts`, `reportsKit.ts`). After a round or first pass, and once each time a PC starts, a background sweep runs in two steps. First, the fast model sorts paths it has not seen into reports. Then the standard model reads the newest draft of each report, with the deal's findings in view, so that an issue already covered cites the existing finding instead of raising a new one. Each step is claimed and logged in the deal's check log, in the same way as describing documents. A finding's ID is derived from the deal, the report, and the issue's title, so two PCs raise the same record.
 
+The standard model sends an issues array for a report, empty when it finds no issues. The same whole report is sent
+back with a correction when the parsed reply omits the array or gives it in the wrong form. An incomplete reply
+leaves a failed attempt in the check log. An explicit negative classification is logged as a non-report (#1212).
+
 ## Checklist items and links
 
 A deal's checklist is made up of its own item records, linked to the findings and questions that bear on them (#2). The code is in `src/domain/checklist.ts`, `src/app/commands/checklist.ts`, `src/app/checklistImport.ts`, and `src/app/state.ts`. What is not built yet is described in [linking-design.md](linking-design.md).

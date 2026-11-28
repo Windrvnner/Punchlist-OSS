@@ -10,7 +10,7 @@ import { unknownIds } from './recordIds';
 import { withFewerChanges } from './limits';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
-  isCut, yes,
+  isCut,
 } from './reportTypes';
 
 /** sentences of one paragraph, written out for the model */
@@ -224,6 +224,12 @@ export const knownUnusable = (known: Known[], keys: string[]) => (text: string) 
   return unknownIds(named, ids).length > 0;
 };
 
+/** The explicit reply that the document is not a report, as the prompt asks. */
+const notReport = (reply: Record<string, unknown>) => reply.report === false && !('issues' in reply);
+
+/** A report that raises no issues gives an empty array (#1212). */
+const isCompleteReportReply = (reply: Record<string, unknown>) => notReport(reply) || Array.isArray(reply.issues);
+
 /** the report's issues from the model in one call; a reply cut off at the length limit comes back with `cut` */
 async function ask(r: ReportRead, known: Known[]) {
   const k = r.k;
@@ -235,16 +241,16 @@ async function ask(r: ReportRead, known: Known[]) {
   const unusable = async (text: string) => (await cites(text)) || named(text);
   const input = { kind: 'report', split: true, model: k.models.standard, system: k.system, files: r.s.files, prompt,
     unusable };
+  const correction = (reply: Record<string, unknown>) => isCompleteReportReply(reply)
+    ? undefined
+    : 'provide an issues array, empty only if the report raises no issues, or {"report":false} for a non-report';
   try {
-    return { reply: await k.ask(input, keys), cut: false };
+    return { reply: await k.ask(input, keys, correction), cut: false };
   } catch (e) {
     if (!isCut(e)) throw e;
     return { reply: null, cut: true };
   }
 }
-
-/** a reply that says the document is not a report by an outside advisor, and gives no issues */
-const notReport = (reply: Record<string, unknown>) => 'report' in reply && !yes(reply.report) && !('issues' in reply);
 
 /**
  * Read one report. Returns the line to write; `'not'` when the model says it is not a report; `'lost'` when this PC
@@ -270,10 +276,10 @@ export async function read(
     return 'lost';
   }
   const { r, got } = sentAndAsked;
-  if (!got.reply) return null;
+  if (!got.reply || !isCompleteReportReply(got.reply)) return null;
   if (notReport(got.reply)) return 'not';
   r.heard(got.reply);
-  if (!(await r.takeAll(listOf(got.reply.issues) as Record<string, unknown>[], known))) return null;
+  if (!(await r.takeAll(got.reply.issues as Record<string, unknown>[], known))) return null;
   return finish(r, last);
 }
 

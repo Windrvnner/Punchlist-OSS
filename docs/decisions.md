@@ -342,6 +342,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The first pass and Check again search the word index item by item, and hand anything that would be a gap to the chat agent's search. A gap shows its search trail ("Searched for …").
 - For new documents and responses, one fast call says what they affect, and only that is looked at.
 - An unreadable reply is repaired or sent back once; a thin reply is sent back with what is wrong.
+  An advisor-report reply with no issues gives an empty issues array before the read is recorded as finished (#1212).
 - Retryable model failures and empty replies are retried quietly, up to twice by default after 2 and 4 seconds.
   An unreachable service follows its own recovery path. Keep everything the person typed.
 - A connector retries a busy or failing service up to twice, honoring Retry-After, before it reports the service
@@ -468,7 +469,9 @@ These decisions are built and wait to be confirmed:
 - Once two PCs' imports of one list have synced, the second PC's Undo of its import is refused.
 - The recovered copy of a deal deleted elsewhere is built, including who sees it, what it holds, and its notice's wording (#220).
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
-- An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, with its spacing and line breaks as written (#1059), and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
+- The model reads an issues list or an advisor report as a whole file. It returns each issues-list point in the
+  list's own words, never reworded, with its spacing and line breaks as written (#1059), and each advisor-report
+  issue with its place in the file. There is no paging and no stop rule (#1026).
 - A document's word index and a search no longer drop a word or number for its length, and a Word file is indexed from
   its body and all its header, footer, footnote and endnote parts (#1025).
 - The core set and a document's most-used words split text as the word index does and drop no word, letter or number

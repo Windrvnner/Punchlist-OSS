@@ -31,9 +31,10 @@ function blocks(reply: string): string[] {
 /**
  * The object in a reply. `keys` are the fields that were asked for: of the objects found, the first that has one of them
  * is the answer, so an aside in braces is not mistaken for it. A reply that is nothing but a list is taken as the
- * first key's list. Null when there is nothing to read.
+ * first key's list. A caller checking reply shape may ask for the first unkeyed object when no keyed answer was found.
+ * Null when there is nothing to read.
  */
-export function readJson(reply: string, keys: string[]): Record<string, unknown> | null {
+export function readJson(reply: string, keys: string[], allowUnkeyed = false): Record<string, unknown> | null {
   const text = String(reply ?? '').replace(/^﻿/, '').trim(); if (!text) return null;
   const fenced = [...text.matchAll(/```[a-zA-Z0-9]*\s*([\s\S]*?)(?:```|$)/g)].map((m) => m[1].trim()).filter(Boolean);
   // a reply that is a list and nothing else
@@ -46,7 +47,7 @@ export function readJson(reply: string, keys: string[]): Record<string, unknown>
     if (keys.some((k) => k in v)) return v;
     fallback ??= v;
   }
-  return keys.length ? null : fallback;
+  return keys.length && !allowUnkeyed ? null : fallback;
 }
 
 /**
