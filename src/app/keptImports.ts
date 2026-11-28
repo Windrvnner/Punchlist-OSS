@@ -113,6 +113,22 @@ class ImportKeeper {
     return this.flush();
   }
 
+  /** Wait for the removal used by a journaled import. A refused write leaves the draft available. */
+  async dropSaved(key: string): Promise<boolean> {
+    await this.ready;
+    if (this.connection === 'memory') {
+      this.drop(key);
+      return true;
+    }
+    if (this.connection !== 'ready') return false;
+    const kept = this.imports.get(key);
+    if (!kept) return true;
+    this.later({ key, drop: true });
+    if (!await this.flush()) return false;
+    if (this.imports.get(key) === kept) this.imports.delete(key);
+    return true;
+  }
+
   drop(key: string) {
     if (this.imports.delete(key)) this.later({ key, drop: true });
   }
@@ -135,6 +151,8 @@ export function keepImport(key: string, parts: Parts) { imports.keep(key, parts)
 export function saveImport(key: string, parts: Parts) { return imports.save(key, parts); }
 
 export function dropImport(key: string) { imports.drop(key); }
+
+export function dropSavedImport(key: string) { return imports.dropSaved(key); }
 
 /** A deal's imports and each way into the firm's checklist keep their own choices. */
 export const importKey = {

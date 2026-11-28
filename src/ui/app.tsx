@@ -1,5 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { dealRows, dismissInterrupted, interruptedView, railDealGroups } from '../app/dealView';
+import { retryInterruptedImport } from '../app/qaImport';
 import { commandLabel, commandPlace } from '../app/commandLabels';
 import { undoFromNotice } from '../app/undoNotice';
 import { StoreContext, useAppState, useStore, lastInput, nameDir } from './hooks';
@@ -385,7 +386,7 @@ function InterruptedBar() {
   const [first, setFirst] = useState<string>();
   const [dismissed, setDismissed] = useState<string[]>([]);
   const bar = useRef<HTMLDivElement>(null);
-  const { showing, hidden } = interruptedView(s, first, dismissed);
+  const { showing, hidden, covered } = interruptedView(s, first, dismissed);
   const show = () => {
     setFirst(hidden[0].id);
     setDismissed([]);
@@ -399,7 +400,7 @@ function InterruptedBar() {
     <div class="intbar" role="status" ref={bar}>
       {showing.map((op) => (
         <Interrupted key={op.id} id={op.id} what={commandLabel(op.command, op.input)} where={commandPlace(s, op.input)}
-          onHide={() => hide(op.id)} />))}
+          covered={covered.includes(op.id)} onHide={() => hide(op.id)} />))}
       {hidden.length > 0 && (
         <Notice glyph="warn" actions={[{ label: 'Show', run: show }]}>
           <NoticeWords text={`${hidden.length} more interrupted`} />
@@ -408,7 +409,9 @@ function InterruptedBar() {
   );
 }
 
-function Interrupted({ id, what, where, onHide }: { id: string; what: string; where: string; onHide: () => void }) {
+function Interrupted({ id, what, where, covered, onHide }: {
+  id: string; what: string; where: string; covered: boolean; onHide: () => void;
+}) {
   const store = useStore();
   // Discard drops what was typed into the action, so it asks first in the app's confirm (#1055)
   const [asking, setAsking] = useState(false);
@@ -421,9 +424,10 @@ function Interrupted({ id, what, where, onHide }: { id: string; what: string; wh
   };
   return (
     <>
-      <Notice id={`interrupted-${id}`} class="intop" glyph="warn" full={text} onClose={onHide}
+      <Notice id={`interrupted-${id}`} class={covered ? 'intop intop-covered' : 'intop'}
+        glyph="warn" full={text} onClose={onHide}
         actions={[
-          { label: 'Retry', run: () => void store.retryOp(id) },
+          { label: 'Retry', run: () => void retryInterruptedImport(store, id) },
           { label: 'Discard', run: () => setAsking(true) },
         ]}>
         <NoticeWords text={text} />
