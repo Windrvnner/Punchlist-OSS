@@ -4,8 +4,10 @@
  * they are: no fast-model pick, and a blackline's clean draft beside it, within the 8 (#1102).
  */
 import { describe, it, expect } from 'vitest';
+import { MemoryLocal } from '../../src/adapters/local';
+import { carriedThread, localConversations } from '../../src/app/threads';
 import { nodeAi } from '../../src/backend/ai';
-import { StandInService } from '../../src/backend/service';
+import { StandInService, type ConverseInput } from '../../src/backend/service';
 import { fromStoreName, StoreKeeper } from '../../src/backend/storeKeeper';
 import { memRepo, Mem } from '../adapters/memRepo';
 import { tooLong } from '../../src/backend/limits';
@@ -51,6 +53,12 @@ function setupIn(
     if (isRead(call)) reads.push(call);
     return JSON.stringify(help);
   });
+  const requests: ConverseInput[] = [];
+  const converse = svc.converse.bind(svc);
+  svc.converse = async (input) => {
+    requests.push(input);
+    return converse(input);
+  };
   if (!toolCalls) (svc as { converse?: unknown }).converse = undefined;
   const keeper = new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock });
   const records = (dealId: string) => otherRooms[dealId] ?? room;
@@ -62,7 +70,7 @@ function setupIn(
   };
   const ai = nodeAi({ service: svc, keeper, repo: memRepo(clock), clock, docs, width: 8, library: [],
     retry: { sleep: async () => {} }, ...(toolCalls ? { toolCalls } : {}) });
-  return { ai, turns, reads, picks };
+  return { ai, svc, turns, reads, picks, requests };
 }
 /** the documents a read was given, in the order it lists them */
 const names = (c: Call) =>
@@ -70,6 +78,8 @@ const names = (c: Call) =>
 const docs = (page?: number) =>
   ({ tool: 'search', what: 'documents', query: 'turbine warranty', ...(page ? { page } : {}) });
 const ask = (message: string) => ({ dealId: 'd1', message, history: [], model: 'standard' });
+const attachments = (docs: DocRecord[]) => docs.map((rec) => ({ doc: rec.name, docId: rec.docId }));
+const sentNames = (call: Call) => call.files.map((file) => fromStoreName(file.name)!.name).sort();
 const RANKED = ['01', '02', '03', '04', '05', '05 (blackline)', '06', '07', '08', '09', '10', '11', '12', '13', '14',
   '15',
   ...Array.from({ length: 15 }, (_v, i) => two(i + 16))].map((x) => `Turbine warranty ${x}.pdf`);
@@ -138,8 +148,6 @@ describe('first-turn attachments use the same batches as the read tool (#1213)',
     'Term Sheet.pdf', 'Land Lease.pdf', 'Side Letter.pdf', 'Board Minutes.pdf',
     'Power Purchase Agreement.pdf', 'Environmental Permit.pdf', 'Grid Connection Agreement.pdf',
   ].map((name, index) => doc(index + 1, name));
-  const attachments = (docs: DocRecord[]) => docs.map((rec) => ({ doc: rec.name, docId: rec.docId }));
-  const sentNames = (call: Call) => call.files.map((file) => fromStoreName(file.name)!.name).sort();
 
   it('names the blackline for another read before listing it as opened or allowing citations', async () => {
     const clean = doc(8, 'Credit Agreement.pdf');
@@ -207,19 +215,19 @@ describe('first-turn attachments use the same batches as the read tool (#1213)',
     const blackline = doc(9, 'Credit Agreement (blackline).pdf');
     const s = setupIn([clean, blackline, first[0]], [
       { tool: 'read', docs: [blackline.name, first[0].name] },
-      { text: 'The facility is secured. [1]', sources: [{ doc: clean.docId, page: 2 }] },
+      { text: 'The facility is secured. [1]', sources: [{ doc: blackline.docId, page: 2 }] },
       { text: 'The term sheet sets the terms. [1]', sources: [{ doc: first[0].docId, page: 1 }] },
     ], Infinity, NO_HELP, {}, [clean.docId]);
     const result = await s.ai.answer({ ...ask('Summarize.'), runId: 'unavailable-draft' });
-    expect(sentNames(s.turns[1])).toEqual([blackline.name, first[0].name]);
+    expect(sentNames(s.turns[1])).toEqual([first[0].name]);
     expect(s.turns[1].prompt).toContain(`These files could not be attached.\n- ${clean.docId} (vdr/${clean.name})`);
-    expect(s.turns[1].prompt).toContain(`its clean draft is vdr/${clean.name}, which is not given here`);
+    expect(s.turns[1].prompt).toContain(`- ${blackline.docId} (vdr/${blackline.name})`);
     expect(names(s.turns[1])).not.toContain(clean.name);
     expect(result).toMatchObject({ ok: true, value: {
-      sources: [{ docId: first[0].docId, loc: 'p. 1' }], research: { read: { docs: 2, of: 3 } },
+      sources: [{ docId: first[0].docId, loc: 'p. 1' }], research: { read: { docs: 1, of: 3 } },
     } });
     if (result.ok) expect(result.value.research?.steps.filter(({ kind }) => kind === 'read'))
-      .toEqual([blackline, first[0]].map(({ name }) => expect.objectContaining({ text: `Reviewed ${name}` })));
+      .toEqual([expect.objectContaining({ text: `Reviewed ${first[0].name}` })]);
   });
 
   it('reads a blackline after the kept conversation has received its clean draft', async () => {
@@ -250,4 +258,160 @@ describe('what the search helper writes is kept as written', () => {
     expect(s.turns[1].prompt).toContain('opened');
     expect(s.turns[1].prompt).toContain(' Helper words.\t');
   }, 60_000);
+});
+
+describe('a blackline needs its clean draft in the same model context (#1430)', () => {
+  const clean = doc(8, 'Credit Agreement.pdf');
+  const blackline = doc(9, 'Credit Agreement (blackline).pdf');
+  const room = [clean, blackline];
+  const read = (document: DocRecord) => ({ tool: 'read', docs: [document.name] });
+  const facts = { text: 'The ratio changed. [1]', sources: [{ doc: blackline.docId, page: 2 }] };
+
+  async function reopenCleanDraft(s: ReturnType<typeof setupIn>) {
+    const first = await s.ai.answer({ ...ask('Summarize.'), attachments: attachments([clean]) });
+    if (!first.ok || !first.value.thread) throw Error('The clean draft was not kept in its model conversation.');
+    expect(sentNames(s.turns[0])).toEqual([clean.name]);
+    const local = new MemoryLocal();
+    await localConversations(local).save('d1', [{ id: 'one', role: 'ai', text: 'ok', state: 'done',
+      at: clock(), thread: first.value.thread,
+    }]);
+    const saved = await localConversations(local).load();
+    if (!saved.ok) throw Error('The conversation could not be loaded.');
+    const thread = carriedThread(saved.value.d1);
+    expect(thread).toMatchObject({ whole: [{ dealId: 'd1', docId: clean.docId }] });
+    if (!thread) throw Error('The model thread was lost.');
+    return thread;
+  }
+
+  function expectRetryContext(change: string, requests: ConverseInput[], id: string) {
+    const [initial, accepted] = requests.slice(1);
+    if (change === 'gone') {
+      expect(initial.conversation).toBe(id);
+      expect(initial.files).toHaveLength(1);
+      expect(accepted.conversation).toBeUndefined();
+      expect(accepted.files).toBeUndefined();
+    }
+    if (change === 'hybrid') {
+      expect(initial.results).toHaveLength(1);
+      expect(accepted.conversation).toBe(id);
+      expect(accepted.results).toBeUndefined();
+      expect(accepted.files).toEqual(initial.files);
+    }
+  }
+
+  function changeContext(context: string, svc: StandInService, thread: Awaited<ReturnType<typeof reopenCleanDraft>>) {
+    if (context === 'gone') svc.conversations.delete(thread.id);
+    if (context === 'compacted') thread.tokens = 1_000_000;
+    if (context === 'hybrid') svc.noToolResults = true;
+  }
+
+  it('names both unopenable files in automatic search and first-turn attachments', async () => {
+    const s = setupIn(room, [], Infinity, NO_HELP, {}, [clean.docId]);
+    const result = await s.ai.answer({
+      ...ask('Summarize the credit agreement.'), attachments: attachments([blackline]),
+    });
+    expect(s.reads).toEqual([]);
+    expect(sentNames(s.turns[0])).toEqual([]);
+    const prompt = s.turns[0].prompt;
+    expect(prompt.split(`vdr/${clean.name}`)).toHaveLength(3);
+    expect(prompt.split(`vdr/${blackline.name}`)).toHaveLength(3);
+    expect(result).toMatchObject({ ok: true, value: { sources: [], research: { read: { docs: 0, of: 2 } } } });
+  });
+
+  it('names omitted folder evidence and reads the pair when files become available again', async () => {
+    const other = doc(7, 'Board Minutes.pdf');
+    const unavailable = [clean.docId];
+    const folder = { tool: 'folder', folder: 'vdr', lookFor: 'facility terms' };
+    const s = setupIn([...room, other], [folder, {
+      toJSON() { unavailable.pop(); return folder; },
+    }, facts], Infinity, NO_HELP, {}, unavailable);
+    const result = await s.ai.answer(ask('Summarize.'));
+    expect(s.reads.map(sentNames)).toEqual([[other.name], [blackline.name, clean.name].sort()]);
+    expect(s.turns[1].prompt).toContain(`vdr/${clean.name}`);
+    expect(s.turns[1].prompt).toContain(`vdr/${blackline.name}`);
+    expect(result).toMatchObject({ ok: true, value: {
+      sources: [{ docId: blackline.docId, reading: true }], research: { read: { docs: 3, of: 3 } },
+    } });
+  });
+
+  it('a clean draft searched by a helper cannot authorize the main chat to read the blackline', async () => {
+    const unavailable: string[] = [];
+    const s = setupIn(room, [{
+      toJSON() { unavailable.push(clean.docId); return read(blackline); },
+    }], Infinity, NO_HELP, {}, unavailable, 'native');
+    const result = await s.ai.answer(ask('Summarize the credit agreement.'));
+    expect(s.reads.map(sentNames)).toEqual([[blackline.name, clean.name].sort()]);
+    expect(sentNames(s.turns[1])).toEqual([]);
+    expect(s.turns[1].prompt).toContain(`vdr/${blackline.name}`);
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it('does not credit a clean draft when the model rejects the turn that tried to send it', async () => {
+    const unavailable: string[] = [];
+    const s = setupIn(room, [read(clean), {
+      toJSON() {
+        unavailable.push(clean.docId);
+        throw Object.assign(new Error('The conversation is gone'), { code: 'gone' });
+      },
+    }, read(blackline)], Infinity, NO_HELP, {}, unavailable, 'native');
+    const result = await s.ai.answer(ask('Summarize.'));
+    expect(s.turns.map(sentNames)).toEqual([[], [clean.name], [], []]);
+    expect(s.requests.map(({ conversation }) => Boolean(conversation))).toEqual([false, true, false, true]);
+    expect(result).toMatchObject({ ok: true, value: {
+      sources: [], thread: { opened: [] }, research: { read: { docs: 0, of: 2 } },
+    } });
+  });
+
+  it('does not borrow a similarly named clean draft from another deal', async () => {
+    const unavailable: string[] = [];
+    const other = room.map((rec) => ({ ...rec, folder: 'legal' }));
+    const s = setupIn([clean], [{ tool: 'read', docs: [`vdr/${clean.name}`] }, {
+      toJSON() {
+        unavailable.push(clean.docId);
+        return { tool: 'read', docs: [`legal/${blackline.name}`] };
+      },
+    }], Infinity, NO_HELP, { d2: other }, unavailable, 'native');
+    const result = await s.ai.answer({ dealIds: ['d1', 'd2'], message: 'Summarize.', model: 'standard', history: [] });
+    expect(s.turns.map(sentNames)).toEqual([[], [clean.name], []]);
+    expect(s.turns[2].prompt).toContain(`d2/${blackline.docId} (legal/${blackline.name})`);
+    expect(result).toMatchObject({ ok: true, value: { research: { read: { docs: 1, of: 3 } } } });
+  });
+
+  it.each(['kept', 'hybrid', 'gone', 'compacted', 'changed'] as const)(
+    'qualifies a previously attached clean draft only in its kept model context (%s)', async (context) => {
+      const unavailable: string[] = [];
+      const allowed = context === 'kept' || context === 'hybrid';
+      const s = setupIn(room, [answer, allowed ? facts : answer], Infinity, NO_HELP, {}, unavailable, 'native');
+      const thread = await reopenCleanDraft(s);
+      unavailable.push(clean.docId);
+      changeContext(context, s.svc, thread);
+      const result = await s.ai.answer({ ...ask('What changed?'), thread, attachments: attachments([blackline]),
+        ...(context === 'changed' ? { model: 'thorough' } : {}),
+      });
+      expectRetryContext(context, s.requests, thread.id);
+      expect(sentNames(s.turns[1])).toEqual(allowed ? [blackline.name] : []);
+      expect(result).toMatchObject({ ok: true, value: { sources: allowed
+        ? [{ docId: blackline.docId, reading: true }] : [], research: { read: { docs: allowed ? 1 : 0, of: 2 } },
+      } });
+      if (!allowed) expect(s.turns[1].prompt).toContain(`vdr/${blackline.name}`);
+    },
+  );
+
+  it('still lets a standalone blackline through a stateless turn', async () => {
+    const s = setupIn([blackline], [facts]);
+    const result = await s.ai.answer({ ...ask('Summarize.'), attachments: attachments([blackline]) });
+    expect(sentNames(s.turns[0])).toEqual([blackline.name]);
+    expect(result).toMatchObject({ ok: true, value: { sources: [{ docId: blackline.docId, reading: true }] } });
+  });
+
+  it('a stateless call cannot use a previous turn’s clean draft', async () => {
+    const unavailable: string[] = [];
+    const s = setupIn(room, [read(clean), {
+      toJSON() { unavailable.push(clean.docId); return read(blackline); },
+    }], Infinity, NO_HELP, {}, unavailable);
+    const result = await s.ai.answer(ask('Summarize.'));
+    expect(s.turns.map(sentNames)).toEqual([[], [clean.name], []]);
+    expect(s.turns[2].prompt).toContain(`vdr/${blackline.name}`);
+    expect(result).toMatchObject({ ok: true, value: { research: { read: { docs: 1, of: 2 } } } });
+  });
 });
