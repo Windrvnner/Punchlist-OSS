@@ -1611,9 +1611,10 @@ export function nodeAi(o: AiOptions) {
         }
         const k = kindsOf(dealId);
         const against = k.against.get(rec.docId) ?? 'own';
-        if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, available, k.pairs.get(rec.docId) ?? null, against, idOf));
-        // another project's document (docs/other-project-documents-design.md): read, never a main source
-        else if (k.precedents.has(rec.docId)) {
+        if (k.pairs.has(rec.docId)) {
+          lines.push(blacklineLine(s, available, k.pairs.get(rec.docId) ?? null, against, idOf));
+        } else if (k.precedents.has(rec.docId)) {
+          // another project's document (docs/other-project-documents-design.md): read, never a main source
           lines.push(`  ${idOf(s)} is another project's document, not this deal's. Its terms are never this deal's: `
             + 'use it only to compare, and cite it only beside a document of this deal. By itself it never shows that '
             + 'a finding is put right or that its problem is back.');
