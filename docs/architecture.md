@@ -199,9 +199,10 @@ in the check log. An explicit negative classification is logged as a non-report 
 
 A cut-off reply keeps its citation-verified complete issues, and the check log records their places with the
 unfinished attempt. The next attempt sends the same whole report and asks for the remaining issues. A completed
-read combines the kept issues with the final reply. A newer draft compares with the last completed draft and any
-verified issues from drafts in between. Overview shows exhausted reads from the persisted attempts in Documents,
-where a single count expands to show the report names (#1212).
+read combines the kept issues with the final reply. A finding retains the original issue signature, including through
+edits and deletion, so retrying an interrupted write can recognize it. A newer draft compares with the last completed
+draft and any verified issues from drafts in between. Overview shows exhausted reads from the persisted attempts
+in Documents, where a single count expands to show the report names (#1212).
 
 ## Checklist items and links
 

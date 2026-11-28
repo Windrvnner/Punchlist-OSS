@@ -71,8 +71,7 @@ export const reportPlace = (source: Source) => JSON.stringify([source.docId, sou
 export interface Known {
   id: string;
   title: string;
-  sources?: Source[];
-  body?: string[];
+  signature?: string;
   closed?: boolean;
   /** a person deleted it: an issue it covers is not raised again */
   deleted?: boolean;
@@ -84,6 +83,7 @@ export interface Issue {
   workstream: string;
   body: string[];
   sources: Source[];
+  signature?: string;
   /** a closed finding on the same issue: a person settled that one, and the advisor raises it again */
   earlier?: string;
 }

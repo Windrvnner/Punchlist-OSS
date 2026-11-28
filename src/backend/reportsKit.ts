@@ -26,24 +26,27 @@ export async function knownFindings(repo: Repository, dealId: string): Promise<K
   if (!held.ok) throw failed(held);
   const notes = await repo.list('tombstone', dealId);
   if (!notes.ok) throw failed(notes);
-  type Finding = { id: string; title?: unknown; status?: string; sources?: Source[]; body?: string[] };
+  type Finding = { id: string; title?: unknown; status?: string; reportIssueSignature?: string };
   const live: Known[] = [];
   for (const l of held.value) {
     const d = l.envelope.data as Finding;
     if (typeof d.title !== 'string') continue;
     live.push({
-      id: d.id, title: d.title, sources: d.sources, body: d.body, ...(d.status === 'closed' ? { closed: true } : {}),
+      id: d.id, title: d.title, signature: d.reportIssueSignature,
+      ...(d.status === 'closed' ? { closed: true } : {}),
     });
   }
   // a finding a person deleted: an issue it covers is not raised again
-  type Note = { kind?: string; snapshot?: { id?: unknown; title?: unknown; sources?: Source[]; body?: string[] } };
+  type Note = { kind?: string; snapshot?: Partial<Finding> };
   const gone: Known[] = [];
   for (const l of notes.value) {
     const d = l.envelope.data as Note;
     const { id, title } = d.snapshot ?? {};
     const isFinding = (d.kind ?? 'finding') === 'finding';
     if (isFinding && typeof id === 'string' && typeof title === 'string') {
-      gone.push({ id, title, sources: d.snapshot?.sources, body: d.snapshot?.body, deleted: true });
+      gone.push({
+        id, title, signature: d.snapshot?.reportIssueSignature, deleted: true,
+      });
     }
   }
   return [...live, ...gone];
@@ -70,6 +73,7 @@ export async function raiseFinding(w: FindingWrites, dealId: string, id: string,
     body: f.body, sources: f.sources,
     origin: 'ai', note: '', reviewed: null, updated: false,
     ...(f.earlier ? { earlier: f.earlier } : {}),
+    ...(f.signature ? { reportIssueSignature: f.signature } : {}),
   };
   const index = { dealId, add: [{ kind: 'finding' as const, id }] };
   const wrote = await w.repo.transaction({ writes: [{ kind: 'finding', id, data, expectedRev: null }], index });

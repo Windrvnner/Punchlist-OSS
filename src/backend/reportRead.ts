@@ -114,10 +114,13 @@ const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string'
 
 const placement = (s: Source) => JSON.stringify([reportPlace(s), s.quote ?? '']);
 const atPlaces = (key: string, sources: Source[]) => JSON.stringify([key, ...sources.map(placement).sort()]);
-const issueId = (issue: ReadIssue) => issue.finding ?? issue.covered ?? '';
+const issueId = (issue?: ReadIssue) => issue?.finding ?? issue?.covered ?? '';
+
+const earlierIssue = (row: Record<string, unknown>, before?: ReadLine) =>
+  before?.issues[(tagNumber(row.still, 'E') ?? 0) - 1];
 
 function issueSignature(title: string, body: string[], sources: Source[]) {
-  const parts = [reportTitleKey(title), body, ...sources.map(placement).sort()];
+  const parts = [title, body, ...sources.map(placement).sort()];
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 }
 
@@ -185,8 +188,8 @@ class ReportRead {
   /** One row of a reply. False when a finding could not be written: the read is not done, and is asked again. */
   async take(row: Record<string, unknown>, known: Known[]): Promise<boolean> {
     // an issue the earlier draft raised and this one still does: the report's page is added to its finding
-    const was = this.before?.issues[(tagNumber(row.still, 'E') ?? 0) - 1];
-    const stillAt = was?.finding ?? was?.covered;
+    const was = earlierIssue(row, this.before);
+    const stillAt = issueId(was);
     if (was && stillAt) return this.still(row, was, stillAt);
     const covering = known.find((f) => f.id === row.covered);
     const title = titleOf(row);
@@ -219,17 +222,18 @@ class ReportRead {
     const own = isOwn(this.k, this.rec.docId, f);
     const issue = own ? { title: f.title, finding: f.id } : { title: f.title, covered: f.id };
     this.issues.push(issue);
-    this.keep({ issue, sources: places });
+    this.keep({ issue, sources: places, ...(own && f.signature ? { signature: f.signature } : {}) });
   }
 
   /** Continue the existing title ordinals, including a finding written before its cutoff was logged. */
-  private idFor(title: string, body: string[], places: Source[], known: Known[]) {
-    const key = this.verifying ? reportTitleKey(title) : title;
+  private idFor(title: string, signature: string, known: Known[]) {
+    const key = reportTitleKey(title);
     let nth = (this.titles.get(key) ?? 0) + 1;
     for (;;) {
       const id = this.k.idFor(this.rec.docId, title, nth);
       const had = this.verifying ? known.find((finding) => finding.id === id) : undefined;
-      if (!this.reserved.has(id) && (!had || sameIssue(had, body, places))) {
+      // Legacy findings and deletions keep their existing title ordinal.
+      if (!this.reserved.has(id) && (had?.signature === undefined || had.signature === signature)) {
         this.titles.set(key, nth);
         return id;
       }
@@ -244,14 +248,15 @@ class ReportRead {
     // an issue stands on a page of the report a person can open, as any finding does
     if (!fitted.text || !fitted.sources.length) { this.unplaced++; return true; }
     const body = k.fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()));
-    const signature = this.retaining || this.resume ? issueSignature(title, body, fitted.sources) : undefined;
-    if (signature && this.seen.has(signature)) return true;
-    const id = this.idFor(title, body, fitted.sources, known);
+    const signature = issueSignature(title, body, fitted.sources);
+    if (this.seen.has(signature)) return true;
+    const id = this.idFor(title, signature, known);
     const issue: Issue = {
       title,
       workstream: k.workstreamOf(row.workstream),
       body,
       sources: fitted.sources,
+      signature,
     };
     // a closed finding on the same issue is named, by its id: with none named, the one given as covering it
     const was = known.find((f) => f.id === row.earlier) ?? covering;
@@ -314,12 +319,6 @@ class ReportRead {
   }
 }
 
-function sameIssue(finding: Known, body: string[], places: Source[]) {
-  if (!finding.sources || JSON.stringify(finding.body) !== JSON.stringify(body)) return false;
-  const have = new Set(finding.sources.map(placement));
-  return places.every((place) => have.has(placement(place)));
-}
-
 /**
  * A reply whose "covered" or "earlier" is not exactly the id of a finding it was shown, asked again (#1162); none
  * given, or "", is not an id
@@ -335,16 +334,17 @@ export const knownUnusable = (known: Known[], keys: string[]) => (text: string) 
 const notReport = (reply: Record<string, unknown>) => reply.report === false && !('issues' in reply);
 
 /** Keep the existing single-row form. Only an explicit empty list says the report raises no issues (#1212). */
-function reportIssueRows(reply: Record<string, unknown>): Record<string, unknown>[] | null {
+function reportIssueRows(reply: Record<string, unknown>, before?: ReadLine): Record<string, unknown>[] | null {
   const issues = reply.issues;
-  if (Array.isArray(issues)) return issues.every(issueRow) ? issues : null;
-  return issueRow(issues) ? [issues] : null;
+  if (Array.isArray(issues)) return issues.every((row) => issueRow(row, before)) ? issues : null;
+  return issueRow(issues, before) ? [issues] : null;
 }
 
-function issueRow(row: unknown): row is Record<string, unknown> {
+function issueRow(row: unknown, before?: ReadLine): row is Record<string, unknown> {
   if (!isObject(row)) return false;
   const covered = typeof row.covered === 'string' && row.covered !== '';
-  return !!titleOf(row) || covered || tagNumber(row.still, 'E') !== null;
+  const drafted = !!titleOf(row) && prose(row.body).length > 0;
+  return drafted || covered || !!issueId(earlierIssue(row, before));
 }
 
 /** the report's issues from the model in one call; a reply cut off at the length limit comes back with `cut` */
@@ -358,9 +358,10 @@ async function ask(r: ReportRead, known: Known[]) {
   const unusable = async (text: string) => (await cites(text)) || named(text);
   const input = { kind: 'report', split: true, model: k.models.standard, system: k.system, files: r.s.files, prompt,
     unusable };
-  const correction = (reply: Record<string, unknown>) => notReport(reply) || reportIssueRows(reply) !== null
+  const correction = (reply: Record<string, unknown>) => notReport(reply) || reportIssueRows(reply, r.before) !== null
     ? undefined
-    : 'provide an issues array, empty only if the report raises no issues, or {"report":false} for a non-report';
+    : 'provide an issues array with complete write-ups or valid references. Give an empty array only when the report'
+      + ' raises no issues, or {"report":false} for a non-report';
   try {
     return { reply: await k.ask(input, keys, correction), cut: false };
   } catch (e) {
@@ -401,7 +402,7 @@ export async function read(
   if (got.cut) return keepCut(r, got.reply, known);
   if (!got.reply) return null;
   if (notReport(got.reply)) return resume ? null : 'not';
-  const issues = reportIssueRows(got.reply);
+  const issues = reportIssueRows(got.reply, before);
   if (!issues) return null;
   r.heard(got.reply);
   if (!(await r.takeAll(issues, known))) return null;
