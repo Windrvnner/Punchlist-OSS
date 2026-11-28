@@ -82,7 +82,9 @@ export const RecordQaLogExport = define({
       .map(([id, rev]) => ({ kind: 'question' as const, id, rev }));
     return ok({
       dealId: deal.id, upserts: [{ kind: 'deal', record: withLogs(deal, logs, ctx.at), expectedRev }],
-      expects, audit: [],
+      expects,
+      expectsMembers: input.source && { dealId: deal.id, kind: 'question', ids: Object.keys(input.source.questions) },
+      audit: [],
     });
   },
 });

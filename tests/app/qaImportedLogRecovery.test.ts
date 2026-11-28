@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { DeleteQuestion, RestoreQuestion } from '../../src/app/commands/questions';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { ChooseQaVersion, KeepQaLog, RecordQaLogExport } from '../../src/app/commands/qaLogs';
 import { submitQaImport } from '../../src/app/qaImport';
@@ -8,8 +9,8 @@ import { readImportBytes } from '../../src/app/transfer';
 import { prepareImport } from '../../src/domain/importExport';
 import { failRecoveryWrite, operationWrite, recoveryApp, recoveryDeal } from './recoveryKit';
 
-it('keeps a conflict choice made before the import retries its log snapshot', async () => {
-  const app = recoveryApp(undefined, [ChooseQaVersion]);
+it.each([false, true])('keeps a newer conflict resolution after log retry (restored: %s)', async (restoreQuestion) => {
+  const app = recoveryApp(undefined, [ChooseQaVersion, DeleteQuestion, RestoreQuestion]);
   const dealId = await recoveryDeal(app);
   try {
     const file = 'Lender Q&A.csv';
@@ -33,11 +34,21 @@ it('keeps a conflict choice made before the import retries its log snapshot', as
     };
     expect((await app.store.dispatch(RecordQaLogExport, { dealId, name, last })).ok).toBe(true);
     const choices = { mapping, path: folder + '/' + file, mode: 'merge' as const, answered: false, makeLog: true };
-    const submit = () => submitQaImport(app.store, dealId, { table, choices: { ...choices, touched: true } }, rows);
+    const newerFile = Uint8Array.from(new TextEncoder().encode('Question,Submitted by\nReview insurance,Contoso'));
+    const other = await readImportBytes(app.store, file, newerFile);
+    if (!other.ok) throw new Error(other.error.message);
+    const importTable = restoreQuestion ? other.value : table;
+    const importRows = prepareImport(importTable.rows, mapping).rows;
+    const submit = () => submitQaImport(app.store, dealId, {
+      table: importTable, choices: { ...choices, touched: true },
+    }, importRows);
+    const target = { dealId, questionId: question.id };
+    if (restoreQuestion) expect((await app.store.dispatch(DeleteQuestion, target)).ok).toBe(true);
     const restore = failRecoveryWrite(app, (tx) => operationWrite(tx, 'RecordQaLogExport', 'succeeded'), 'Log busy');
     expect(await submit()).toMatchObject({ ok: false, error: { message: expect.stringContaining('Log busy') } });
     restore();
 
+    if (restoreQuestion) expect((await app.store.dispatch(RestoreQuestion, target)).ok).toBe(true);
     const conflict = () => qaKept(app.store.get(), app.store.get().questions[question.id]);
     expect(conflict()).toEqual({ response: 'From file' });
     const revision = app.store.get().deals[dealId].rev;

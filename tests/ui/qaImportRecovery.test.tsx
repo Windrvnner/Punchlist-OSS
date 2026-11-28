@@ -8,7 +8,7 @@ import { ImportDialog } from '../../src/ui/qaImport';
 import { App } from '../../src/ui/app';
 import { importKey, initializeKeptImports, keptImport, keepImport, keptImportsReady } from '../../src/app/keptImports';
 import { MemoryKeptImports } from '../../src/adapters/keptImports';
-import { ImportQuestions } from '../../src/app/commands/importQuestions';
+import { ImportQuestions, undoLastImportPlan } from '../../src/app/commands/importQuestions';
 import { prepareImport } from '../../src/domain/importExport';
 import { ELSEWHERE } from '../adapters/memRepo';
 import { readImportBytes, type ImportTable } from '../../src/app/transfer';
@@ -496,6 +496,12 @@ it.each(receiptSteps)('refreshes a committed %s after its receipt is lost', asyn
     const last = state.deals[dealId].qaLogs[0]?.last;
     expect(Object.keys(last?.sent ?? {})).toHaveLength(2);
     expect(app.store.interruptedOps()).toHaveLength(0);
+    if (command === 'ImportQuestions') {
+      const undo = undoLastImportPlan(state, dealId);
+      expect(undo).toMatchObject({ ok: true, value: { removed: 2 } });
+      if (!undo.ok) throw new Error(undo.error.message);
+      expect(state.ui.toasts.some((toast) => toast.action?.opId === undo.value.op.id)).toBe(true);
+    }
   } finally {
     app.repo.transaction = transaction;
     app.store.closing();
