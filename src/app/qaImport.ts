@@ -5,7 +5,7 @@ import {
 } from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
 import type { AcceptedMatch } from '../domain/qaMatch';
-import { dropImport, finishKeptSubmission, importKey, keepImport, keptImport } from './keptImports';
+import { dropImport, finishKeptSubmission, importKey, keepImport, keptImport, keptImportsReady } from './keptImports';
 import { unappliedColumnsWarning, unappliedImportColumns } from './qaImportColumns';
 import { keepImportedLog, logTakenBy } from './qaLog';
 import type { Store } from './store';
@@ -34,6 +34,7 @@ interface Submission {
 }
 
 const submitting = new Set<string>();
+const dialogReportsFailure = { quietRefusal: () => true };
 
 /** Checks that what was kept is still a whole Q&A import, so a damaged or older entry starts a fresh one. */
 export function keptQaImport(key: string): QaKept | null {
@@ -208,6 +209,32 @@ function savedSubmission(key: string): Submission | null {
   return valid ? { ...value, table: metadata } : null;
 }
 
+export function isCorrelatedQaImport(op: Operation | undefined):
+  op is Operation & { dealId: string; idempotencyKey: string } {
+  return op?.command === 'ImportQuestions' && !!op.dealId && !!op.idempotencyKey?.startsWith('qa-import:');
+}
+
+/** The interrupted action reopens its complete import instead of retrying only the rows (#270). */
+export async function retryInterruptedImport(store: Store, opId: string) {
+  const operation = store.get().ops[opId];
+  if (!isCorrelatedQaImport(operation)) return store.retryOp(opId);
+  await keptImportsReady;
+  const { dealId, idempotencyKey } = operation;
+  const key = importKey.qa(dealId);
+  if (savedSubmission(key)?.key !== idempotencyKey) return store.retryOp(opId);
+  await store.loadDeal(dealId, { gaps: false });
+  const state = store.get();
+  if (state.dealLoad[dealId] !== 'loaded') {
+    store.toast('The deal could not be loaded. Retry when it is available.', 'warn');
+    return;
+  }
+  const saved = savedSubmission(key);
+  const current = keptQaImport(key);
+  if (state.ui.dialog || saved?.key !== idempotencyKey || !current) return;
+  keepImport(key, { table: { ...saved.table, bytes: current.table.bytes }, choices: saved.choices });
+  store.ui({ dialog: { kind: 'importQa', dealId } });
+}
+
 /** A refused pre-journal attempt can be changed; a started import keeps its original, visible choices. */
 async function chooseSubmission(store: Store, saved: Submission | null, current: QaKept, rows: ImportRow[]) {
   const { bytes, ...table } = current.table;
@@ -240,7 +267,7 @@ async function resumeSubmission(store: Store, dealId: string, submission: Submis
   const operation = found.value;
   if (operation?.state === 'succeeded') return ok(undefined);
   if (operation) {
-    const result = await store.retryOp(operation.id);
+    const result = await store.retryOp(operation.id, dialogReportsFailure);
     return result ?? stillRunning();
   }
   const { choices, rows } = submission;
@@ -249,7 +276,7 @@ async function resumeSubmission(store: Store, dealId: string, submission: Submis
   if (taken) return fail({ kind: 'rejected', message: taken });
   return store.dispatch(ImportQuestions, {
     dealId, mode: choices.mode, rows, answerResponded: choices.answered, accepted: choices.accepted ?? [],
-  }, { idempotencyKey: submission.key });
+  }, { ...dialogReportsFailure, idempotencyKey: submission.key });
 }
 
 function stillRunning() {

@@ -1,5 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { dealRows, dismissInterrupted, interruptedView, railDealGroups } from '../app/dealView';
+import { retryInterruptedImport } from '../app/qaImport';
 import { commandLabel, commandPlace } from '../app/commandLabels';
 import { undoFromNotice } from '../app/undoNotice';
 import { StoreContext, useAppState, useStore, lastInput, nameDir } from './hooks';
@@ -423,7 +424,7 @@ function Interrupted({ id, what, where, onHide }: { id: string; what: string; wh
     <>
       <Notice id={`interrupted-${id}`} class="intop" glyph="warn" full={text} onClose={onHide}
         actions={[
-          { label: 'Retry', run: () => void store.retryOp(id) },
+          { label: 'Retry', run: () => void retryInterruptedImport(store, id) },
           { label: 'Discard', run: () => setAsking(true) },
         ]}>
         <NoticeWords text={text} />

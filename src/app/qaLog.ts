@@ -67,17 +67,33 @@ export function logTakenBy(store: Store, dealId: string, path: string | null): s
  * deal's log imported again keeps where its table is. Any other file only brought questions in. Quietly: the import
  * has its own notice and Undo.
  */
-export async function keepImportedLog(store: Store, dealId: string, t: { path: string | null; sheet: string; headerRow: number; mapping: Mapping; make: boolean; rows: string[][] }): Promise<Result<void>> {
-  const choice = logChoice(store, dealId, t.path); if (!choice || (choice === 'new' && !t.make)) return ok(undefined);
-  const at = placeOf(t.path!)!; const had = logOf(store, dealId);
-  const r = await store.dispatch(KeepQaLog, { dealId, log: { name: had?.name ?? logName(at.file), file: at.file, folder: at.folder, sheet: t.sheet, headerRow: t.headerRow, mapping: t.mapping } }, { quiet: true });
+export async function keepImportedLog(
+  store: Store, dealId: string,
+  t: { path: string | null; sheet: string; headerRow: number; mapping: Mapping; make: boolean; rows: string[][] },
+): Promise<Result<void>> {
+  const choice = logChoice(store, dealId, t.path);
+  if (!choice || (choice === 'new' && !t.make)) return ok(undefined);
+  const at = placeOf(t.path!)!;
+  const had = logOf(store, dealId);
+  const { sheet, headerRow, mapping } = t;
+  const logInfo = { name: had?.name ?? logName(at.file), file: at.file, folder: at.folder, sheet, headerRow, mapping };
+  const opts = { quiet: true, quietRefusal: () => true };
+  const r = await store.dispatch(KeepQaLog, { dealId, log: logInfo }, opts);
   if (!r.ok) return r;
   // What the file holds is recorded as what the app last wrote: the questions now say what it says, so a cell a person
   // later changes in the app is the app's to bring up to date, and one someone changes in the file is theirs (logWrite).
-  const log = logOf(store, dealId)!; const qs = dealQuestions(store.get(), dealId); const holds = logHolds({ rows: t.rows }, t.mapping, qs);
+  const log = logOf(store, dealId)!;
+  const qs = dealQuestions(store.get(), dealId);
+  const holds = logHolds({ rows: t.rows }, t.mapping, qs);
   // the record is dated anew, so a choice made in Resolve since the last update is folded in here, or it would be asked again
   const now = withPicks(log, qs);
-  const rec = await store.dispatch(RecordQaLogExport, { dealId, name: log.name, last: { archive: log.last?.archive ?? '', at: store.services.clock.now(), by: store.get().user?.name ?? '', sent: { ...now.sent, ...Object.fromEntries(Object.entries(holds).map(([id, h]) => [id, { ...now.sent[id], ...h }])) }, kept: now.kept, changed: log.last?.changed ?? {} } }, { quiet: true });
+  const savedCells = Object.entries(holds).map(([id, cells]) => [id, { ...now.sent[id], ...cells }]);
+  const sent = { ...now.sent, ...Object.fromEntries(savedCells) };
+  const last = {
+    archive: log.last?.archive ?? '', at: store.services.clock.now(), by: store.get().user?.name ?? '',
+    sent, kept: now.kept, changed: log.last?.changed ?? {},
+  };
+  const rec = await store.dispatch(RecordQaLogExport, { dealId, name: log.name, last }, opts);
   return rec.ok ? ok(undefined) : rec;
 }
 
