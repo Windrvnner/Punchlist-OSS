@@ -237,8 +237,9 @@ A deal's checklist is made up of its own item records, linked to the findings an
 
 - **The Q&A log** (`src/app/qaLog.ts`, `src/backend/qaLogs.ts`) is the team's own spreadsheet; the deal records only where it is. An update reads the log as it is, works out the cells to change (`logWrite` in `src/domain/logWrite.ts`, which finds each question's row with the import's own lookup, `matchQuestions` in `src/domain/qaMatch.ts`), and writes them into a copy (`editLog` in `src/backend/spreadsheets.ts`). It then checks that only those cells changed, archives the old version, and saves the copy over the log (`src/backend/qaLogFolder.ts`). An edit saved to the log just before an update moved it is merged back in cell by cell (`mergeKept` in `src/domain/keptMerge.ts`), with its rows lined up by the same lookup.
 - **Q&A import** reads and proposes a table layout through `src/app/transfer.ts`. Its preview uses prepared dates
-  where available. `src/app/qaImport.ts` submits the prepared rows through `ImportQuestions`. That workflow resumes retained
-  submissions by their journal correlation and finishes the saved log choice.
+  where available. `src/app/qaImportLayout.ts` publishes the selected table and its accepted matches together. The
+  preview and `src/app/qaImport.ts` both send the accepted matches and prepared rows to `ImportQuestions`. The
+  submission workflow resumes retained submissions by their journal correlation and finishes the saved log choice.
 - **The master checklist** is brought in pasted or from a file, read whole by the model in one call (in halves,
   through `parts.ts`, when the service refuses it as too long or cuts the reply off; lines it leaves unplaced are read
   once more by the thorough model), and tied out so that every line is accounted for (`src/app/listRead.ts`,

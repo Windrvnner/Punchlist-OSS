@@ -9,8 +9,10 @@ import { StoreContext } from '../../src/ui/hooks';
 import { ImportDialog } from '../../src/ui/qaImport';
 import { keepImport, importKey, keptImportsReady } from '../../src/app/keptImports';
 import { readImportBytes } from '../../src/app/transfer';
+import { ImportQuestions, UndoLastImport } from '../../src/app/commands/importQuestions';
 import { dealQuestions } from '../../src/app/state';
 import { fail, ok } from '../../src/domain/result';
+import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { tableFrom } from '../../src/domain/sheets';
 import { recoveryApp, recoveryDeal, type RecoveryApp } from '../app/recoveryKit';
 
@@ -23,6 +25,10 @@ const COLUMN_CHANGES = [
   'Question,,Final Notes,Response',
   'Provide the permit transfer schedule,,Transfer timing is being reviewed,Transfer expected before closing',
 ].join('\n');
+const EPC_HEADINGS = 'Question,Submitted by,Response';
+const EPC_QUESTION = 'who is the EPC contractor';
+const LENDER_A = [EPC_HEADINGS, `${EPC_QUESTION},Lender A,See the executed agreement`].join('\n');
+const LENDER_B = [EPC_HEADINGS, `${EPC_QUESTION},Lender B,Not yet known`];
 
 const screens: HTMLDivElement[] = [];
 beforeAll(() => {
@@ -39,13 +45,13 @@ afterEach(() => {
 });
 
 /** Hold a requested sheet or heading row until the test releases it, optionally failing the read. */
-function holdSheetReads(app: RecoveryApp, csv: string, otherSheet: boolean) {
+function holdSheetReads(app: RecoveryApp, csv: string, otherSheet: boolean, alternateCsv?: string[]) {
   const sheets = app.store.services.sheets;
   const original = sheets.read;
   const held = new Map<number | string, () => void>();
   const failing = new Set<number>();
   const grid = csv.split('\n').map((line) => line.split(','));
-  const alternate = [
+  const alternate = alternateCsv?.map((line) => line.split(',')) ?? [
     ['Question', 'Notes', 'Response'],
     ['Question', 'Notes', 'Response'],
     ['Question', 'Final Notes', 'Response'],
@@ -70,15 +76,18 @@ function holdSheetReads(app: RecoveryApp, csv: string, otherSheet: boolean) {
 }
 
 /** The import dialog on a kept import of the file at heading row 1. */
-async function dialog(csv = CSV, { legacy = false, otherSheet = false } = {}) {
-  const app = recoveryApp();
+async function dialog(csv = CSV, { legacy = false, otherSheet = false, alternateCsv, merge = false }: {
+  legacy?: boolean; otherSheet?: boolean; alternateCsv?: string[]; merge?: boolean;
+} = {}) {
+  const app = recoveryApp(undefined, [UndoLastImport]);
   const dealId = await recoveryDeal(app);
   await keptImportsReady;
-  const { letGo, failing, restore } = holdSheetReads(app, csv, otherSheet);
+  const { letGo, failing, restore } = holdSheetReads(app, csv, otherSheet, alternateCsv);
   const read = await readImportBytes(app.store, 'Lender Q&A.csv', Uint8Array.from(new TextEncoder().encode(csv)));
   if (!read.ok) throw new Error(read.error.message);
   const choices = {
-    mapping: read.value.mapping, path: null, mode: 'append', answered: false, makeLog: false, touched: true,
+    mapping: read.value.mapping, path: null, mode: merge ? 'merge' : 'append',
+    answered: false, makeLog: false, touched: true,
   };
   const { cols: _cols, ...withoutPositions } = read.value;
   keepImport(importKey.qa(dealId), { table: legacy ? withoutPositions : read.value, choices });
@@ -116,6 +125,46 @@ async function dialog(csv = CSV, { legacy = false, otherSheet = false } = {}) {
   };
   return { app, dealId, get, heading, letGo, pickResponse, choose, reopen, done, failing };
 }
+
+it('matches only a row the person accepted on the selected sheet, through reopening and Undo (#1210)', async () => {
+  const { app, dealId, get, choose, letGo, reopen, done } =
+    await dialog(LENDER_A, { otherSheet: true, alternateCsv: LENDER_B, merge: true });
+  try {
+    const grid = [EPC_HEADINGS.split(','), ['Who is the EPC contractor?', 'Lender A', 'Awaiting confirmation']];
+    const prepared = prepareImport(grid.slice(1), suggestMapping(grid[0]));
+    await act(async () => {
+      expect(await app.store.dispatch(ImportQuestions, {
+        dealId, mode: 'append', rows: prepared.rows, answerResponded: false,
+      })).toMatchObject({ ok: true });
+    });
+    const [original] = dealQuestions(app.store.get(), dealId);
+    await act(() => get<HTMLButtonElement>('[data-accept="2"]').click());
+    await reopen();
+    expect(get('#im-line').textContent).toContain('1 existing will change');
+    await choose('#im-sheet', 'Updated review');
+    await letGo('Updated review');
+    await vi.waitFor(() => expect(get('.imprev').textContent).toContain('Not yet known'));
+    await reopen();
+    expect(get<HTMLSelectElement>('#im-sheet').value).toBe('Updated review');
+    const preview = get('#im-line').textContent;
+    await act(() => get<HTMLButtonElement>('#im-go').click());
+    await vi.waitFor(() => {
+      const imports = Object.values(app.store.get().ops).filter((op) =>
+        op.command === 'ImportQuestions' && op.state === 'succeeded');
+      expect(imports).toHaveLength(2);
+    });
+    expect(app.store.get().questions[original.id]).toEqual(original);
+    expect(preview).toBe('Import 1 question · 1 new · 0 existing will change');
+    const imported = dealQuestions(app.store.get(), dealId);
+    expect(imported).toHaveLength(2);
+    expect(imported.find((question) => question.id !== original.id))
+      .toMatchObject({ askedBy: 'Lender B', response: 'Not yet known' });
+    expect(await app.store.dispatch(UndoLastImport, { dealId })).toMatchObject({ ok: true });
+    expect(dealQuestions(app.store.get(), dealId)).toEqual([original]);
+  } finally {
+    await done();
+  }
+});
 
 describe('a heading row read again in the Q&A import (#63)', () => {
   it('keeps a response column explicitly left out during the read (#741)', async () => {

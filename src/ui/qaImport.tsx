@@ -8,7 +8,6 @@ import { Modal, DialogHead } from './dialogs';
 import { FileInput, PickFileRow } from './fileDrop';
 import { previewImport, type ImportLocation, type ImportTable } from '../app/transfer';
 import type { ImportField } from '../domain/importExport';
-import type { AcceptedMatch } from '../domain/qaMatch';
 import {
   clearQaImport, keepQaImport, keptQaImport, loadQaImport, prepareQaImport, qaImportMakesLog,
   replaceQaImport, submitQaImport, summarizeQaImport, type ImportMode, type QaChoices,
@@ -66,15 +65,16 @@ function useQaImportState(store: Store, dealId: string, fresh: boolean) {
   const [kept] = useState(() => (fresh ? null : keptQaImport(key)));
   const choices = kept?.choices;
   const [layout, setLayout] = useState<QaImportLayoutView>();
-  const [reader] = useState(() => new QaImportLayout(store, kept?.table ?? null, choices?.mapping ?? null, setLayout));
-  const { table, mapping, reading, asking, wantedSheet, error: readError, unapplied, warning } = layout ?? reader.view;
+  const [reader] = useState(() => new QaImportLayout(
+    store, kept?.table ?? null, choices?.mapping ?? null, setLayout, choices?.accepted,
+  ));
+  const { table, mapping, accepted, reading, asking, wantedSheet, error: readError, unapplied, warning } =
+    layout ?? reader.view;
   useEffect(() => () => reader.cancel(), [reader]);
   // where the file is, which the desktop app knows: the deal's log is that file
   const [path, setPath] = useState<string | null>(choices?.path ?? null);
   const [mode, setMode] = useState<ImportMode>(choices?.mode ?? 'merge');
   const [answered, setAnswered] = useState(!!choices?.answered);
-  // the suggestions the person accepted, by the file's line; none is applied until they accept it
-  const [accepted, setAccepted] = useState<AcceptedMatch[]>(choices?.accepted ?? []);
   // the file becomes the deal's log only if this stays checked; the app sets it until the person does (touched)
   const [makeLog, setMakeLog] = useState(!!choices?.makeLog);
   const touched = useRef(!!choices?.touched);
@@ -89,7 +89,7 @@ function useQaImportState(store: Store, dealId: string, fresh: boolean) {
   // another choice, the dialog closed) and changes nothing. The layout numbers its own sheet reads and proposals.
   const token = useRef(0);
   return {
-    key, table, mapping, reader, accepted, setAccepted, path, setPath, mode, setMode, answered, setAnswered,
+    key, table, mapping, reader, accepted, path, setPath, mode, setMode, answered, setAnswered,
     makeLog, setMakeLog, touched, busy: layoutBusy(reading, asking) || busy, setBusy, wantedSheet,
     error: error || readError, setError, restart, setRestart, fileRef, token, unapplied, warning,
   };
@@ -158,7 +158,6 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
     qa.setPath(null);
     qa.setMode('merge');
     qa.setAnswered(false);
-    qa.setAccepted([]);
     qa.setMakeLog(false);
     qa.touched.current = false;
   };
@@ -201,7 +200,6 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     const { table, path, askForLayout } = read.value;
     reader.replace(table);
     qa.setPath(path);
-    qa.setAccepted([]);
     qa.touched.current = false;
     if (askForLayout) void askAi(table);
   };
@@ -246,8 +244,7 @@ async function runImport(store: Store, dealId: string, qa: QaImportState, plan: 
 }
 
 function restoreChoices(qa: QaImportState, table: ImportTable, choices: QaChoices) {
-  qa.reader.replace(table, choices.mapping);
-  qa.setAccepted(choices.accepted ?? []);
+  qa.reader.replace(table, choices.mapping, choices.accepted);
   qa.setPath(choices.path);
   qa.setMode(choices.mode);
   qa.setAnswered(choices.answered);

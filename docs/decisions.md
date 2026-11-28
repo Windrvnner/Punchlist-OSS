@@ -96,7 +96,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A response on a question linked to a finding marks that finding; a response on an unlinked question is checked once against the open findings.
 - Import finds the table and its columns by the app's own rules and asks the model only when no question column is found. Nothing is imported until the person clicks **Import**, and the whole import is one Undo.
 - Q&A and checklist imports keep an unused heading row as typed and mark it “Not used.” The preview stays on the
-  last accepted table until another sheet or heading row is read (#380).
+  last accepted table until another sheet or heading row is read (#380). Accepted Q&A matches stay with that sheet
+  when its heading row is read again. Reading another file or sheet clears those matches (#1210).
 - **Undo Last Import…** in the Q&A page's ⋯ menu takes back this PC's last import after a confirmation, with no Undo after it, and leaves alone questions changed since the import.
 - A responder column is read as the response's author.
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.

@@ -1,4 +1,5 @@
 import { type ImportField, type Mapping } from '../domain/importExport';
+import type { AcceptedMatch } from '../domain/qaMatch';
 import type { Store } from './store';
 import {
   applyImportColumnPicks, pickImportColumn, restoreImportColumnPicks, unappliedColumnsWarning, unappliedImportColumns,
@@ -10,6 +11,7 @@ import { SERVICE } from '../control';
 export interface QaImportLayoutView {
   table: QaImportTable | null;
   mapping: Mapping | null;
+  accepted: AcceptedMatch[];
   reading: boolean;
   /** the model is proposing the layout */
   asking: boolean;
@@ -27,8 +29,9 @@ export class QaImportLayout {
   constructor(
     private store: Store, table: ImportTable | null, mapping: Mapping | null,
     private onChange: (view: QaImportLayoutView) => void,
+    accepted: AcceptedMatch[] = [],
   ) {
-    this.current = layoutView(restoreImportColumnPicks(table, mapping), mapping);
+    this.current = layoutView(restoreImportColumnPicks(table, mapping), mapping, accepted);
   }
 
   get view() { return this.current; }
@@ -61,27 +64,33 @@ export class QaImportLayout {
     return asked.mapping.text != null ? `${SERVICE} had no better proposal` : undefined;
   }
 
-  replace(table: ImportTable | null, mapping = table?.mapping ?? null) {
+  replace(table: ImportTable | null, mapping = table?.mapping ?? null, accepted: AcceptedMatch[] = []) {
     this.cancel();
-    this.show(layoutView(restoreImportColumnPicks(table, mapping), mapping));
+    this.show(layoutView(restoreImportColumnPicks(table, mapping), mapping, accepted));
   }
 
   /** A proposed layout keeps the choices made while it was awaited; they win over the proposal's columns (#741). */
   propose(proposal: ImportTable) {
     const before = this.current.table;
     const picks = before?.columnPicks ?? [];
-    if (!before || !picks.length) return this.replace(proposal);
+    if (!before || !picks.length) return this.replace(proposal, proposal.mapping, this.acceptedFor(proposal));
     this.cancel();
     const { table, mapping } = applyImportColumnPicks(before, proposal, picks);
-    this.show(layoutView(table, mapping));
+    this.show(layoutView(table, mapping, this.acceptedFor(table)));
   }
 
   pick(field: ImportField, column: number | null) {
     const { table, mapping, reading, wantedSheet } = this.current;
     if (!table || !mapping) return;
     const picked = pickImportColumn(table, field, column);
-    const view = layoutView(picked, { ...mapping, [field]: column });
+    const view = layoutView(picked, { ...mapping, [field]: column }, this.current.accepted);
     this.show({ ...view, reading, wantedSheet, asking: this.current.asking });
+  }
+
+  /** A rendered suggestion can only be accepted for its own sheet of the current workbook (#1210). */
+  acceptMatch(source: ImportTable, { line, text, questionId }: AcceptedMatch) {
+    if (!this.isCurrentSheet(source)) return;
+    this.show({ ...this.current, accepted: [...this.current.accepted, { line, text, questionId }] });
   }
 
   async reread(where: ImportLocation, accept?: (table: ImportTable) => void) {
@@ -101,8 +110,17 @@ export class QaImportLayout {
     if (this.request !== mine) return;
     const columnPicks = this.current.table?.columnPicks ?? [];
     const { table, mapping } = applyImportColumnPicks(beforeWithPositions, read.value, columnPicks);
-    this.show(layoutView(table, mapping));
+    this.show(layoutView(table, mapping, this.acceptedFor(table)));
     accept?.(read.value);
+  }
+
+  private acceptedFor(table: ImportTable) {
+    return this.isCurrentSheet(table) ? this.current.accepted : [];
+  }
+
+  private isCurrentSheet(table: ImportTable) {
+    const current = this.current.table;
+    return current?.bytes === table.bytes && current.sheet === table.sheet;
   }
 
   private hasLegacyPicks(before: ImportTable) {
@@ -116,10 +134,12 @@ export class QaImportLayout {
   }
 }
 
-function layoutView(table: QaImportTable | null, mapping: Mapping | null): QaImportLayoutView {
+function layoutView(
+  table: QaImportTable | null, mapping: Mapping | null, accepted: AcceptedMatch[],
+): QaImportLayoutView {
   const unapplied = unappliedImportColumns(table);
   const warning = unappliedColumnsWarning(unapplied);
-  return { table, mapping, reading: false, asking: false, error: '', unapplied, warning };
+  return { table, mapping, accepted, reading: false, asking: false, error: '', unapplied, warning };
 }
 
 /** Recover the old layout's source positions from the same saved bytes, without altering its accepted preview. */
