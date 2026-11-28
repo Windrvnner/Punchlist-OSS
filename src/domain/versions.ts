@@ -8,7 +8,7 @@
  */
 
 /** Bookkeeping that differs between two writes of the same content: two people who make the same record on two PCs write it at different times. */
-const BOOKKEEPING = new Set(['rev', 'updatedAt', 'createdAt']);
+const BOOKKEEPING = new Set(['rev', 'updatedAt', 'createdAt', 'reportIssueSignature']);
 
 /** Key order must not matter: two PCs may build the same record with its fields in a different order. */
 function canonical(v: unknown): unknown {
