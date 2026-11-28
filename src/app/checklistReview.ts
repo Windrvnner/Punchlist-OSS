@@ -17,7 +17,6 @@ export interface ListTarget {
   named: boolean;
   /** the list of that name the firm has now, if any */
   replaces: ReturnType<typeof findList>;
-  revision: number | null;
   /** the list in two versions, when it is: it waits for a choice before it can be brought in */
   split: State['conflicts'][string] | undefined;
   splitSays: string;
@@ -25,14 +24,12 @@ export interface ListTarget {
   hasGeneral: boolean;
   /** the general list's items, which another list's items are checked against for duplicates */
   generalTexts: string[];
-  generalRevision: number;
 }
 
 export function listTarget(state: State, firm: FirmList, layer: Layer, name: string): ListTarget {
   const named = layer === 'broad' || !!key(name);
   const replaces = findList(firm, layer, name);
   const id = listId(layer, name);
-  const revision = state.firmList[id]?.rev ?? null;
   // a list in two versions waits for a choice: said here, before its review is made, so no review is thrown away
   const split = named ? state.conflicts[id] : undefined;
   const versions = split ? versionsWord(split.versions.length).toLowerCase() : '';
@@ -43,8 +40,7 @@ export function listTarget(state: State, firm: FirmList, layer: Layer, name: str
   const generalTexts = layer === 'broad' ? [] : (usable?.items ?? []).map((item) => item.text);
   const listNames = alphabetical(firm.lists.filter((list) => list.layer === layer).map((list) => list.name));
   return {
-    id, layer, name, named, replaces, revision, split, splitSays, generalTexts, listNames,
-    generalRevision: general?.rev ?? 0, hasGeneral: !!general,
+    id, layer, name, named, replaces, split, splitSays, generalTexts, listNames, hasGeneral: !!general,
   };
 }
 

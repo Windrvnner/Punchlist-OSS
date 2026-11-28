@@ -7,7 +7,6 @@ import {
   type ChecklistReviewChange, type ListTarget, type Review,
 } from './checklistImport';
 import { keepChecklistImport, readKeptChecklist, type ChecklistChoices } from './checklistKept';
-import { LIST_CHANGED_SINCE_REVIEW } from './commands/checklist';
 import { NOT_DONE, showChecklistOutcome } from './checklistOutcome';
 import { keepChecklistReviewChoices } from './checklistReview';
 import { dropImport, importKey } from './keptImports';
@@ -501,11 +500,12 @@ export class ChecklistImportSession {
     const removesFromGeneral = review.pairs.some((pair) => pair.inAgainst && remove.has(pair.a));
     const file = this.table?.name ?? this.text?.name ?? '';
     const target = this.target;
-    if (reviewChanged(review, target, removesFromGeneral)) return this.activity('', LIST_CHANGED_SINCE_REVIEW);
-    const reviewed = { destination: target.revision, general: removesFromGeneral ? target.generalRevision : undefined };
+    if (reviewChanged(review, target, removesFromGeneral)) {
+      return this.activity('', 'The list changed. Go back and review it again.');
+    }
     this.activity('importing');
     try {
-      const result = await submitChecklist(this.store, this.key, target, items, file, reviewed);
+      const result = await submitChecklist(this.store, this.key, target, items, file);
       if (!result.ok) return this.activity('', `Couldn’t import: ${result.error.message}`);
       // Once written, the dialog goes back to the lists, even if this session was closed during the write.
       this.dispose();

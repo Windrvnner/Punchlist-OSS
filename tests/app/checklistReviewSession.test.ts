@@ -9,7 +9,7 @@ import { listId } from '../../src/domain/checklist';
 import { fail, ok } from '../../src/domain/result';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { ELSEWHERE } from '../adapters/memRepo';
-import { copyRecoveryDisk, holdRecoveryWrite, recoveryApp } from './recoveryKit';
+import { copyRecoveryDisk, recoveryApp } from './recoveryKit';
 
 const key = importKey.checklist();
 let app: ReturnType<typeof recoveryApp>;
@@ -147,27 +147,6 @@ it('preserves wording changed on another PC while the list is in review (#56)', 
   ]);
 });
 
-it('refuses a queued Import when an earlier write changes the reviewed list (#56)', async () => {
-  const questions = portfolioQuestions().slice(0, 2_000);
-  const name = 'Wind';
-  const id = listId('technology', name);
-  const items = priorItems(questions, 'offshore wind');
-  const list = { layer: 'technology' as const, name, items, file: 'Prior requests.csv', fileDate: '' };
-  expect((await app.store.dispatch(BringInList, { list })).ok).toBe(true);
-  const session = await technologyReview(questions, name);
-  const updatedItems = priorItems(questions, 'onshore wind');
-  const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
-  const first = app.store.dispatch(BringInList, { list: { ...list, items: updatedItems } });
-  await held.entered;
-  const queued = session.bringIn();
-  held.release();
-  expect((await first).ok).toBe(true);
-  await queued;
-  expect(app.store.get().firmList[id].items[0]).toEqual(updatedItems[0]);
-  expect(session.view.work.error).toContain('The list changed');
-  expect(keptImport(key)).toBeDefined();
-});
-
 it.each([
   { field: 'section', column: 1, section: 'Financing', subsection: 'Reports' },
   { field: 'subsection', column: 3, section: 'Operations', subsection: 'Supporting records' },
@@ -228,7 +207,7 @@ it('preserves a synced destination addition even without previously approved wor
   expect(session.view.work.error).toContain('The list changed');
 });
 
-it.each(['before Import', 'at commit'])('preserves rows when General changes %s (#56)', async (when) => {
+it('preserves rows when General changes before Import (#56)', async () => {
   const questions = portfolioQuestions().slice(0, 2_000);
   const edited = 'Provide the latest independent energy yield report.';
   app.store.services.ai.reword = async () => ok([{ at: 120, text: edited, why: '' }]);
@@ -240,18 +219,9 @@ it.each(['before Import', 'at commit'])('preserves rows when General changes %s 
   for (let index = 0; index < 120; index++) session.flipRemove(index);
   const changed = [{ text: 'Confirm all lender notice periods and deliverables.' }, ...general.slice(1)];
 
-  if (when === 'before Import') {
-    peerChangesList(id, changed);
-    await app.store.refreshSync();
-    await session.bringIn();
-  } else {
-    const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
-    const importing = session.bringIn();
-    await held.entered;
-    peerChangesList(id, changed);
-    held.release();
-    await importing;
-  }
+  peerChangesList(id, changed);
+  await app.store.refreshSync();
+  await session.bringIn();
 
   const wind = listId('technology', 'Wind');
   expect(app.store.get().firmList[wind]?.items.length ?? 0).toBe(0);

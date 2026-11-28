@@ -7,7 +7,7 @@
  * an item it has is never written over (a turned-off item stays off).
  */
 import { z } from 'zod';
-import { define, type Plan, type PlanCtx, type Upsert } from '../command';
+import { define, type PlanCtx, type Upsert } from '../command';
 import { DealId } from '../../domain/model';
 import { ok, fail, notFound, rejected, type Result } from '../../domain/result';
 import { FirmLayerList, type FirmList, ListId, ListRecord, Item, ItemFrom, ItemId, LIST_NAME_MAX, LAYER_NAMES, firmOf, itemId, itemsFor, key, listId, dealLayers, type Layer } from '../../domain/checklist';
@@ -145,25 +145,6 @@ export const RegroupDealItems = define({
 export const dealsForBringIn = (state: Pick<State, 'deals'>, list: { layer: Layer; name: string }) => Object.values(state.deals)
   .filter((d) => d.group !== 'closed' && dealLayers(d).some((x) => x.layer === list.layer && key(x.value) === key(list.name)));
 
-export const LIST_CHANGED_SINCE_REVIEW = 'The list changed. Go back and review it again.';
-
-const generalListId = listId('broad', '');
-const ListReviewRevisions = z.object({
-  destination: z.number().int().nonnegative().nullable(),
-  general: z.number().int().nonnegative().optional(),
-});
-export type ListReviewRevisions = z.infer<typeof ListReviewRevisions>;
-
-function reviewedListChanged(state: State, current: ListRecord | undefined, reviewed?: ListReviewRevisions) {
-  if (!reviewed) return false;
-  if (reviewed.destination !== (current?.rev ?? null)) return true;
-  return reviewed.general !== undefined && reviewed.general !== (state.firmList[generalListId]?.rev ?? 0);
-}
-
-function reviewedGeneral(rev: number | undefined): Plan['expects'] {
-  return rev === undefined ? undefined : [{ kind: 'firmList', id: generalListId, rev }];
-}
-
 /**
  * Bring in one list of the firm's: the general list, or the list for one structure, sector or technology. It is a record
  * of its own (`listId`), so it replaces only the list of that layer and name. This writes the list only; the deals then
@@ -172,10 +153,7 @@ function reviewedGeneral(rev: number | undefined): Plan['expects'] {
  */
 export const BringInList = define({
   name: 'BringInList',
-  input: z.object({
-    list: FirmLayerList.omit({ by: true, at: true }),
-    reviewed: ListReviewRevisions.optional(),
-  }),
+  input: z.object({ list: FirmLayerList.omit({ by: true, at: true }) }),
   targets: (_s, i) => [listId(i.list.layer, i.list.name)],
   plan(state, input, ctx) {
     const l = input.list; const name = l.layer === 'broad' ? '' : l.name;
@@ -186,13 +164,11 @@ export const BringInList = define({
     const id = listId(l.layer, name); const cur = state.firmList[id];
     // refused even when nothing would be written, so a list in two versions is never taken as brought in
     const split = state.conflicts[id]; if (split) return fail(rejected(`${conflictLabel(state, split)} has ${versionsWord(split.versions.length).toLowerCase()}. Choose one first`));
-    if (reviewedListChanged(state, cur, input.reviewed)) return fail(rejected(LIST_CHANGED_SINCE_REVIEW));
     const record = ListRecord.parse({ ...l, name, items, by: ctx.actor, at: ctx.at, id, rev: cur?.rev ?? 0, createdAt: cur?.createdAt ?? ctx.at, updatedAt: ctx.at });
     // the same items from the same file write nothing: the deals are still given what they lack. Another file or date is kept, as one version still
     if (cur && sameContent(cur, record) && cur.file === record.file && cur.fileDate === record.fileDate && cur.name === record.name) return ok({ upserts: [], audit: [] });
     return ok({
       upserts: [{ kind: 'firmList', record, expectedRev: cur ? cur.rev : null }],
-      expects: reviewedGeneral(input.reviewed?.general),
       audit: [],
       inverse: { command: 'RestoreList', input: { id, list: cur ?? null } },
       message: `${l.layer === 'broad' ? 'The general list' : `The ${name} list`} imported`,
