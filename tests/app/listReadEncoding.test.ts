@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
-import { readListFile } from '../../src/app/listRead';
+import { describe, expect, it, vi } from 'vitest';
+import { LIST_ACCEPT, readListFile } from '../../src/app/listRead';
 
 const utf16 = (text: string, bigEndian = false) => Uint8Array.from(
   [...text].flatMap((c) => {
@@ -38,5 +38,28 @@ describe('a plain-text list in any encoding a text editor or Excel saves (#382)'
     const read = await readListFile({} as never, file('Checklist.txt', bytes));
     const message = read.ok ? '' : read.error.message;
     expect(message).toBe('The file starts with a UTF-8 byte-order mark but is not valid UTF-8');
+  });
+});
+
+describe('checklist source formats', () => {
+  it.each(['xlsx', 'XLSM', 'xlsb', 'xls', 'csv'])('refuses a .%s before reading it', async (extension) => {
+    const arrayBuffer = vi.fn(async () => new ArrayBuffer(0));
+    const source = { name: `Checklist.${extension}`, arrayBuffer };
+    const read = vi.fn(async () => ({ ok: true as const, value: { columns: ['Item'], rows: [['Review the lease']] } }));
+    const result = await readListFile({ services: { sheets: { read } } } as never, source);
+    expect(result).toMatchObject({ ok: false, error: { kind: 'invalid' } });
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(LIST_ACCEPT.split(',')).not.toContain(`.${extension.toLowerCase()}`);
+  });
+
+  it('passes a Word checklist to the document text reader', async () => {
+    const bytes = Uint8Array.of(1, 2);
+    const name = 'Checklist.docx';
+    const text = vi.fn(async () => ({ ok: true as const, value: 'Site control\nReview the signed lease' }));
+    const result = await readListFile({ services: { sheets: { text } } } as never, file(name, bytes));
+    expect(text).toHaveBeenCalledWith(bytes, name);
+    expect(result).toEqual({ ok: true, value: { lines: ['Site control', 'Review the signed lease'] } });
+    expect(LIST_ACCEPT.split(',')).toContain('.docx');
   });
 });

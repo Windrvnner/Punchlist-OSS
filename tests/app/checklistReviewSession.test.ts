@@ -1,12 +1,12 @@
 // @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryKeptImports } from '../../src/adapters/keptImports';
-import { csvCodec } from '../../src/adapters/spreadsheet';
 import { ChecklistImportSession } from '../../src/app/checklistImportSession';
 import { importKey, initializeKeptImports, keptImport, keptImportsReady } from '../../src/app/keptImports';
 import { BringInList } from '../../src/app/commands/checklist';
 import { listId } from '../../src/domain/checklist';
 import { fail, ok } from '../../src/domain/result';
+import { checklistSpreadsheet } from '../fixtures/checklistSpreadsheet';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { ELSEWHERE } from '../adapters/memRepo';
 import { copyRecoveryDisk, recoveryApp } from './recoveryKit';
@@ -20,6 +20,7 @@ beforeEach(async () => {
   initializeKeptImports(drafts);
   await keptImportsReady;
   app = recoveryApp();
+  app.store.services.sheets = checklistSpreadsheet;
   await app.store.boot();
 });
 afterEach(async () => {
@@ -41,9 +42,9 @@ it('imports the section and subsection remapped after Back (#56)', async () => {
   const questions = portfolioQuestions().slice(0, 2_000);
   const headers = ['Area', 'Other area', 'Subsection', 'Other subarea', 'Item'];
   const rows = questions.map((text) => ['Operations', 'Financing', 'Reports', 'Supporting records', text]);
-  const encoded = await csvCodec.write('Sheet1', [headers, ...rows]);
+  const encoded = await checklistSpreadsheet.write('Sheet1', [headers, ...rows]);
   if (!encoded.ok) throw new Error(encoded.error.message);
-  const file = new File([encoded.value.bytes.slice().buffer], 'Portfolio requests.csv');
+  const file = new File([encoded.value.bytes.slice().buffer], 'Portfolio requests.ods');
   const session = open();
   session.setAskReword(false);
   session.setAskSame(false);
@@ -159,10 +160,10 @@ it.each([
   app.store.services.ai.reword = reword;
   const rows = questions.map((question) => ['Operations', 'Financing', 'Reports', 'Supporting records', question]);
   const headers = ['Section', 'Alternate area', 'Subsection', 'Alternate subsection', 'Item'];
-  const encoded = await csvCodec.write('Sheet1', [headers, ...rows]);
+  const encoded = await checklistSpreadsheet.write('Sheet1', [headers, ...rows]);
   if (!encoded.ok) throw new Error(encoded.error.message);
   const session = open();
-  await session.load(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.csv'));
+  await session.load(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.ods'));
   session.setAskReword(true);
   session.setAskSame(false);
   await session.chooseColumns();
@@ -317,14 +318,14 @@ it('keeps other choices after a list replacement and a reopened Section remap (#
   app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
   app.store.services.ai.reword = async () => ok([{ at: 120, text: wording, why: '' }]);
   const sections = questions.map((question) => ['Operations', 'Financing', question]);
-  const encoded = await csvCodec.write('Sheet1', [['Section', 'Alternate area', 'Item'], ...sections]);
+  const encoded = await checklistSpreadsheet.write('Sheet1', [['Section', 'Alternate area', 'Item'], ...sections]);
   if (!encoded.ok) throw new Error(encoded.error.message);
   const prior = priorItems(questions, 'offshore wind');
   const id = await savePriorList('technology', 'Wind', prior);
   const session = open();
   session.setLayer('technology');
   session.setName('Wind');
-  await session.load(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.csv'));
+  await session.load(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.ods'));
   session.setAskReword(true);
   session.setAskSame(false);
   await session.chooseColumns();
@@ -408,7 +409,7 @@ it('restores checks only for identical wording returned after a failed refresh a
 it('keeps checks after a failed sheet read and starts over on an accepted new sheet (#56)', async () => {
   const text = 'Confirm the executed interconnection agreement.';
   const revised = 'Provide the executed interconnection agreement and its amendments.';
-  app.store.services.sheets = { ...csvCodec, read: async (_bytes, _name, options) =>
+  app.store.services.sheets = { ...checklistSpreadsheet, read: async (_bytes, _name, options) =>
     options?.sheet === 'Unavailable'
       ? fail({ kind: 'failed', message: 'Could not read sheet' })
       : ok({ sheet: options?.sheet ?? 'Main', sheets: ['Main', 'Supplement'], columns: ['Item'], rows: [[text]] }),
@@ -416,7 +417,7 @@ it('keeps checks after a failed sheet read and starts over on an accepted new sh
   app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
   app.store.services.ai.reword = async () => ok([{ at: 0, text: revised, why: '' }]);
   const session = open();
-  await session.load(new File(['test workbook'], 'Checklist.xlsx'));
+  await session.load(new File(['test workbook'], 'Checklist.ods'));
   session.setAskReword(true);
   session.setAskSame(false);
   await session.chooseColumns();
