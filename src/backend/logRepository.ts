@@ -799,40 +799,46 @@ export class LogRepository implements Repository {
     for (const name of own) this.changes.heal(this.o.shared, name);
   }
 
-  /** Read whatever has arrived in the shared folder since last time. Returns the records that changed. */
-  private refresh(tell = true): string[] {
+  /** Read what has arrived, reporting a failure when a scope required by the caller cannot be read. */
+  private refresh(tell = true, requiredScope?: string): Failure | undefined {
     this.healAll(); this.lookAtTouch();
     const changed = new Set<string>();
-    let names: string[] = []; try { names = this.o.shared.list().filter((n) => CHANGE_FILE.test(n)); } catch { if (tell) this.tellSync(); return []; }
+    let names: string[];
+    try { names = this.o.shared.list().filter((n) => CHANGE_FILE.test(n)); }
+    catch {
+      if (tell) this.tellSync();
+      return requiredScope === undefined ? undefined : UNREADABLE;
+    }
     // a deal not read yet waits its turn (a new one, from another PC, joins the queue); its files are read whole when it comes
     const now: string[] = [];
     this.listed = new Set(names.map((n) => this.scopeOf(n)));
     for (const name of names) { const s = this.scopeOf(name); if (this.isRead(s)) now.push(name); else if (!this.pending.includes(s)) this.pending.push(s); }
-    this.readFiles(now, changed);
+    const whole = this.readFiles(now, changed, true, requiredScope);
     for (const k of this.letGoStuck()) changed.add(k);
     if (!this.allRead) this.nextStep();
     if (tell) {
       this.tell(changed);
       this.tellSync();
     }
-    return [...changed];
+    return requiredScope !== undefined && !whole ? LOCKED : undefined;
   }
   /** Take in whatever these files hold that has not been taken in; the records changed are added to `changed`. */
-  /** Returns false when one of them could not be opened (a sync client holding it for a moment, say); the others are still taken in. */
-  private readFiles(names: string[], changed: Set<string>, writeReceipts = true): boolean {
+  /** Returns false when a file in the required scope could not be read, or any file when no scope is specified. */
+  private readFiles(names: string[], changed: Set<string>, writeReceipts = true, requiredScope?: string): boolean {
     let whole = true;
+    const required = (name: string) => requiredScope === undefined || this.scopeOf(name) === requiredScope;
     for (const name of names) {
       let text: string | null = null;
       try {
         if (this.o.shared.size(name) === this.read.get(name)) continue;
         text = this.o.shared.read(name);
       } catch {
-        whole = false;
+        if (required(name)) whole = false;
         continue;
       }
       if (text == null) continue;
       if (this.readChangeLines(text, changed, writeReceipts)) this.read.set(name, bytes(text));
-      else whole = false;
+      else if (required(name)) whole = false;
     }
     return whole;
   }
@@ -1147,7 +1153,9 @@ export class LogRepository implements Repository {
     // a deal deleted says what this PC had taken in when the person began deleting it (the window asked then: `seen`), or else
     // before this change: never lines that arrived since, which the person never saw
     const seen = tx.purgeDeal ? tx.seen ?? this.view.seenNow() : undefined;
-    this.refresh();                                                    // judge against everything that has arrived
+    const readsFirmLists = [...writes, ...(tx.expects ?? [])].some(({ kind }) => kind === 'firmList');
+    const unread = this.refresh(true, readsFirmLists ? GLOBAL : undefined);
+    if (unread) return fail(unread);
     if (!this.readForChange(writes, deletes, tx)) return fail(this.miss);   // including every deal it touches, read now if it has not been
     if (this.cloned) return fail({ kind: 'rejected', message: COPIED });
     // a whole deal is not removed while changes to it from another PC are still held back: they would be lost unseen
@@ -1185,7 +1193,7 @@ export class LogRepository implements Repository {
     if (changedRead) return fail(changedRead);
     const added = this.unexpectedMember(tx, had);
     if (added) return fail({ kind: 'conflict', message: CHANGED, recordId: added });
-    if (!shared) return this.saveJournal(opTx);
+    if (!shared) return local ? this.saveJournal(opTx) : ok({});
     // 2. one line for the whole transaction
     const seq = this.seq + 1; const recs: RecChange[] = []; const retract: string[] = [];
     // A version's id names this install and line, plus a random part: a copied install that has not been found out yet writes

@@ -137,7 +137,8 @@ it('refuses a queued Import when an earlier write changes the reviewed list (#56
   expect(keptImport(key)).toBeDefined();
 });
 
-it.each([false, true])('checks a repeat import without writing a version (peer edit: %s) (#41)', async (changed) => {
+it.each(['unchanged', 'changed', 'locked'])('checks a repeat import without writing a version (%s)', async (state) => {
+  const changed = state !== 'unchanged';
   const questions = portfolioQuestions().slice(0, 2_000);
   const id = listId('broad', '');
   expect((await app.store.dispatch(BringInList, {
@@ -154,11 +155,22 @@ it.each([false, true])('checks a repeat import without writing a version (peer e
   await review.pasted();
   await review.next();
   const updated = 'Provide the executed amendment to the grid connection agreement.';
+  const priorFiles = new Set(app.saved.shared.list());
   if (changed) {
     const items = [{ text: updated }, ...saved.items.slice(1)];
     app.repo.peer.change('firmList', id, { ...saved, items, rev: saved.rev + 1 }, ELSEWHERE);
   }
-  await review.bringIn();
+  const lockedFile = state === 'locked' && app.saved.shared.list().find((file) => !priorFiles.has(file));
+  const read = app.saved.shared.read.bind(app.saved.shared);
+  const readSpy = vi.spyOn(app.saved.shared, 'read').mockImplementation((file) => {
+    if (file === lockedFile) throw Object.assign(new Error('Locked by another process'), { code: 'EBUSY' });
+    return read(file);
+  });
+  const localWrite = vi.spyOn(app.saved.local, 'write');
+  try { await review.bringIn(); }
+  finally { readSpy.mockRestore(); }
+  if (state === 'locked') expect(review.view.work.error).toContain('can’t be opened');
+  expect(localWrite.mock.calls.some(([file]) => file === 'ops.json')).toBe(false);
   expect(!!keptImport(key)).toBe(changed);
   await app.store.refreshSync();
   expect(app.store.get().firmList[id].items[0].text).toBe(changed ? updated : questions[0]);
