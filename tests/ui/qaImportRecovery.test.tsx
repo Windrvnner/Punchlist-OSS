@@ -6,10 +6,11 @@ import './keptTextSession';
 import { StoreContext } from '../../src/ui/hooks';
 import { ImportDialog } from '../../src/ui/qaImport';
 import { App } from '../../src/ui/app';
-import { keptImport, keepImport, importKey, keptImportsReady } from '../../src/app/keptImports';
-import { readImportBytes } from '../../src/app/transfer';
+import { importKey, initializeKeptImports, keptImport, keepImport, keptImportsReady } from '../../src/app/keptImports';
+import { MemoryKeptImports } from '../../src/adapters/keptImports';
+import { readImportBytes, type ImportTable } from '../../src/app/transfer';
 import {
-  copyRecoveryDisk, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal, type RecoveryApp,
+  copyRecoveryDisk, failRecoveryWrite, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal, type RecoveryApp,
 } from '../app/recoveryKit';
 
 const screens: HTMLDivElement[] = [];
@@ -236,19 +237,73 @@ it('keeps the file if Start Over fails to discard its action, then starts over o
   await app.repo.close();
 });
 
-it('retires the interrupted action only after a replacement file is read', async () => {
-  const { app, key } = await interruptedImport();
-  await app.store.boot();
-  const screen = await retryInterruptedImport(app);
+async function replaceImportFile(screen: HTMLElement) {
   await act(() => screen.querySelector<HTMLButtonElement>('#im-back')!.click());
-  expect(app.store.interruptedOps()).toHaveLength(1);
   const input = screen.querySelector<HTMLInputElement>('#im-file')!;
   const replacement = new File(['Question\nConfirm the insurance renewal'], 'Renewal.csv', { type: 'text/csv' });
   Object.defineProperty(input, 'files', { value: [replacement] });
   await act(() => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+}
+
+it('retires the interrupted action only after a replacement file is read', async () => {
+  const { app, key } = await interruptedImport();
+  await app.store.boot();
+  const screen = await retryInterruptedImport(app);
+  expect(app.store.interruptedOps()).toHaveLength(1);
+  await replaceImportFile(screen);
   await vi.waitFor(() => expect(screen.textContent).toContain('Renewal.csv'));
   expect(keptImport(key)?.submission).toBeNull();
   expect(app.store.interruptedOps()).toHaveLength(0);
   expect(Object.keys(app.store.get().questions)).toHaveLength(0);
   await app.repo.close();
+});
+
+it.each(['start over', 'replace'] as const)('keeps Append recovery when local storage refuses %s', async (action) => {
+  const port = new MemoryKeptImports();
+  initializeKeptImports(port);
+  const app = recoveryApp();
+  const dealId = await recoveryDeal(app);
+  const key = importKey.qa(dealId);
+  await preparedImport(app, dealId);
+  const screen = await openImport(app, dealId);
+  failRecoveryWrite(app, (transaction) => operationWrite(transaction, 'KeepQaLog', 'pending'), 'Log write refused');
+  await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+  await vi.waitFor(() => expect(screen.textContent).toContain('Log write refused'));
+  expect(Object.keys(app.store.get().questions)).toHaveLength(2);
+  const retained = keptImport(key);
+
+  const write = port.write.bind(port);
+  const persist = vi.spyOn(port, 'write').mockImplementation((changes, replace) =>
+    changes.some((change) => 'drop' in change) ? Promise.resolve(false) : write(changes, replace));
+  if (action === 'start over') {
+    await confirmStartOver(screen);
+  } else {
+    await replaceImportFile(screen);
+  }
+  await vi.waitFor(() => expect(screen.textContent).toContain('Couldn’t clear'));
+  expect(keptImport(key)).toEqual(retained);
+  const disk = copyRecoveryDisk(app.saved);
+  app.store.closing();
+  await app.repo.close();
+
+  persist.mockRestore();
+  const read = port.read.bind(port);
+  const hydrate = vi.spyOn(port, 'read').mockImplementation(async () => (await read()).map((part) => {
+    if (part.part !== 'table') return part;
+    // The local port returns bytes in the new window's realm as IndexedDB does.
+    const table = part.value as ImportTable;
+    return { ...part, value: { ...table, bytes: Uint8Array.from(table.bytes) } };
+  }));
+  initializeKeptImports(port);
+  await keptImportsReady;
+  hydrate.mockRestore();
+  const next = recoveryApp(disk);
+  await next.store.boot();
+  await next.store.loadDeal(dealId, { gaps: false });
+  const restored = await openImport(next, dealId);
+  await act(() => restored.querySelector<HTMLButtonElement>('#im-go')!.click());
+  await vi.waitFor(() => expect(keptImport(key)).toBeUndefined());
+  expect(Object.keys(next.store.get().questions)).toHaveLength(2);
+  expect(next.store.get().deals[dealId].qaLogs[0].file).toBe('Lender Q&A.csv');
+  await next.repo.close();
 });
