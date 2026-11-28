@@ -1,6 +1,6 @@
 /**
- * Step 3 of the third-party reports sweep (reports.ts): the standard model reads one report through for the issues it
- * raises, in one call, and each issue becomes a finding, unless a finding on the deal already covers it.
+ * Step 3 of the third-party reports sweep (reports.ts). Each issue becomes a finding unless a finding on the deal
+ * already covers it. A cutoff keeps verified issues so the next attempt can ask for the rest of the whole report.
  */
 import type { DocRecord } from './documents';
 import type { Cited } from './agent';
@@ -10,7 +10,7 @@ import { unknownIds } from './recordIds';
 import { withFewerChanges } from './limits';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
-  isCut,
+  type ReportCut, type KeptReportIssue, isCut, reportPlace, reportTitleKey,
 } from './reportTypes';
 
 /** sentences of one paragraph, written out for the model */
@@ -82,13 +82,24 @@ function replyAsk(id: string, before: ReadIssue[] | undefined) {
 }
 
 /** where a read has got to, as the prompt needs it */
-interface ReadAt { k: ReportKit; s: SentDoc; before?: ReadLine }
+interface ReadAt { k: ReportKit; s: SentDoc; before?: ReadLine; resume?: ReportCut }
+
+function resumeAsk(resume: ReportCut | undefined) {
+  if (!resume) return '';
+  const kept = resume.issues.map(({ issue, sources }) => {
+    const places = sources.map(({ loc, quote }) => quote ? `${loc} "${quote}"` : loc).join(', ');
+    return `${issue.finding ?? issue.covered}: ${issue.title} (${places})`;
+  });
+  return '\n\nThe previous reply was cut off. Give the remaining issues from the entire report. '
+    + 'Include issues before the cutoff that are not listed below. Omit only the exact issues already kept here:'
+    + (kept.length ? `\n${kept.join('\n')}` : ' none.');
+}
 
 /** the prompt that reads a report's issues */
 export function readAsk(r: ReadAt, known: Known[]) {
   const id = r.s.sent[0].rec.docId;
   const body = issuesAsk(r.k, id) + knownAsk(id, known) + earlierAsk(id, r.before?.issues);
-  return `Documents:\n${r.s.listing}\n\n${body}${replyAsk(id, r.before?.issues)}`;
+  return `Documents:\n${r.s.listing}\n\n${body}${replyAsk(id, r.before?.issues)}${resumeAsk(r.resume)}`;
 }
 
 /** a finding this report raised: its id is the one `idFor` gives the report and its title */
@@ -100,10 +111,18 @@ function isOwn(k: ReportKit, doc: string, f: Known) {
 /** the title as the model wrote it; a blank one is none (#1215) */
 const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string' && row.title.trim() ? row.title : '');
 
+const placement = (s: Source) => JSON.stringify([reportPlace(s), s.quote ?? '']);
+const atPlaces = (key: string, sources: Source[]) => JSON.stringify([key, ...sources.map(placement).sort()]);
+const issueId = (issue: ReadIssue) => issue.finding ?? issue.covered ?? '';
+
 /** One read of one report, in one call: what it has found. */
 class ReportRead {
-  issues: ReadIssue[] = [];
-  advisor = '';
+  issues: ReadIssue[];
+  advisor: string;
+  kept: KeptReportIssue[] = [];
+  retaining = false;
+  private seen = new Set<string>();
+  private reserved = new Set<string>();
   /** findings of the earlier draft's issues this draft no longer raises */
   dropped = new Set<string>();
   /** how many issues of each title the report has given: another of the same title gets its own finding id */
@@ -118,7 +137,33 @@ class ReportRead {
     readonly rec: DocRecord,
     readonly s: SentDoc,
     readonly before: ReadLine | undefined,
-  ) {}
+    readonly resume?: ReportCut,
+  ) {
+    this.issues = resume?.issues.filter((row) => !row.still).map((row) => row.issue) ?? [];
+    this.advisor = resume?.advisor ?? '';
+    for (const row of resume?.issues ?? []) {
+      this.rememberPlaces(row.issue, row.sources);
+      if (row.issue.finding) this.reserved.add(row.issue.finding);
+    }
+  }
+
+  private rememberPlaces(issue: ReadIssue, sources: Source[]) {
+    this.seen.add(atPlaces(issueId(issue), sources));
+    this.seen.add(atPlaces(reportTitleKey(issue.title), sources));
+  }
+
+  private keep(issue: ReadIssue, sources: Source[], still?: true) {
+    if (!this.retaining) return;
+    this.rememberPlaces(issue, sources);
+    this.kept.push({ issue, sources, ...(still ? { still } : {}) });
+  }
+
+  private get verifying() { return this.retaining || !!this.resume; }
+
+  private miss() {
+    this.unplaced++;
+    return true;
+  }
 
   /** the places in the report a row cites, kept only where they open */
   placed(row: Record<string, unknown>) {
