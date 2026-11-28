@@ -371,7 +371,7 @@ it('restores checks only for identical wording returned after a failed refresh a
   session.flipReword(120);
   session.flipReword(121);
   session.backToList();
-  const updated = [...prior];
+  const updated = prior.map((item, at) => at === 2 ? { text: questions[at] } : item);
   updated[0] = { ...prior[0], text: 'Provide the amended offshore turbine EPC agreement.' };
   await savePriorList('technology', 'Wind', updated);
   app.store.services.ai.reword = async () => fail({ kind: 'unreachable', message: 'Wording service unavailable' });
@@ -392,15 +392,18 @@ it('restores checks only for identical wording returned after a failed refresh a
   const reopened = open();
   expect(reopened.view.step).toBe('review');
   const changedSplit = { ...split, also: ['Provide an executed amendment to the grid connection agreement.'] };
-  app.store.services.ai.reword = async () => ok([wording, changedSplit]);
+  const revoked = { at: 2, text: prior[2].text, why: '' };
+  app.store.services.ai.reword = async () => ok([revoked, wording, changedSplit]);
   await reopened.retryWording();
   expect(reopened.view.listReview.review?.rewords.slice(-2)).toEqual([wording, changedSplit]);
   expect(reopened.view.listReview.useReword.has(120)).toBe(true);
+  expect(reopened.view.listReview.useReword.has(revoked.at)).toBe(false);
   expect(reopened.view.listReview.useReword.has(121)).toBe(false);
   await reopened.bringIn();
   const final = app.store.get().firmList[id].items;
   expect(final).toHaveLength(2_000);
   expect(final[0]).toEqual(updated[0]);
+  expect(final[2]).toEqual(updated[2]);
   expect(final[120]).toEqual({ text: wording.text, was: questions[120] });
   expect(final[121]).toEqual({ text: questions[121] });
 });
@@ -433,4 +436,57 @@ it('keeps checks after a failed sheet read and starts over on an accepted new sh
   expect(session.view.source.table?.sheet).toBe('Supplement');
   expect(session.view.listReview.review?.rewords[0]?.text).toBe(revised);
   expect(session.view.listReview.useReword.has(0)).toBe(false);
+});
+
+it('keeps removals through a failed refresh and accepts new choices during partial Retry (#56)', async () => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const pairs = Array.from({ length: 120 }, (_, index) => ({
+    a: 120 + index, b: 240 + index, inAgainst: false, why: '',
+  }));
+  const [first, , alternative, changed] = pairs;
+  for (const { a, b } of pairs) questions[b] = `Diligence request: ${questions[a]}`;
+  questions[500] = `For the lender review: ${questions[alternative.a]}`;
+  questions[501] = `Please respond to this request: ${questions[changed.a]}`;
+  app.store.services.ai.reword = async () => ok([]);
+  const prior = priorItems(questions, 'offshore wind');
+  const id = await savePriorList('technology', 'Wind', prior);
+  const session = await technologyReview(questions, 'Wind', false, true);
+  session.backToList();
+  session.setAskSame(true);
+  app.store.services.ai.sameMeaning = async () => ok({ pairs });
+  await session.next();
+  for (const { a } of pairs) session.flipRemove(a);
+  expect(session.view.listReview.remove.size).toBe(120);
+  session.backToList();
+
+  const updated = [...prior];
+  updated[0] = { ...prior[0], text: 'Provide the amended offshore turbine EPC agreement.' };
+  await savePriorList('technology', 'Wind', updated);
+  const unavailable = { kind: 'unreachable' as const, message: 'Duplicate service unavailable' };
+  app.store.services.ai.sameMeaning = async () => fail(unavailable);
+  await session.next();
+  expect(session.view.listReview.review?.asked.same).toBe('unreachable');
+  expect(session.view.listReview.remove.size).toBe(0);
+
+  app.store.services.ai.sameMeaning = async () => ok({
+    pairs: [first, { ...alternative, b: 500 }],
+    missed: { kind: 'unreachable', at: pairs.slice(1).map(({ a }) => a) },
+  });
+  await session.retry();
+  expect(session.view.listReview.remove).toEqual(new Set([first.a]));
+  session.flipRemove(first.a);
+  session.flipRemove(alternative.a);
+  session.flipRemove(alternative.a);
+
+  app.store.services.ai.sameMeaning = async () => ok({
+    pairs: pairs.slice(1).map((pair) => pair === changed ? { ...pair, b: 501 } : pair),
+  });
+  await session.retry();
+  expect(session.view.listReview.remove.size).toBe(117);
+  for (const { a } of [first, alternative, changed]) expect(session.view.listReview.remove.has(a)).toBe(false);
+  await session.bringIn();
+  const saved = app.store.get().firmList[id].items;
+  expect(saved).toHaveLength(1_883);
+  expect(saved[0]).toEqual(updated[0]);
+  expect(saved.some(({ text }) => text === questions[pairs[1].a])).toBe(false);
 });
