@@ -28,7 +28,7 @@ import { Operation, AuditEntry, Deal, Question, Finding, Tombstone, Member, CURR
 import { keepUnseen, movedHash } from './recovered';
 import { scopeOfKey } from './conversations';
 import { Item, ListRecord } from '../domain/checklist';
-import { Undo } from './commands/undo';
+import { Undo, changedSince } from './commands/undo';
 import { lastImport } from './commands/importQuestions';
 import { merged, localConversations } from './threads';
 import { seenSince } from './draftsSeen';
@@ -555,7 +555,18 @@ export class Store {
     this.unsettledHere.delete(id);
     this.unwritten.delete(id);
     this.set({ ...this.state, ops: { ...this.state.ops, [id]: operation } });
+    this.offerRecoveredImportUndo(operation);
     return ok(undefined);
+  }
+
+  private offerRecoveredImportUndo(operation: Operation) {
+    const { id, command, inverse, results, undoneBy } = operation;
+    if (command !== 'ImportQuestions' || !inverse || !results || undoneBy || this.lastMessage.has(id)) return;
+    if (changedSince(this.state, results)?.length !== 0) return;
+    const message = 'Import saved';
+    this.lastMessage.set(id, message);
+    if (this.lastMessage.size > 50) this.lastMessage.delete(this.lastMessage.keys().next().value!);
+    this.toast(message, 'done', { label: 'Undo', opId: id });
   }
 
   private async reloadImportStepRecords(command: string, dealId: string) {
@@ -978,6 +989,10 @@ export class Store {
 
   private toTransaction(plan: Plan, op: Operation, at: string, actor: string, pendingRev: number): Transaction {
     const settled: Operation = { ...op, ...(plan.settledInput !== undefined ? { input: plan.settledInput } : {}), state: 'succeeded', settledAt: at, inverse: plan.inverse };
+    // Keep result identities in the first receipt, so losing its reply cannot lose Import Undo.
+    if (op.command === 'ImportQuestions' && op.idempotencyKey?.startsWith('qa-import:')) {
+      settled.results = resultsOf(plan, {});
+    }
     return {
       writes: [
         ...plan.upserts.map((u) => ({ kind: u.kind, id: u.record.id, data: u.record, expectedRev: u.expectedRev, ...(u.resolves ? { resolves: u.resolves } : {}), ...(u.beside ? { beside: true } : {}), ...this.seenOf(u.kind, u.record.id) })),
