@@ -150,6 +150,23 @@ it.each([false, true])('preserves distinct issues with the same title and citati
   }
 });
 
+it.each([true, false])('preserves differing report titles as written (cutoff: %s)', async (cut) => {
+  const first = row('the inverter contract omits replacement costs', 16);
+  const other = { ...first, title: 'the inverter contract omits  replacement costs' };
+  const s = await reader((_call, attempt) => {
+    if (cut && attempt === 1) cutAfter([first, other], 2);
+    return JSON.stringify({ issues: cut ? [] : [first, other] });
+  });
+  try {
+    await s.sweep();
+    const saved = val(await s.repo.list('finding', 'd1')).map(({ envelope }) => envelope.data as Finding);
+    expect(saved.map(({ title }) => title).sort()).toEqual([first.title, other.title].sort());
+    expect(s.state().read.get(docId)?.issues).toHaveLength(2);
+  } finally {
+    await s.ai.close();
+  }
+});
+
 it('rejects a cut prefix that names an unshown document (#1212)', async () => {
   const valid = row('the substation transformer has no test record', 2);
   const invalid = row('the maintenance schedule has expired', 3);
@@ -191,6 +208,46 @@ it('recovers when the finding write succeeds before the cutoff checkpoint append
     expect(findings).toHaveLength(2);
     expect(resumed.state().read.get(docId)?.issues.map(({ title }) => title)).toEqual(issues.map(({ title }) => title));
     expect(resumed.state().tries('read', docId)).toBe(1);
+  } finally {
+    await resumed.ai.close();
+  }
+});
+
+it('honors a deletion after an interrupted cutoff while retaining a distinct issue (#1212)', async () => {
+  const first = row('the EPC contractor omits the winter maintenance warranty', 3);
+  const another = { ...first, body: ['The agreement excludes emergency on-site repairs from the warranty. [1]'] };
+  const initial = await reader(() => cutAfter([first], 1));
+  const restore = refuse(initial.shared, (text) => text.includes('"cut":'), () => new Error('Disk full'), 1);
+  try {
+    await initial.sweep();
+    expect(initial.state().tries('read', docId)).toBe(0);
+    const [saved] = val(await initial.repo.list('finding', 'd1'));
+    const data = saved.envelope.data as Finding;
+    const edited = { ...data, body: ['The advisor confirmed this concern during review.'] };
+    val(await initial.repo.transaction({ writes: [{
+      kind: 'finding', id: data.id, data: edited, expectedRev: saved.rev,
+    }] }));
+    const changed = val(await initial.repo.get('finding', data.id))!;
+    const deleted = { id: data.id, dealId: data.dealId, kind: 'finding', snapshot: changed.envelope.data };
+    val(await initial.repo.transaction({
+      writes: [{ kind: 'tombstone', id: data.id, data: deleted, expectedRev: null }],
+      deletes: [{ kind: 'finding', id: data.id, expectedRev: changed.rev }],
+      index: { dealId: 'd1', add: [{ kind: 'tombstone', id: data.id }], remove: [{ kind: 'finding', id: data.id }] },
+    }));
+    expect(val(await initial.repo.list('finding', 'd1'))).toHaveLength(0);
+  } finally {
+    restore();
+    await initial.ai.close();
+  }
+  const resumed = await reader((_call, attempt) => {
+    if (attempt === 1) cutAfter([first, another], 2);
+    return '{"issues":[]}';
+  }, initial);
+  try {
+    await resumed.sweep();
+    const saved = val(await resumed.repo.list('finding', 'd1')).map(({ envelope }) => envelope.data as Finding);
+    expect(saved.map(({ body }) => body)).toEqual([another.body]);
+    expect(val(await resumed.repo.list('tombstone', 'd1'))).toHaveLength(1);
   } finally {
     await resumed.ai.close();
   }

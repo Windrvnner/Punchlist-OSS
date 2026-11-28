@@ -866,6 +866,8 @@ describe('advisor report reply shape (#1212)', () => {
     { report: true }, { issues: null }, { issues: 'Missing inverter warranty' }, { issues: {} },
     { advisor: 'Independent engineer' }, {}, { report: null }, { report: false, issues: null },
     { report: true, issues: [null, {}] },
+    { issues: [{ title: 'The inverter warranty is missing' }] },
+    { issues: [{ still: 'E42' }] },
   ])('sends a thin reply back once and leaves it unread if still thin (%j)', async (reply) => {
     const { report, state, reads, repairs, findings } = await sweepReply(() => reply);
     expect(reads).toHaveLength(2);
