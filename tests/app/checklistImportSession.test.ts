@@ -244,3 +244,50 @@ it('imports only the wording accepted for the destination chosen after Back (#56
   expect(shown).toEqual(windItems.map(({ text }) => text));
   expect(saved[listId('technology', 'Solar')]?.items).toEqual(solarItems);
 });
+
+it('preserves wording changed on another PC while the list is in review (#56)', async () => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const items = priorItems(questions, 'offshore wind');
+  const name = 'Wind';
+  const id = listId('technology', name);
+  expect((await app.store.dispatch(BringInList, {
+    list: { layer: 'technology', name, items, file: 'Prior requests.csv', fileDate: '' },
+  })).ok).toBe(true);
+  const session = await technologyReview(questions, name);
+  const before = app.store.get().firmList[id];
+  const updatedItems = priorItems(questions, 'onshore wind');
+  app.repo.peer.change('firmList', id, { ...before, items: updatedItems, rev: before.rev + 1 }, ELSEWHERE);
+  await app.store.refreshSync();
+  expect(app.store.get().firmList[id].items).toEqual(updatedItems);
+  await session.bringIn();
+  expect(app.store.get().firmList[id].items[0]).toEqual(updatedItems[0]);
+  expect(keptImport(key)).toBeDefined();
+
+  session.backToList();
+  await session.next();
+  await session.bringIn();
+  expect(app.store.get().firmList[id].items).toEqual([
+    ...updatedItems, ...questions.slice(120).map((text) => ({ text })),
+  ]);
+});
+
+it('refuses a queued Import when an earlier write changes the reviewed list (#56)', async () => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const name = 'Wind';
+  const id = listId('technology', name);
+  const items = priorItems(questions, 'offshore wind');
+  const list = { layer: 'technology' as const, name, items, file: 'Prior requests.csv', fileDate: '' };
+  expect((await app.store.dispatch(BringInList, { list })).ok).toBe(true);
+  const session = await technologyReview(questions, name);
+  const updatedItems = priorItems(questions, 'onshore wind');
+  const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
+  const first = app.store.dispatch(BringInList, { list: { ...list, items: updatedItems } });
+  await held.entered;
+  const queued = session.bringIn();
+  held.release();
+  expect((await first).ok).toBe(true);
+  await queued;
+  expect(app.store.get().firmList[id].items[0]).toEqual(updatedItems[0]);
+  expect(session.view.work.error).toContain('The list changed');
+  expect(keptImport(key)).toBeDefined();
+});
