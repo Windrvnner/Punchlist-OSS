@@ -326,12 +326,12 @@ export class ChecklistImportSession {
     this.choices = { ...this.choices, askedFor: '', shown: false, remove: new Set(), useReword: new Set() };
   }
 
-  private acceptSource(table: ImportTable | null, text: ChecklistText | null, mapping = this.choices.mapping) {
+  private acceptSource(text: ChecklistText) {
     this.resetReview();
-    this.table = table;
+    this.table = null;
     this.text = text;
     this.error = '';
-    this.choices = { ...this.choices, mapping, byColumns: false };
+    this.choices = { ...this.choices, byColumns: false };
     clearChecklistHeading(this.key);
     return this.readSource();
   }
@@ -344,8 +344,7 @@ export class ChecklistImportSession {
     if (!this.requests.isLatest(token)) return;
     this.busy = '';
     if (!read.ok) return this.activity('', `Could not read ${file.name}: ${read.error.message}`);
-    if ('table' in read.value) await this.acceptSource(read.value.table, null, read.value.mapping);
-    else await this.acceptSource(null, read.value.text);
+    await this.acceptSource(read.value);
   };
 
   loadDropped(file: SourceFile) {
@@ -354,7 +353,7 @@ export class ChecklistImportSession {
 
   pasted = () => {
     const text = this.pastedSource(this.paste);
-    if (!this.busy && this.live && text) return this.acceptSource(null, text);
+    if (!this.busy && this.live && text) return this.acceptSource(text);
   };
 
   chooseColumns = () => {

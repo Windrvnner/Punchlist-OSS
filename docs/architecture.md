@@ -243,7 +243,7 @@ A deal's checklist is made up of its own item records, linked to the findings an
   where available. `src/app/qaImportLayout.ts` publishes the selected table and its accepted matches together. The
   preview and `src/app/qaImport.ts` both send the accepted matches and prepared rows to `ImportQuestions`. The
   submission workflow resumes retained submissions by their journal correlation and finishes the saved log choice.
-- **The master checklist** is pasted or imported from a Word, RTF, PDF, OpenDocument, or text file.
+- **The master checklist** is pasted or imported from a Word, RTF, PDF, OpenDocument text (`.odt`), or plain text file.
   The model reads it whole in one call (in halves through `parts.ts` when the service refuses it as too long or cuts
   the reply off). The thorough model rereads any unplaced lines, and the app accounts for every line (`src/app/listRead.ts`,
   `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one
