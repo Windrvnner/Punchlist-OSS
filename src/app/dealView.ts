@@ -44,16 +44,18 @@ const INTERRUPTED_ROWS = 3;
 
 /** Show rotates from the first hidden action. Dismissed actions also count toward the overflow. */
 export function interruptedView(
-  state: Pick<State, 'ops'> & Partial<Pick<State, 'ui'>>, first: string | undefined, dismissed: string[],
+  state: Pick<State, 'ops'> & Partial<Pick<State, 'deals' | 'ui'>>, first: string | undefined, dismissed: string[],
 ) {
   const dialog = state.ui?.dialog;
-  const ops = interruptedOperations(state).filter((op) =>
-    dialog?.kind !== 'importQa' || op.dealId !== dialog.dealId || !isCorrelatedQaImport(op));
+  const ops = interruptedOperations(state);
+  const covered = dialog?.kind === 'importQa' && state.deals?.[dialog.dealId]
+    ? ops.filter((op) => op.dealId === dialog.dealId && isCorrelatedQaImport(op)).map((op) => op.id)
+    : [];
   const start = Math.max(0, ops.findIndex((op) => op.id === first));
   const ordered = [...ops.slice(start), ...ops.slice(0, start)];
   const showing = ordered.filter((op) => !dismissed.includes(op.id)).slice(0, INTERRUPTED_ROWS);
   const hidden = ordered.filter((op) => !showing.includes(op));
-  return { showing, hidden };
+  return { showing, hidden, covered };
 }
 
 export function dismissInterrupted(state: Pick<State, 'ops'>, dismissed: string[], id: string) {

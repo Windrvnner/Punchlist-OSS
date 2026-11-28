@@ -311,6 +311,34 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   console.log('screenshots in', shots);
 }
 
+// Interrupt a real journaled import before its rows land, then recover it by keyboard.
+{ const { ctx, page } = await fresh();
+  const dealId = await newDeal(page, 'Import Recovery');
+  await page.goto(URL + '#qa-' + dealId);
+  await page.click('#qa-cols');
+  await page.click('#qa-import');
+  await page.setInputFiles('#im-file', file('recovery.csv', 'Question\nProvide the signed escrow agreement\n'));
+  await page.waitForSelector('#im-go');
+  await page.evaluate(() => {
+    const repo = store.services.repo;
+    const transaction = repo.transaction.bind(repo);
+    repo.transaction = (tx) => tx.writes.some((write) => write.kind === 'question')
+      ? new Promise(() => { window.importWriteHeld = true; })
+      : transaction(tx);
+  });
+  await page.click('#im-go');
+  await page.waitForFunction(() => window.importWriteHeld);
+  await page.reload();
+  const retry = page.locator('.intop .tundo').getByText('Retry', { exact: true });
+  await retry.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#im-go');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.imdlg', { state: 'detached' });
+  const focused = await retry.evaluate((button) => document.activeElement === button);
+  say('interrupted-import-escape-returns-to-retry', focused && (await qs(page, dealId)).length === 0);
+  await ctx.close(); }
+
 // ---- 2 Excel's two date systems: read through LibreOffice, tested in tests/backend/sheets.test.ts (the stand-in reads CSV only)
 
 // ---- 3 findings export, settings, search ----------------------------------------------
