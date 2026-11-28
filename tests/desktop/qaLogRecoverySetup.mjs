@@ -11,7 +11,8 @@ export const room = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-desktop-log
 export const logFolder = path.join(room, 'logs');
 const home = path.join(room, 'home');
 const isolatedConfig = path.join(room, 'config');
-const heading = 'No.,Question,Response\r\n';
+const columns = ['No.', 'Question', 'Response'];
+const heading = columns.join(',') + '\r\n';
 const stem = 'Due diligence questions';
 export const csv = {
   file: `${stem}.csv`, sheet: 'Sheet1', question: 'What permits remain outstanding?', answer: 'None.',
@@ -22,6 +23,13 @@ export const book = {
 export const addedQuestion = 'Please provide the latest compliance certificate.';
 export const addedAnswer = 'The signed version is available.';
 
+function convertWorkbook(source, destination) {
+  const profile = pathToFileURL(path.join(room, 'fixture-profile')).href;
+  execFileSync('soffice', [
+    `-env:UserInstallation=${profile}`, '--headless', '--convert-to', 'xlsx', '--outdir', destination, source,
+  ], { timeout: 120_000, env: { ...process.env, XDG_CONFIG_HOME: isolatedConfig } });
+}
+
 export function prepareFiles() {
   const local = path.join(home, 'local');
   const shared = path.join(room, 'shared');
@@ -31,10 +39,7 @@ export function prepareFiles() {
   fs.writeFileSync(path.join(logFolder, csv.file), `${heading}1,${csv.question},${csv.answer}\r\n`);
   const workbookInput = path.join(source, csv.file);
   fs.writeFileSync(workbookInput, `${heading}1,${book.question},${book.answer}\r\n`);
-  const profile = pathToFileURL(path.join(room, 'fixture-profile')).href;
-  execFileSync('soffice', [
-    `-env:UserInstallation=${profile}`, '--headless', '--convert-to', 'xlsx', '--outdir', logFolder, workbookInput,
-  ], { timeout: 120_000, env: { ...process.env, XDG_CONFIG_HOME: isolatedConfig } });
+  convertWorkbook(workbookInput, logFolder);
   return new Map([csv, book].map(({ file }) => [file, fs.readFileSync(path.join(logFolder, file))]));
 }
 
@@ -62,7 +67,7 @@ export async function launch(endpoint) {
 }
 
 export async function seedDeals(page) {
-  return await page.evaluate(async ({ folder, entries, addedQuestion, addedAnswer }) => {
+  return await page.evaluate(async ({ folder, entries, addedQuestion, addedAnswer, columns }) => {
     const dispatch = async (command, input) => {
       const result = await store.dispatch(store.commandNamed(command), input, { quiet: true });
       if (!result.ok) throw new Error(result.error.message);
@@ -78,14 +83,26 @@ export async function seedDeals(page) {
       }));
       await dispatch('ImportQuestions', { dealId: deal.id, mode: 'append', rows });
       const { file, sheet } = log;
+      const headers = columns.map((label, column) => ({ label, column }));
       await dispatch('KeepQaLog', {
         dealId: deal.id,
-        log: { name: file, file, folder, sheet, headerRow: 1, mapping: { n: 0, text: 1, response: 2 } },
+        log: { name: file, file, folder, sheet, headerRow: 1, headers, mapping: { n: 0, text: 1, response: 2 } },
       });
       deals.push(deal.id);
     }
     return deals;
-  }, { folder: logFolder, entries: [csv, book], addedQuestion, addedAnswer });
+  }, { folder: logFolder, entries: [csv, book], addedQuestion, addedAnswer, columns });
+}
+
+export function insertWorkbookNotes() {
+  const source = path.join(room, 'fixture', csv.file);
+  const replacement = path.join(room, 'replacement');
+  fs.mkdirSync(replacement);
+  const reordered = ['No.,Question,Notes,Response', `1,${book.question},Leave in Notes,${book.answer}`,
+    `2,${addedQuestion},,${addedAnswer}`];
+  fs.writeFileSync(source, reordered.join('\r\n') + '\r\n');
+  convertWorkbook(source, replacement);
+  fs.copyFileSync(path.join(replacement, book.file), path.join(logFolder, book.file));
 }
 
 // A stand-in accepts only the sign-in probe. A real model is never contacted.

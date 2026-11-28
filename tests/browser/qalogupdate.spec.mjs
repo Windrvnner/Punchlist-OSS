@@ -18,7 +18,11 @@ const id = await page.evaluate(async () => {
   await run('CreateDeal', { name: 'Logged', folders: [] }); const dealId = Object.values(store.get().deals).find((d) => d.name.endsWith('Logged')).id;
   await store.loadDeal(dealId);
   await run('ImportQuestions', { dealId, mode: 'append', rows: [{ n: 1, text: 'What is the DSCR?', response: 'Ours' }, { n: 2, text: 'Who is the EPC contractor?', response: '' }].map((r, k) => ({ line: k + 2, askedBy: 'Lender A', received: '', workstream: '', priority: '', respondedBy: '', responded: '', status: '', ...r })) });
-  await run('KeepQaLog', { dealId, log: { name: 'Log', file: 'Log.xlsx', folder: 'X:\\Deals\\Logged', sheet: 'Log', headerRow: 1, mapping: { n: 0, text: 1, response: 2 } } });
+  const headers = ['No.', 'Question', 'Response'].map((label, column) => ({ label, column }));
+  await run('KeepQaLog', { dealId, log: {
+    name: 'Log', file: 'Log.xlsx', folder: 'X:\\Deals\\Logged', sheet: 'Log', headerRow: 1, headers,
+    mapping: { n: 0, text: 1, response: 2 },
+  } });
   // the log holds Q1 with someone else's response, and not Q2; saving says "in use" until told otherwise
   const ok = (value) => ({ ok: true, value });
   window.__save = { status: 'later' }; window.__saves = 0;
@@ -101,6 +105,21 @@ await placeAsk(); await page.click('#qa-cols'); await page.click('#qa-log'); awa
 await page.click('.pklist label:nth-child(3)'); await page.click('#pk-go'); await page.waitForTimeout(300);
 steps = await page.evaluate(() => window.__steps);
 say('a-new-row-is-added-below-the-last', steps?.some((x) => x.kind === 'rows' && x.after === 4) && steps.some((x) => x.kind === 'cell' && x.row === 5 && x.value === 'Final answer, sroe'), JSON.stringify(steps));
+
+await page.evaluate(() => {
+  store.ui({ toasts: [] });
+  window.__steps = null;
+  store.services.qaLogs.read = async () => ({ ok: true, value: {
+    columns: ['No.', 'Question', 'Notes'], cols: [0, 1, 2], lines: [2], lastRow: 2,
+    rows: [['1', 'What is the DSCR?', '']], stamp: 'renamed-heading',
+  } });
+});
+await page.click('#qa-cols');
+await page.click('#qa-log');
+await page.locator('#toast .ttext').filter({ hasText: 'Import Q&A Log' }).waitFor();
+say('a-missing-selected-header-asks-for-mapping-review-before-writing',
+  await page.evaluate(() => window.__steps === null), JSON.stringify(await toasts()));
+
 // "Make this the deal's Q&A log" starts checked only for a file with two or more parties under Submitted by
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qalogupdate-'));
 const one = path.join(tmp, 'Lender A list.csv'), many = path.join(tmp, 'Proseware Q&A log.csv');
