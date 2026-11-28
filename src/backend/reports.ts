@@ -32,7 +32,7 @@ import { unknownIds } from './recordIds';
 import { read, type ReportReadResult } from './reportRead';
 import { withFewerChanges, type ChangeShare } from './limits';
 import {
-  type ReportKit, type ReportLine, type ReadLine, type ReportCut, type Owed,
+  type ReportKit, type ReportLine, type ReadLine, type ReadIssue, type ReportCut, type Owed,
   SORT_PART, TRIES, isCut, isTooLong, isUnreachable, yes, reportPlace,
 } from './reportTypes';
 
@@ -117,11 +117,32 @@ export const incompleteReports = (docs: DocRecord[], st: ReportState) => docs
   .filter(({ docId }) => unreadReport(st, docId) && st.tries('read', docId) >= TRIES)
   .map(({ docId, name }) => ({ docId, name }));
 
-function earlierRead(st: ReportState, doc: string): ReadLine | undefined {
-  const read = st.read.get(doc);
-  if (read) return read;
-  const cut = st.cuts.get(doc);
-  if (cut?.issues.length) return { doc, advisor: cut.advisor, issues: cut.issues.map((row) => row.issue) };
+/** The last completed draft is the baseline. Verified issues from later cut-off drafts add to it. */
+function earlierRead(st: ReportState, docs: string[]): ReadLine | undefined {
+  let latestCut: ReadLine | undefined;
+  const added: ReadIssue[] = [];
+  for (const doc of docs) {
+    const complete = st.read.get(doc);
+    if (complete) return withInterveningIssues(complete, added);
+    const cut = st.cuts.get(doc);
+    if (!cut?.issues.length) continue;
+    latestCut ??= { doc, advisor: cut.advisor, issues: [] };
+    for (const { issue } of cut.issues) added.push(issue);
+  }
+  return latestCut && withInterveningIssues(latestCut, added);
+}
+
+function withInterveningIssues(read: ReadLine, added: ReadIssue[]): ReadLine {
+  if (!added.length) return read;
+  const issues = [...read.issues];
+  const present = new Set(issues.map((issue) => issue.finding ?? issue.covered));
+  for (const issue of added) {
+    const id = issue.finding ?? issue.covered;
+    if (present.has(id)) continue;
+    present.add(id);
+    issues.push(issue);
+  }
+  return { ...read, issues };
 }
 
 /** the fields a sort's reply is read for */
@@ -276,7 +297,7 @@ async function readOne(k: ReportKit, rec: DocRecord, count: Count): Promise<bool
   try {
     const now = stateOf(await k.lines());
     if (!canRead(now, rec.docId)) return false;
-    const before = (k.earlier.get(rec.docId) ?? []).map((doc) => earlierRead(now, doc)).find(Boolean);
+    const before = earlierRead(now, k.earlier.get(rec.docId) ?? []);
     const last = now.tries('read', rec.docId) >= TRIES - 1;
     const got = await read(k, rec, before, last, now.cuts.get(rec.docId)).catch(tooLongIsNull);
     if (got === 'lost') return false;          // another PC took the read over, or this PC cannot send it
