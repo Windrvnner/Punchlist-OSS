@@ -5,7 +5,7 @@
  */
 import { int, prose, strings } from './lenient';
 import { pageOf, rankRecords, type Page } from './recordSearch';
-import { batchesOf } from './agentFolder';
+import { batchesOf } from './agentBatches';
 import { qaRow, qaText } from './qaRow';
 import type { AgentRun } from './agentRun';
 import { foundAt, withPlaces } from './agentRun';
@@ -79,7 +79,8 @@ async function searchDocuments(run: AgentRun, asked: Asked, query: string, repor
     if (looked.error.kind === 'unreachable') {
       throw Object.assign(new Error(looked.error.message), { code: 'unreachable' });
     }
-    report.out.push(`Documents: ${looked.error.message}.`);
+    const missing = notOpened(run, shown.items, []);
+    report.out.push(`Documents: ${looked.error.message}.${missing}\n${pageLine('documents', asked, shown)}`);
     report.said.push(looked.error.message);
     return;
   }
@@ -113,9 +114,8 @@ function documentPage(run: AgentRun, ranking: DealDoc[], page: number): Page<Dea
 function notOpened(run: AgentRun, page: DealDoc[], sent: DealDoc[]): string {
   const left = page.filter((d) => !sent.some((s) => s.dealId === d.dealId && s.rec.docId === d.rec.docId));
   if (!left.length) return '';
-  const paths = left.map((d) => run.kit.where(d.rec)).join('; ');
   const why = 'could not be opened on this PC, or too long to read with the others';
-  return `\nNot opened (${why}): ${paths}. Read them by name to see them.`;
+  return `\nNot opened (${why}). Ask to read them by id:\n${run.readList(left)}`;
 }
 
 /** the deal's findings ranked by the query's words, a page of them, each whole */

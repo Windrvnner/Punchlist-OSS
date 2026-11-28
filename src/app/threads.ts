@@ -63,11 +63,13 @@ const Research = z.object({ steps: z.array(z.object({ kind: z.enum(['search', 'r
  * opened documents (it named them by label, as `tags`) still loads, without `opened`: the app then carries on from
  * the history text instead (`carriedThread`), so no saved conversation is lost (#1162)
  */
+const ThreadDocuments = z.array(z.object({ dealId: z.string(), docId: z.string() }));
 const Thread = z.object({
   id: z.string().min(1),
   model: z.string(),
   tokens: z.number(),
-  opened: z.array(z.object({ dealId: z.string(), docId: z.string() })).optional(),
+  opened: ThreadDocuments.optional(),
+  whole: ThreadDocuments.optional(),
   transcript: z.string().optional(),
   call: z.string().optional(),
 });

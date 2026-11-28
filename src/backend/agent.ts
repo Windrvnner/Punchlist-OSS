@@ -60,12 +60,12 @@ import { ok, fail, type Result } from '../domain/result';
 import type { ModelThread, Research } from '../ports';
 import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
-import { strings, prose, list as listOf } from './lenient';
+import { isObject, readJson, strings, prose, list as listOf } from './lenient';
 import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY, withFewerChanges, type ChangeShare } from './limits';
 import { control, SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
-import type { Cited, Run, Sent } from './agentKit';
-import { AgentRun } from './agentRun';
+import type { Cited, Run, Sent, WholeFiles } from './agentKit';
+import { AgentRun, type ReadAttachment } from './agentRun';
 import { catchUp, pageNumber, search, type What } from './agentSearch';
 import { FolderMemory, FolderReader } from './agentFolder';
 import { KeptConversation, type Turn } from './agentTalk';
@@ -93,6 +93,29 @@ const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […], "offer": {…}}';
 /** the fields a turn's reply is read for */
 const REPLY_KEYS = ['tool', 'text'];
+
+/** A listed retry id can be a read argument. The reply's prose and citations still require opened documents. */
+function forDocumentCheck(text: string, canRequest: (value: unknown) => boolean): string {
+  const reply = readJson(text, REPLY_KEYS);
+  const tool = reply?.tool;
+  const checkArgs = (args: Record<string, unknown>) => {
+    const docs = listOf(args.docs);
+    const remaining = docs.filter((value) => !canRequest(value));
+    return remaining.length < docs.length ? { ...args, docs: remaining } : args;
+  };
+  if (reply && typeof tool === 'string' && tool.trim().toLowerCase() === 'read') {
+    const checked = checkArgs(reply);
+    return checked === reply ? text : JSON.stringify(checked);
+  }
+  // Native tools come as a list of calls. Only a read's docs argument can name a deferred document.
+  if (!text.startsWith('[') || !Array.isArray(tool)) return text;
+  const checked = tool.map((call) => {
+    if (!isObject(call) || call.name !== 'read' || !isObject(call.args)) return call;
+    const args = checkArgs(call.args);
+    return args === call.args ? call : { ...call, args };
+  });
+  return checked.some((call, index) => call !== tool[index]) ? JSON.stringify(checked) : text;
+}
 
 export function chatAgent(kit: AgentKit, opts: AgentOptions = {}) {
   const limits: Limits = {
@@ -191,16 +214,16 @@ class Answering {
   }
 
   /**
-   * What the person gave (attachments, a finding's own documents) is attached from the first turn, and the question
-   * itself is searched for in everything.
+   * The first batch of documents the person gave (attachments, a finding's own documents) is attached from the first
+   * turn, and the question itself is searched for in everything.
    */
   private async firstSteps(): Promise<void> {
     const { kit, question, run } = this;
     const must = question.deals.flatMap((dealId) => (question.must[dealId] ?? [])
       .map((docId) => kit.records(dealId).find((r) => r.docId === docId))
       .filter((r): r is DocRecord => !!r)
-      .map((rec) => run.idOf(run.open(dealId, rec))));
-    if (must.length) run.done.push(run.read(must, this.limits.width));
+      .map((rec) => ({ dealId, rec })));
+    if (must.length) run.done.push(run.readBatch(must, this.limits.width));
     if (!this.stopped) run.done.push(await search(run, 'all', question.message));
   }
 
@@ -229,26 +252,28 @@ class Answering {
    * leaves them
    */
   private async reply(turnNumber: number, last: boolean, share: ChangeShare): Promise<Record<string, unknown> | null> {
-    const { kit, question, run } = this;
-    const { files, listing, got } = await kit.send(run.whole, run.spansDeals, share);
-    // a document that cannot be opened on this PC was not read
-    if (got.length < run.whole.length) run.whole = got;
-    const turn = this.turnOf(turnNumber, last, files, listing);
-    this.turnNow = turn;
-    return kit.talk
-      ? this.conversation.ask(turn)
-      : kit.askJson(
-        {
-          kind: 'answer', model: question.model, system: turn.system, prompt: turn.full(true), files,
-          unusable: turn.unusable,
-        },
-        turn.keys,
-        turn.shape,
-      );
+    const prepare = (prior: WholeFiles) => this.prepareTurn(turnNumber, last, share, prior);
+    if (this.kit.talk) return this.conversation.ask(prepare);
+    const turn = await prepare([]);
+    const reply = await this.kit.askJson({
+      kind: 'answer', model: this.question.model, system: turn.system, prompt: turn.full(true),
+      files: turn.files, unusable: turn.unusable,
+    }, turn.keys, turn.shape);
+    if (reply) this.run.attached(turn.attachment);
+    return reply;
+  }
+
+  /** Prepare after the conversation knows whether its provider context continues or starts fresh. */
+  private async prepareTurn(turnNumber: number, last: boolean, share: ChangeShare, prior: WholeFiles) {
+    const { kit, run } = this;
+    const { files, listing, got } = await kit.send(run.whole, run.spansDeals, share, prior);
+    this.turnNow = this.turnOf(turnNumber, last, files, listing, run.attachment(got));
+    return this.turnNow;
   }
 
   /** the pieces of this turn's prompt */
-  private turnOf(turnNumber: number, last: boolean, files: string[], listing: string): Turn {
+  private turnOf(turnNumber: number, last: boolean, files: string[], listing: string,
+    attachment: ReadAttachment): Turn {
     const { kit, question } = this;
     const docLine = (s: Sent) => {
       const pages = s.rec.pages ? ` (${s.rec.pages} pages)` : '';
@@ -260,15 +285,16 @@ class Answering {
       : last ? ' It is your last: answer now from what you have, with no tool.' : '';
     const turnLine = `This is turn ${turnNumber} of at most ${this.limits.turns}.${ending}`;
     return {
-      full: (history) => this.prompt(history, listing, turnLine, docLine),
+      full: (history) => this.prompt(history, listing, turnLine, docLine, attachment),
       files,
       listing,
+      attachment,
       turnLine,
       docLine,
       system: `${inlineTools(this.limits.width)}\n\n${kit.rules}`,
       keys: REPLY_KEYS,
       shape: REPLY_SHAPE,
-      unusable: async (text) => (await this.namesUnknownQuestion(text)) || this.namesUnopenedDoc(text),
+      unusable: async (text) => (await this.namesUnknownQuestion(text)) || this.namesUnopenedDoc(text, attachment),
     };
   }
 
@@ -288,18 +314,22 @@ class Answering {
    * opened: a failed reply, asked again (#1162). One it opened that is gone since counts as opened: `fit` drops its
    * citation.
    */
-  private namesUnopenedDoc(text: string): boolean {
+  private namesUnopenedDoc(text: string, attachment: ReadAttachment): boolean {
     const { kit, run } = this;
-    return docsUnusable(run.opened, run.spansDeals, REPLY_KEYS, kit.where, undefined, run.gone)(text);
+    const canRequest = (value: unknown) =>
+      typeof value === 'string' && (run.canRequest(value) || attachment.missing.includes(value));
+    const checked = forDocumentCheck(text, canRequest);
+    return docsUnusable(attachment.opened, run.spansDeals, REPLY_KEYS, kit.where, undefined, run.gone)(checked);
   }
 
   /** the turn's whole prompt; `history`: with the conversation's last messages and its transcript */
-  private prompt(history: boolean, listing: string, turnLine: string, docLine: (s: Sent) => string): string {
+  private prompt(history: boolean, listing: string, turnLine: string, docLine: (s: Sent) => string,
+    attachment: ReadAttachment): string {
     const { question, run } = this;
     const transcript = this.conversation.transcript;
-    const shown = run.shown();
+    const { shown, done, got } = attachment;
     // the turn's steps are numbered only to list them; nothing is mapped back by number (#1162)
-    const doneSoFar = run.done.map((x, i) => `${i + 1}. ${x}`).join('\n\n');
+    const doneSoFar = done.map((x, i) => `${i + 1}. ${x}`).join('\n\n');
     return [
       question.about ? `${question.about}\n` : '',
       history && question.history ? `Earlier in this conversation:\n${question.history}\n\n` : '',
@@ -309,7 +339,7 @@ class Answering {
         : '',
       `Question: ${question.message}\n\n`,
       shown.length ? `Documents opened so far (cite them by id):\n${shown.map(docLine).join('\n')}\n\n` : '',
-      run.whole.length ? `Given to you whole with this message:\n${listing}\n\n` : '',
+      got.length ? `Given to you whole with this message:\n${listing}\n\n` : '',
       `What you have done so far:\n${doneSoFar}`,
       run.notes ? `\n\nYour notes so far: ${run.notes}` : '',
       `\n\n${turnLine}`,

@@ -78,7 +78,7 @@ import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
 import { AI_DRAFTED, questionIdsIn, questionsForIds, responseHeader } from './qaRow';
 import { citesUnsent, docHandle, docsUnusable, namesOnlyShown, sentAs, unknownIds, unknownInPairs } from './recordIds';
-import type { DealDoc, Looked, Unusable } from './agentKit';
+import type { DealDoc, Looked, Unusable, WholeFiles } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
 } from '../domain/memo';
@@ -1335,7 +1335,7 @@ export function nodeAi(o: AiOptions) {
   /**
    * The chat's document search as fixed pages (#1102): the keyword ranking as `top` gives it with no room set, only the
    * documents that answer to a word of the query, best first, across deals in turn as `folderList` takes them. A page
-   * of it is cut as a folder read's batches are (agentFolder.ts `batchesOf`).
+   * of it is cut as a folder read's batches are (agentBatches.ts `batchesOf`).
    */
   async function searchRanking(deals: string[], query: string): Promise<DealDoc[]> {
     const per = await Promise.all(deals.map(async (dealId) =>
@@ -1552,73 +1552,128 @@ export function nodeAi(o: AiOptions) {
    * pipeline A the markup's strike-through and colors may not reach it, so deleted words can read as kept ones.
    */
   function blacklineLine(s: Sent, mine: Sent[], cleanId: string | null | false, against: Against,
-    idOf: (x: Sent) => string): string {
+    idOf: (x: Sent) => string, prior?: WholeFiles): string {
     const id = idOf(s);
-    const clean = cleanId ? mine.find((x) => x.rec.docId === cleanId) : undefined; const rec = cleanId ? o.docs.records(s.dealId).find((r) => r.docId === cleanId) : undefined;
-    // a standalone blackline: no clean draft is in the data room, so what it shows is never taken as the deal's terms
-    const of = clean
-      ? `its clean draft is ${idOf(clean)}. ${idOf(clean)} is what the deal's terms are`
-      : rec
-        ? `its clean draft is ${where(rec)}, which is not given here. The terms are what that clean draft says`
-      : cleanId === false
-        ? 'no clean draft of it was found by its cover or name. '
-          + 'What it shows is not confirmed as the deal\'s terms: say so wherever you rely on it'
-        : 'which clean draft it goes with is not clear. The terms are what a clean draft says';
-    const sees = (o.blackline ?? control.blackline.pipeline) === 'A' ? ' Its strike-through and colors may not come through to you, so deleted words can read as if they were kept: be careful which wording is the new one.' : ' Struck-through words are deleted and colored words are inserted.';
-    // what it was compared against (docs/other-project-documents-design.md): only this deal's own earlier draft makes its changes the deal's
-    const vs = against === 'own' ? '' : against === 'other' && cleanId === false
-      ? ` ${id} was made on another project: neither side of it is this deal's. Use it only to compare, and cite it `
-        + 'only beside a document of this deal.'
-      : against === 'other'
-        ? ` ${id} compares this deal's draft with another project's document. Its deleted wording is the other `
-          + 'project\'s, not an earlier draft of this deal: never report a deletion or insertion as a change made in '
-          + 'this deal.'
-      : ` ${id} compares its clean draft with another document, which may be an earlier draft of this deal or another `
-        + 'project\'s. Do not report a difference as a change made in this deal unless a draft of this deal shows it.';
-    const alone = against === 'own' ? '' : ` By itself it never shows that a finding is put right or that its problem is back.`;
+    const of = cleanDraftLine(s.dealId, mine, cleanId, idOf, prior);
+    const sees = (o.blackline ?? control.blackline.pipeline) === 'A'
+      ? ' Its strike-through and colors may not come through to you, so deleted words can read as if they were kept: '
+        + 'be careful which wording is the new one.'
+      : ' Struck-through words are deleted and colored words are inserted.';
+    const vs = comparedWith(id, against, cleanId === false);
+    const alone = against === 'own' ? ''
+      : ' By itself it never shows that a finding is put right or that its problem is back.';
     const compared = against === 'own' ? 'drafts' : 'documents';
     return `  ${id} is a blackline: a comparison of two ${compared} with the changes marked, made by a comparison `
       + `tool; ${of}. Read ${id} only for what changed, and give each change as what ${id} appears to show, citing `
       + `its page.${sees}${vs}${alone}`;
   }
+
+  function cleanDraftLine(dealId: string, mine: Sent[], cleanId: string | null | false,
+    idOf: (x: Sent) => string, prior?: WholeFiles): string {
+    if (cleanId === false) {
+      return 'no clean draft of it was found by its cover or name. '
+        + 'What it shows is not confirmed as the deal\'s terms: say so wherever you rely on it';
+    }
+    if (!cleanId) return 'which clean draft it goes with is not clear. The terms are what a clean draft says';
+    const rec = o.docs.records(dealId).find((r) => r.docId === cleanId);
+    const inCall = mine.find((x) => x.rec.docId === cleanId);
+    const earlier = rec && wasSent(prior, dealId, cleanId) ? { dealId, rec } : undefined;
+    const clean = inCall ?? earlier;
+    if (clean) return `its clean draft is ${idOf(clean)}. ${idOf(clean)} is what the deal's terms are`;
+    if (rec) {
+      return `its clean draft is ${where(rec)}, which is not given here. The terms are what that clean draft says`;
+    }
+    return 'which clean draft it goes with is not clear. The terms are what a clean draft says';
+  }
+
+  /** Only a comparison with this deal's own early draft makes the changes this deal's. */
+  function comparedWith(id: string, against: Against, standalone: boolean): string {
+    if (against === 'own') return '';
+    if (against === 'other' && standalone) {
+      return ` ${id} was made on another project: neither side of it is this deal's. Use it only to compare, `
+        + 'and cite it only beside a document of this deal.';
+    }
+    if (against === 'other') {
+      return ` ${id} compares this deal's draft with another project's document. Its deleted wording is the other `
+        + 'project\'s, not an earlier draft of this deal: never report a deletion or insertion as a change made in '
+        + 'this deal.';
+    }
+    return ` ${id} compares its clean draft with another document, which may be an earlier draft of this deal `
+      + 'or another project\'s. Do not report a difference as a change made in this deal unless a draft of this deal '
+      + 'shows it.';
+  }
+
+  function wasSent(prior: WholeFiles | undefined, dealId: string, docId: string): boolean {
+    return !!prior?.some((doc) => doc.dealId === dealId && doc.docId === docId);
+  }
+
+  /** A chat blackline needs its clean draft in this batch or earlier in this specific model context (#1430). */
+  function chatFiles(dealId: string, available: Sent[], prior: WholeFiles): Sent[] {
+    const { pairs } = kindsOf(dealId);
+    const inCall = new Set(available.map(({ rec }) => rec.docId));
+    return available.filter(({ rec }) => {
+      const clean = pairs.get(rec.docId);
+      return !clean || inCall.has(clean) || wasSent(prior, dealId, clean);
+    });
+  }
+
+  const chatSend: AgentKit['send'] = (sent, spansDeals, share, prior = []) => send(sent, spansDeals, share, prior);
+
   /**
    * Put these documents in the store and describe them for the prompt. `got` are the ones that are really there: a
    * document whose file cannot be found on this PC is left out, and nothing may be recorded as read from it. A
    * draft's tracked changes are listed as `share` leaves them (#1381). `spansDeals`: the prompt spans several deals,
    * so each document is named with its deal (#1162).
    */
-  async function send(sent: Sent[], spansDeals: boolean, share: ChangeShare):
+  async function send(sent: Sent[], spansDeals: boolean, share: ChangeShare, prior?: WholeFiles):
     Promise<{ files: string[]; listing: string; got: Sent[] }> {
-    const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
+    const files: string[] = [];
+    const lines: string[] = [];
+    const got: Sent[] = [];
     const idOf = (s: Sent) => docHandle(s, spansDeals);
     // the passages this request lists are counted afresh (#1381)
     share.listed = 0;
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
-      const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
-      describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
-      for (const s of mine) {
-        const id = ids[s.rec.docId]; if (!id) continue; files.push(id); got.push(s);
-        const rec = o.docs.records(dealId).find((r) => r.docId === s.rec.docId) ?? s.rec;          // a Word file's pages are counted when it is first sent, just now
-        lines.push(`${idOf(s)}: ${where(rec)}${rec.pages ? ` (${rec.pages} pages)` : ''}`);
-        // a draft's pages show its tracked changes as markup: say so, and send the changes themselves, read from the
-        // file, which are fact
-        if (rec.tracked) {
-          lines.push(`  ${idOf(s)} has ${rec.tracked} tracked changes. Its pages show them as markup, `
-            + 'so its wording is proposed, not agreed.');
-          lines.push(...await changesOf(dealId, idOf(s), rec.docId, share));
-        }
-        const k = kindsOf(dealId);
-        const against = k.against.get(rec.docId) ?? 'own';
-        if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, against, idOf));
-        // another project's document (docs/other-project-documents-design.md): read, never a main source
-        else if (k.precedents.has(rec.docId)) {
-          lines.push(`  ${idOf(s)} is another project's document, not this deal's. Its terms are never this deal's: `
-            + 'use it only to compare, and cite it only beside a document of this deal. By itself it never shows that '
-            + 'a finding is put right or that its problem is back.');
-        }
+      const mine = sent.filter((s) => s.dealId === dealId);
+      const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
+      const loaded = mine.filter((s) => ids[s.rec.docId]);
+      const available = prior ? chatFiles(dealId, loaded, prior) : loaded;
+      const withheld = loaded.filter((doc) => !available.includes(doc));
+      // Prioritize descriptions as before, except for chat blacklines withheld from this read.
+      describeSoon(dealId, mine.filter((doc) => !withheld.includes(doc)).map((doc) => doc.rec.docId));
+      for (const s of available) {
+        files.push(ids[s.rec.docId]);
+        got.push(s);
+        lines.push(...await documentListing(s, available, idOf, share, prior));
       }
     }
     return { files, listing: lines.join('\n'), got };
+  }
+
+  /** In a prompt, label a file and the limits of what it can show. */
+  async function documentListing(s: Sent, available: Sent[], idOf: (x: Sent) => string,
+    share: ChangeShare, prior?: WholeFiles): Promise<string[]> {
+    const { dealId } = s;
+    // A Word file's pages are counted when it is first sent.
+    const rec = o.docs.records(dealId).find((r) => r.docId === s.rec.docId) ?? s.rec;
+    const id = idOf(s);
+    const pages = rec.pages ? ` (${rec.pages} pages)` : '';
+    const lines = [`${id}: ${where(rec)}${pages}`];
+    if (rec.tracked) {
+      lines.push(`  ${id} has ${rec.tracked} tracked changes. Its pages show them as markup, `
+        + 'so its wording is proposed, not agreed.');
+      lines.push(...await changesOf(dealId, id, rec.docId, share));
+    }
+    const { pairs, against, precedents } = kindsOf(dealId);
+    if (pairs.has(rec.docId)) {
+      const compared = against.get(rec.docId) ?? 'own';
+      lines.push(blacklineLine(s, available, pairs.get(rec.docId) ?? null, compared, idOf, prior));
+    } else if (precedents.has(rec.docId)) {
+      lines.push(`  ${id} is another project's document, not this deal's. Its terms are never this deal's: `
+        + 'use it only to compare, and cite it only beside a document of this deal. By itself it never shows that '
+        + 'a finding is put right or that its problem is back.');
+    }
+    return lines;
   }
   /** those of some documents that can be put in the store from this PC. A store that cannot take them is none of them; only a service that cannot be reached throws. */
   /** `unsent`, when given, is filled with the ids of those that could not be put in the store, so a reason names only them */
@@ -1707,7 +1762,8 @@ export function nodeAi(o: AiOptions) {
   const live = async <T>(kind: 'finding' | 'question', dealId: string): Promise<T[] | null> => { const r = await o.repo.list(kind, dealId); return r.ok ? r.value.map((l) => l.envelope.data as T) : null; };
   /** what the chat agent is made of: the main session's turns, with search (the helper below reads on the fast model) and read; the checks reuse it to fill their gaps (`fill`) */
   const agentKit: AgentKit = {
-    models, records: (d) => o.docs.records(d), words, send, fit, where, cleanDrafts: cleanDraftsOf, rules: RULES,
+    models, records: (d) => o.docs.records(d), words, send: chatSend, fit, where,
+    cleanDrafts: cleanDraftsOf, rules: RULES,
     now: () => Date.now(),
     askJson: (input, keys, shape) => askJson(input, keys, shape),
     folder: (deals, said, what) => folderList(deals, said, what),
@@ -1797,7 +1853,8 @@ export function nodeAi(o: AiOptions) {
     Promise<Result<Record<string, unknown> | null>> {
     const unopened = { kind: 'failed', message: 'The documents for this could not be opened on this PC' } as const;
     return withFewerChanges(async (share) => {
-      const { files, listing, got } = await send(sent, asking.deals.length > 1, share);
+      const sendRound = asking.kind === 'search' ? chatSend : send;
+      const { files, listing, got } = await sendRound(sent, asking.deals.length > 1, share);
       // a finding is not reassessed on part of what was chosen while the rest is out of reach
       if (asking.kind === 'reassess' && lostSome(sent, got)) return fail(unopened);
       if (got.length < sent.length) sent.splice(0, sent.length, ...got);

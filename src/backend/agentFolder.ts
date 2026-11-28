@@ -6,10 +6,10 @@
 import { prose } from './lenient';
 import { folderKey } from './folderList';
 import type { AgentRun } from './agentRun';
-import { cites, dealDocKey, foundAt, sameDoc, withPlaces } from './agentRun';
+import { cites, dealDocKey, foundAt, withPlaces } from './agentRun';
+import { batchesOf, sameDoc, type Batch } from './agentBatches';
 import { codeOf, type AgentKit, type Cited, type DealDoc, type Run, type Sent } from './agentKit';
 import type { ResearchStep } from '../ports';
-import type { DocRecord } from './documents';
 import { batchAsk, noun, oneLine, quoted } from './agentPrompts';
 import { docsUnusable } from './recordIds';
 import { withFewerChanges, type ChangeShare } from './limits';
@@ -35,12 +35,10 @@ const KEPT = 30;
 type Place = { read: Set<string>; agreed: boolean };
 /** a folder as listed for this run, by the folder's own name (or names, `; `-separated) */
 type FolderList = { label: string; docs: DealDoc[] };
-/** one batch of a folder read: its documents, and the places in the folder of the first and last it reads */
-export type Batch = { first: number; last: number; recs: DealDoc[] };
 /** what a batch found, for the main session */
 type BatchFinding = { at: string; ids: string; text: string; places: string; got: Sent[] };
-/** one batch being read: its step, and the documents opened for it, with those opened before it */
-type BatchReading = { index: number; batch: Batch; at: string; step: ResearchStep; sent: Sent[]; had: Set<Sent> };
+/** one batch being read with its step in the research trail */
+type BatchReading = { index: number; batch: Batch; at: string; step: ResearchStep };
 
 /** keep the last few of a map, the most recent last */
 function keepRecent<V>(map: Map<string, V>, key: string, value: V): void {
@@ -205,6 +203,8 @@ class FolderPass {
   private quietBatches = 0;
   /** why each batch that could not be read was not, in the batches' order */
   private readonly failed: string[] = [];
+  /** Files the helper could not open, even when the reply on the remaining files fails. */
+  private readonly omitted: DealDoc[][] = [];
   /** the next batch to start */
   private nextBatch = 0;
   private fast = '';
@@ -270,7 +270,8 @@ class FolderPass {
   /** a batch's documents sent and the fast model's reply on them; null when none of them could be opened on this PC */
   private async askBatch(reading: BatchReading, share: ChangeShare) {
     const { kit } = this.run;
-    const { files, listing, got } = await kit.send(reading.sent, this.run.spansDeals, share);
+    const { files, listing, got } = await kit.send(reading.batch.recs, this.run.spansDeals, share);
+    this.omitted[reading.index] = reading.batch.recs.filter((doc) => !got.some((sent) => sameDoc(sent, doc)));
     if (!got.length) {
       return null;
     }
@@ -281,16 +282,13 @@ class FolderPass {
     return { got, reply: await kit.askJson(ask, BATCH_KEYS, '{"text": "…", "sources": […]}') };
   }
 
-  /** a batch's step, and its documents opened to be listed to the model */
+  /** a batch's step before attaching its files to the helper */
   private startBatch(index: number): BatchReading {
     const batch = this.batches[index];
     const at = batch.first === batch.last ? `Document ${batch.first}` : `Documents ${batch.first}–${batch.last}`;
     const text = `Reviewed ${at.toLowerCase()} of ${this.folder.toRead} in ${quoted(this.folder.label)}`;
     const step = this.run.step({ kind: 'read', text });
-    // opened to be listed to the model; a document it was not given after all is not opened, nor counted
-    const had = new Set(this.run.opened);
-    const sent = batch.recs.map((x) => this.run.open(x.dealId, x.rec));
-    return { index, batch, at, step, sent, had };
+    return { index, batch, at, step };
   }
 
   /** what a batch asks of the fast model */
@@ -304,16 +302,21 @@ class FolderPass {
   private keep(reading: BatchReading, got: Sent[], reply: Record<string, unknown>): void {
     const { kit } = this.run;
     const { batch, step } = reading;
-    this.unopenNew(reading, got);
+    const missing = this.omitted[reading.index].length;
+    if (missing) {
+      this.failed[reading.index] = `${reading.at.toLowerCase()} (${missing} could not be opened on this PC)`;
+    }
     this.readCount += got.length;
     for (const x of batch.recs) if (got.some((g) => sameDoc(g, x))) this.readNow.add(dealDocKey(x));
     const { text, sources } = kit.fit(prose(reply.text).join(' '), reply.sources as Cited[], got, true);
-    const ids = this.run.idsOf(sources);
     // a document that said nothing on this is not listed to the model again; one cited is
-    for (const s of got) {
-      if (sources.some((x) => cites(x, s))) this.run.quiet.delete(s);
-      else if (!reading.had.has(s)) this.run.quiet.add(s);
-    }
+    const opened = got.map((doc) => {
+      const had = this.run.opened.some((sent) => sameDoc(sent, doc));
+      const sent = this.run.open(doc.dealId, doc.rec);
+      if (!had && !sources.some((source) => cites(source, sent))) this.run.quiet.add(sent);
+      return sent;
+    });
+    const ids = this.run.idsOf(sources);
     if (sources.length) step.found = sources.map(foundAt);
     if (!sources.length) {
       this.quietBatches++;
@@ -325,21 +328,15 @@ class FolderPass {
       ids: got.map((x) => this.run.idOf(x)).join(', '),
       text: withPlaces(text, ids, sources),
       places: [...new Set(sources.map((x, i) => `${ids[i]} ${x.loc}`))].join(', '),
-      got,
+      got: opened,
     };
     finish(step, `${sources.length} ${noun(sources.length, 'passage')}`);
   }
 
-  /** a batch that could not be read: its new documents are not opened, and why is told to the main session */
+  /** a batch that could not be read: tell the main session why */
   private notRead(reading: BatchReading, why: string, result: string): void {
-    this.unopenNew(reading, []);
     this.failed[reading.index] = `${reading.at.toLowerCase()} (${why})`;
     finish(reading.step, result);
-  }
-
-  /** the documents opened for this batch that were new to it and the model was not given are not opened */
-  private unopenNew(reading: BatchReading, keep: Sent[]): void {
-    for (const s of reading.sent) if (!keep.includes(s) && !reading.had.has(s)) this.run.unopen(s);
   }
 
   /**
@@ -349,14 +346,38 @@ class FolderPass {
    */
   result(heading: string): string {
     const failed = this.failed.some(Boolean) ? `\nNot read: ${this.failed.filter(Boolean).join('; ')}.` : '';
-    if (!this.findings.some(Boolean)) return `${heading}\nNone of them says anything about it.${failed}`;
+    if (!this.findings.some(Boolean)) {
+      const result = `${heading}\nNone of them says anything about it.${failed}`;
+      return result + this.omissionDetails(this.room - result.length);
+    }
     const quiet = this.quietBatches
       ? `\n${this.quietBatches} ${noun(this.quietBatches, 'batch', 'batches')} said nothing about it; their documents `
         + 'are not listed, but can be read by path.'
       : '';
     const said = `${heading}\nWhat they say:`;
-    const found = this.boundedFindings(this.room - `${said}${quiet}${failed}`.length);
-    return `${said}${found.map((x) => `\n${x}`).join('')}${quiet}${failed}`;
+    const room = this.room - `${said}${quiet}${failed}`.length;
+    const found = this.boundedFindings(room);
+    const omitted = this.omissionDetails(room - found.cost);
+    return `${said}${found.lines.map((x) => `\n${x}`).join('')}${quiet}${failed}${omitted}`;
+  }
+
+  /** Use the existing folder result budget for retry handles as well as passages (#480, #1430). */
+  private omissionDetails(room: number): string {
+    const missing = [...new Map(this.omitted.flat().map((doc) => [dealDocKey(doc), doc])).values()];
+    if (!missing.length || room <= 0) return '';
+    const heading = '\nUnavailable files (ask to read by id):\n';
+    const lines = missing.map((doc) => this.run.readLine(doc).length + 1);
+    const total = heading.length + lines.reduce((sum, length) => sum + length, -1);
+    if (total <= room) return heading + this.run.readList(missing);
+
+    let left = room - heading.length - moreOmitted(missing.length).length + 1;
+    let count = 0;
+    while (count < lines.length && lines[count] <= left) {
+      left -= lines[count++];
+    }
+    const tail = moreOmitted(missing.length - count);
+    if (!count) return tail.length <= room ? tail : '';
+    return heading + this.run.readList(missing.slice(0, count)) + tail;
   }
 
   /**
@@ -364,7 +385,7 @@ class FolderPass {
    * past it is counted, and its documents are not listed to the model, so the prompt stays bounded however large the
    * folder. The line counting them takes room too, so the findings are fitted again until it fits beside them.
    */
-  private boundedFindings(room: number): string[] {
+  private boundedFindings(room: number): { lines: string[]; cost: number } {
     let reserve = 0;
     let fit = this.fitFindings(room);
     // fewer findings fit beside a longer line, which counts more of them: the reserve only grows, up to the line that
@@ -374,14 +395,15 @@ class FolderPass {
       fit = this.fitFindings(room - reserve);
     }
     for (const x of fit.over.flat()) this.run.quiet.add(x);
-    return fit.over.length ? [...fit.lines, moreLine(fit.over.length)] : fit.lines;
+    if (!fit.over.length) return { lines: fit.lines, cost: fit.used };
+    return { lines: [...fit.lines, moreLine(fit.over.length)], cost: fit.used + moreCost(fit.over.length) };
   }
 
   /**
    * the batches' findings that fit `room`, each line with the line break before it and the documents it newly lists;
    * past it, the new documents of each batch left over
    */
-  private fitFindings(room: number): { lines: string[]; over: Sent[][] } {
+  private fitFindings(room: number): { lines: string[]; over: Sent[][]; used: number } {
     let used = 0;
     const lines: string[] = [];
     const over: Sent[][] = [];
@@ -399,8 +421,12 @@ class FolderPass {
         over.push(newDocs);
       }
     }
-    return { lines, over };
+    return { lines, over, used };
   }
+}
+
+function moreOmitted(count: number): string {
+  return `\n${count} more unavailable ${noun(count, 'file')} in those batches. Ask to read that folder again.`;
 }
 
 /** what the line counting the batches past the room adds to the result, with the line break before it */
@@ -425,42 +451,4 @@ function fittingLine(full: string, short: string, used: number, room: number): s
 /** a step done, with its result */
 function finish(step: ResearchStep, result: string): void {
   Object.assign(step, { result, done: true });
-}
-
-/**
- * Documents in their order cut into batches of `width` each, one call each: a blackline goes with its clean draft
- * (which may be outside the list), and a batch it would overflow ends where it is, so the next one starts with the
- * pair. Each batch keeps the places in the list of the first and last document it reads. A folder read's batches, and
- * the pages of the chat's document search (agentSearch.ts).
- */
-export function batchesOf(todo: DealDoc[], cleanDrafts: AgentKit['cleanDrafts'], width: number): Batch[] {
-  const batches: Batch[] = [];
-  const cleansOf = new Map<string, Map<string, DocRecord>>();
-  for (let i = 0; i < todo.length; i++) {
-    const doc = todo[i];
-    const pair = [...withCleanDraft(doc, cleanDrafts, cleansOf), doc];
-    let current = batches.at(-1);
-    const notIn = (batch: Batch) => pair.filter((p) => !batch.recs.some((y) => sameDoc(y, p)));
-    const full = !!current && current.recs.length > 0 && current.recs.length + notIn(current).length > width;
-    if (!current || full) {
-      current = { first: i + 1, last: i + 1, recs: [] };
-      batches.push(current);
-    }
-    current.recs.push(...notIn(current));
-    current.last = i + 1;
-  }
-  return batches;
-}
-
-/** a document's clean draft, when it is a blackline that has one; each deal's pairs looked up once (`cleansOf`) */
-function withCleanDraft(doc: DealDoc, cleanDrafts: AgentKit['cleanDrafts'],
-  cleansOf: Map<string, Map<string, DocRecord>>): DealDoc[] {
-  if (!cleanDrafts) return [];
-  let cleans = cleansOf.get(doc.dealId);
-  if (!cleans) {
-    cleans = cleanDrafts(doc.dealId);
-    cleansOf.set(doc.dealId, cleans);
-  }
-  const clean = cleans.get(doc.rec.docId);
-  return clean ? [{ dealId: doc.dealId, rec: clean }] : [];
 }

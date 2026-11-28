@@ -11,6 +11,8 @@ import type { ChangeShare } from './limits';
 export interface Sent { dealId: string; rec: DocRecord }
 /** a document of a deal, before it is given to a model */
 export interface DealDoc { dealId: string; rec: DocRecord }
+/** Whole files accepted by the same model conversation before this chat turn. */
+export type WholeFiles = readonly ModelThread['opened'][number][];
 /** a citation as a model writes it */
 export interface Cited {
   doc?: unknown;
@@ -70,9 +72,10 @@ export interface AgentKit {
   words(text: string, dealId?: string): Set<string>;
   /**
    * put documents in the store and list them for a prompt, each by its id (`spansDeals`: with its deal), a draft's
-   * tracked changes as `share` leaves them (#1381); `got` are those really there
+   * tracked changes as `share` leaves them (#1381); `got` are those really there. A paired blackline needs a clean
+   * draft in this batch or among the `prior` whole files of this chat context (#1430).
    */
-  send(sent: Sent[], spansDeals: boolean, share: ChangeShare):
+  send(sent: Sent[], spansDeals: boolean, share: ChangeShare, prior?: WholeFiles):
     Promise<{ files: string[]; listing: string; got: Sent[] }>;
   /** keep the citations that can be stood behind, renumbering the markers in the text */
   fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean): { text: string; sources: Source[] };
