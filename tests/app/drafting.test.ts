@@ -135,7 +135,8 @@ async function mergeFixture(others: number[] = []) {
     dealId, questionId: q.id, response: APP_RESPONSE,
   }, { quiet: true })).toMatchObject({ ok: true });
   expect(await keepImportedLog(store, dealId, {
-    path: `X:\\Deals\\Portfolio\\${LOG_NAME}`, sheet: 'Log', headerRow: 1, mapping: MAPPING, make: true, rows,
+    path: `X:\\Deals\\Portfolio\\${LOG_NAME}`, sheet: 'Log', headerRow: 1, columns: COLUMNS,
+    mapping: MAPPING, make: true, rows,
   })).toMatchObject({ ok: true });
   expect(await store.dispatch(RecordQaLogExport, {
     dealId, name: LOG_NAME.replace(/\.csv$/, ''),

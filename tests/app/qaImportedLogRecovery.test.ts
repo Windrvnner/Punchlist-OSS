@@ -5,6 +5,7 @@ import { ChooseQaVersion, KeepQaLog, RecordQaLogExport } from '../../src/app/com
 import { submitQaImport } from '../../src/app/qaImport';
 import { chooseVersion } from '../../src/app/qaLog';
 import { qaKept } from '../../src/app/state';
+import { logHeaders } from '../../src/domain/qaLogLayout';
 import { readImportBytes } from '../../src/app/transfer';
 import { prepareImport } from '../../src/domain/importExport';
 import { failRecoveryWrite, operationWrite, recoveryApp, recoveryDeal } from './recoveryKit';
@@ -25,7 +26,7 @@ it.each([false, true])('keeps a newer conflict resolution after log retry (resto
     expect((await app.store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: initialRows })).ok).toBe(true);
     const question = Object.values(app.store.get().questions)[0];
     const name = 'Lender Q&A';
-    const log = { name, file, folder, sheet, headerRow, mapping };
+    const log = { name, file, folder, sheet, headerRow, mapping, headers: logHeaders(table) };
     expect((await app.store.dispatch(KeepQaLog, { dealId, log })).ok).toBe(true);
     const last = {
       archive: '', at: '2026-11-27T16:20:00.000Z', by: 'Peer',

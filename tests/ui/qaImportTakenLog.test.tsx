@@ -42,6 +42,7 @@ afterEach(() => {
 async function claimLog(app: RecoveryApp, dealId: string) {
   const log = {
     name: 'Lender Q&A', file: 'Lender Q&A.csv', folder: 'X:\\Deals\\Proseware\\Q&A', sheet: 'Sheet1', headerRow: 1,
+    headers: [{ label: 'Question', column: 0 }, { label: 'Response', column: 1 }],
     mapping: { text: 0, response: 1 },
   };
   expect((await app.store.dispatch(KeepQaLog, { dealId, log })).ok).toBe(true);
@@ -65,6 +66,7 @@ async function keepImportOf(app: RecoveryApp, dealId: string) {
   const read = await readImportBytes(app.store, 'Lender Q&A.csv', Uint8Array.from(new TextEncoder().encode(CSV)));
   if (!read.ok) throw new Error(read.error.message);
   const choices = {
+    headers: [{ label: 'Question', column: 0 }, { label: 'Response', column: 1 }],
     mapping: { text: 0, response: 1 }, path: PATH, mode: 'append', answered: true, makeLog: true, touched: true,
   };
   keepImport(importKey.qa(dealId), { table: read.value, choices });

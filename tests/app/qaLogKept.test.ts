@@ -46,7 +46,10 @@ async function setup() {
   const imported = prepareImport(rows, suggestMapping(columns)).rows.map((row) => ({ ...row, askedBy: FIRM }));
   const seeded = await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: imported }, { quiet: true });
   expect(seeded.ok).toBe(true);
-  expect((await keepImportedLog(store, dealId, { path: path.join(folder, FILE), sheet: 'Sheet1', headerRow: 1, mapping: suggestMapping(columns), make: true, rows })).ok).toBe(true);
+  expect((await keepImportedLog(store, dealId, {
+    path: path.join(folder, FILE), sheet: 'Sheet1', headerRow: 1, columns, mapping: suggestMapping(columns),
+    make: true, rows,
+  })).ok).toBe(true);
   const q = (i: number) => dealQuestions(store.get(), dealId).find((x) => x.text === text(i))!;
   return { folder, store, dealId, q };
 }

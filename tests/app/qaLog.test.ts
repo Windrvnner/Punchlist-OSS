@@ -18,40 +18,13 @@ import {
 import { suggestMapping } from '../../src/domain/importExport';
 import { ok, fail } from '../../src/domain/result';
 import type { QaLogFiles } from '../../src/ports';
+import { columns, files, headers, importedLog, LOG, PATH } from './qaLogFixture';
 
 const COMMANDS = [CreateDeal, CreateQuestion, SetResponse, EditQuestionField, SetQuestionStatus, KeepQaLog, SetQaLogFolder, RecordQaLogExport, RestoreQaLogs, ChooseQaVersion, RestoreQaVersion, TakeFromQaLog, RestoreQuestionSnapshots, Undo, RestoreVersion];
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 15, 10, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${String(seq++).padStart(7, '0')}` };
 
-const columns = ['No.', 'Question', 'Response'];
-const PATH = 'X:\\Deals\\Proseware\\Q&A\\Lender A Q&A.xlsx';
-/** the log's rows as the import read them */
-const LOG = [['1', 'What is the DSCR?', ''], ['2', 'Who is the EPC contractor?', 'Fabrikam']];
-/** a stand-in for the files: the log on the drive holds two questions; what each read and save was asked */
-function files(over: Partial<QaLogFiles> = {}) {
-  const saves: Parameters<QaLogFiles['save']>[0][] = []; const reads: Parameters<QaLogFiles['read']>[0][] = []; const made: Parameters<QaLogFiles['create']>[0][] = [];
-  const f: QaLogFiles = {
-    read: async (at) => {
-      reads.push(at);
-      return ok({
-        columns,
-        cols: [0, 1, 2],
-        lines: [2, 3],
-        lastRow: 3,
-        rows: [
-          ['1', 'What is the DSCR?', ''],
-          ['2', 'Who is the EPC contractor?', 'Fabrikam'],
-        ],
-        stamp: 's1',
-      });
-    },
-    save: async (req) => { saves.push(req); return ok({ status: 'written' as const, archive: `Lender A Q&A 2026-11-15 100${saves.length}.xlsx` }); },
-    create: async (req) => { made.push(req); return ok({ file: req.file }); },
-    ...over,
-  };
-  return { f, saves, reads, made };
-}
 async function make(qaLogs: QaLogFiles, picks: string[] = ['X:\\Deals\\Proseware\\Q&A v2'], path: string | null = PATH, rows = LOG) {
   const opts = { latency: [0, 0] as [number, number] }; const repo = memRepo(clock.now, disk());
   const asked: number[] = [];
@@ -61,7 +34,10 @@ async function make(qaLogs: QaLogFiles, picks: string[] = ['X:\\Deals\\Proseware
   const [q1, q2] = dealQuestions(store.get(), dealId);
   for (const q of [q1, q2]) await store.dispatch(EditQuestionField, { dealId, questionId: q.id, field: 'askedBy', value: 'Lender A' });
   await store.dispatch(SetResponse, { dealId, questionId: q2.id, response: 'Fabrikam' });
-  expect((await keepImportedLog(store, dealId, { path, sheet: 'Log', headerRow: 1, mapping: suggestMapping(columns), make: true, rows })).ok).toBe(true);
+  expect((await keepImportedLog(store, dealId, {
+    path, sheet: 'Log', headerRow: 1, columns,
+    mapping: suggestMapping(columns), make: true, rows,
+  })).ok).toBe(true);
   return { store, dealId, asked };
 }
 
@@ -71,31 +47,41 @@ describe('a deal\'s Q&A log', () => {
   });
   it('is the first file the deal imports, by where that file is: nothing of it is copied', async () => {
     const { store, dealId } = await make(files().f);
-    expect(store.get().deals[dealId].qaLogs).toEqual([{ name: 'Lender A Q&A', file: 'Lender A Q&A.xlsx', folder: 'X:\\Deals\\Proseware\\Q&A', sheet: 'Log', headerRow: 1, mapping: suggestMapping(columns), last: expect.objectContaining({ sent: expect.any(Object) }) }]);
+    expect(store.get().deals[dealId].qaLogs).toEqual([{
+      name: 'Lender A Q&A', file: 'Lender A Q&A.xlsx', folder: 'X:\\Deals\\Proseware\\Q&A',
+      sheet: 'Log', headerRow: 1, mapping: suggestMapping(columns), headers,
+      last: expect.objectContaining({ sent: expect.any(Object) }),
+    }]);
   });
   it('stays the one log when another party\'s list is imported; the same file imported again keeps where its table is', async () => {
     const { store, dealId } = await make(files().f);
-    await keepImportedLog(store, dealId, { path: 'C:\\Users\\a\\Downloads\\Bidder C questions.xlsx', sheet: 'Log', headerRow: 1, mapping: suggestMapping(columns), make: true, rows: LOG });
+    await keepImportedLog(store, dealId, {
+      path: 'C:\\Users\\a\\Downloads\\Bidder C questions.xlsx', sheet: 'Log', headerRow: 1, columns,
+      mapping: suggestMapping(columns), make: true, rows: LOG,
+    });
     expect(store.get().deals[dealId].qaLogs.map((l) => l.file)).toEqual(['Lender A Q&A.xlsx']);
-    await keepImportedLog(store, dealId, { path: PATH, sheet: 'Q&A', headerRow: 3, mapping: suggestMapping(columns), make: true, rows: LOG });
+    await keepImportedLog(store, dealId, { ...importedLog, path: PATH, sheet: 'Q&A', headerRow: 3 });
     expect(logOf(store, dealId)).toMatchObject({ file: 'Lender A Q&A.xlsx', sheet: 'Q&A', headerRow: 3 });
   });
   it('is never a file in one of the deal\'s document folders: that is a document, not the log', async () => {
     const { store, dealId } = await make(files().f, [], null);
     store.get().deals[dealId].folders.push({ path: 'X:\\Deals\\Proseware\\Data room', label: 'Data room', files: 1, size: '1 MB' } as never);
-    await keepImportedLog(store, dealId, { path: 'X:\\Deals\\Proseware\\Data room\\Q&A\\Lender Q&A.xlsx', sheet: 'Log', headerRow: 1, mapping: suggestMapping(columns), make: true, rows: LOG });
+    await keepImportedLog(store, dealId, {
+      path: 'X:\\Deals\\Proseware\\Data room\\Q&A\\Lender Q&A.xlsx', sheet: 'Log', headerRow: 1, columns,
+      mapping: suggestMapping(columns), make: true, rows: LOG,
+    });
     expect(store.get().deals[dealId].qaLogs).toEqual([]);
   });
   it('is a file only when the person leaves "Make this file the deal\'s Q&A log" checked at the import', async () => {
     const { store, dealId } = await make(files().f, [], null);
     expect(logChoice(store, dealId, PATH)).toBe('new');
-    await keepImportedLog(store, dealId, { path: PATH, sheet: 'Log', headerRow: 1, mapping: suggestMapping(columns), make: false, rows: LOG });
+    await keepImportedLog(store, dealId, { ...importedLog, path: PATH, make: false });
     expect(store.get().deals[dealId].qaLogs).toEqual([]);
   });
   it('is not offered again once the deal has one; its own file imported again is kept up to date without asking', async () => {
     const { store, dealId } = await make(files().f);
     expect([logChoice(store, dealId, PATH), logChoice(store, dealId, 'X:\\Other\\Bidder C.xlsx'), logChoice(store, dealId, null)]).toEqual(['same', null, null]);
-    await keepImportedLog(store, dealId, { path: PATH, sheet: 'Q&A', headerRow: 3, mapping: suggestMapping(columns), make: false, rows: LOG });
+    await keepImportedLog(store, dealId, { ...importedLog, path: PATH, sheet: 'Q&A', headerRow: 3, make: false });
     expect(logOf(store, dealId)).toMatchObject({ sheet: 'Q&A', headerRow: 3 });
   });
   it('is the same file when only the path\'s case or slashes differ, as Windows treats them', async () => {
@@ -225,7 +211,10 @@ describe('a deal\'s Q&A log', () => {
     const { store, dealId } = await make(f, undefined, PATH, box.file.rows);
     const q2 = dealQuestions(store.get(), dealId)[1];
     await store.dispatch(SetQuestionStatus, { dealId, questionId: q2.id, status: 'answered' }); await store.dispatch(EditQuestionField, { dealId, questionId: q2.id, field: 'responded', value: '2026-11-12' });
-    await keepImportedLog(store, dealId, { path: PATH, sheet: 'Log', headerRow: 1, mapping: suggestMapping(cols4), make: true, rows: box.file.rows });
+    await keepImportedLog(store, dealId, {
+      path: PATH, sheet: 'Log', headerRow: 1, columns: cols4,
+      mapping: suggestMapping(cols4), make: true, rows: box.file.rows,
+    });
     box.file = at('Outstanding', '11/20/2026');
     expect(await exportQaLog(store, dealId)).toMatchObject({ value: { status: 'written', changed: 1, kept: [] } }); expect(saves).toEqual([]);
     const q = store.get().questions[q2.id];
@@ -394,7 +383,7 @@ describe('a deal\'s Q&A log', () => {
       const { store, dealId, q, saves } = await twoVersions();
       expect((await chooseVersion(store, dealId, q().id, 'app')).ok).toBe(true);
       const rows = [['1', 'What is the DSCR?', ''], ['2', 'Who is the EPC contractor?', 'Contoso']];
-      expect((await keepImportedLog(store, dealId, { path: PATH, sheet: 'Log', headerRow: 1, mapping: suggestMapping(columns), make: false, rows })).ok).toBe(true);
+      expect((await keepImportedLog(store, dealId, { ...importedLog, path: PATH, make: false, rows })).ok).toBe(true);
       expect(qaVersions(store.get(), q())).toBe('');
       expect(await exportQaLog(store, dealId)).toMatchObject({ value: { status: 'written', updated: 1, kept: [] } });
       expect(saves[0].steps).toEqual([{ kind: 'cell', row: 2, col: 2, value: 'Fabrikam Construction' }]);
@@ -445,7 +434,7 @@ describe('a deal\'s Q&A log', () => {
     const had = store.get().deals[dealId].qaLogs;
     const log = {
       name: 'Lender A Q&A', file: 'Lender A Q&A.xlsx', folder: 'X:/Deals/Proseware/Q&A/', sheet: 'Log', headerRow: 1,
-      mapping: suggestMapping(columns),
+      mapping: suggestMapping(columns), headers,
     };
     const r = await store.dispatch(KeepQaLog, { dealId: other, log });
     expect(!r.ok && r.error.message).toMatch(said);
@@ -454,7 +443,10 @@ describe('a deal\'s Q&A log', () => {
   it('of two deals with one name, each keeps its own file: one file is one deal\'s log, and a log the app starts says which deal it is', async () => {
     const { f, made } = files(); const { store, dealId } = await make(f);                // the first Proseware's log is X:\\Deals\\Proseware\\Q&A\\Lender A Q&A.xlsx
     await store.dispatch(CreateDeal, { name: 'Proseware', folders: [], counterparty: 'Tailwind' }); const twin = Object.keys(store.get().deals).find((id) => id !== dealId)!; await store.loadDeal(twin);
-    expect((await keepImportedLog(store, twin, { path: 'X:\\Deals\\Proseware 2\\Lender A Q&A.xlsx', sheet: 'Log', headerRow: 1, mapping: suggestMapping(columns), make: true, rows: LOG })).ok).toBe(true);
+    expect((await keepImportedLog(store, twin, {
+      path: 'X:\\Deals\\Proseware 2\\Lender A Q&A.xlsx', sheet: 'Log', headerRow: 1, columns,
+      mapping: suggestMapping(columns), make: true, rows: LOG,
+    })).ok).toBe(true);
     const r = await store.dispatch(SetQaLogFolder, { dealId: twin, name: 'Lender A Q&A', folder: 'x:\\deals\\proseware\\q&a\\' });
     expect(!r.ok && r.error.message).toBe('Project Proseware already uses “Lender A Q&A.xlsx” in this folder as its Q&A log. Choose another folder');
     // the first deal moves its log away, the twin takes the folder, and the first move's Undo is refused rather than share it
