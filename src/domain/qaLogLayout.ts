@@ -13,7 +13,7 @@ export function logLayoutChanged() {
   return rejected('Remap in Import Q&A Log.');
 }
 
-/** Keep a selected unnamed column in a log read even when all its cells are now blank. */
+/** Keep a selected unnamed column in a log read when it still exists and its cells are blank. */
 export function selectedUnnamedColumns(layout: QaLogLayout): number[] {
   return Object.values(layout.mapping).flatMap((index) => {
     const header = index == null ? undefined : layout.headers[index];

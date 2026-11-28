@@ -187,14 +187,34 @@ it('can still write to a selected unnamed column after all its values have been 
   expect(read()).toEqual([headers, first, [second[0], second[1], response]]);
 });
 
-async function saveKeptFixture(folder: string, file: string, rows: string[][], sheets: SpreadsheetCodec) {
+it('stops if a selected unnamed column is deleted from the file', async () => {
+  const [first, second] = portfolio(2);
+  const { store, dealId, file, folder, write } = await linkedLog([NUMBER, QUESTION, ''], [
+    [first[0], first[1], 'Waiting for the consent letter'], second,
+  ], { response: 2 });
+  const item = dealQuestions(store.get(), dealId)[1];
+  value(await store.dispatch(SetResponse, {
+    dealId, questionId: item.id, response: 'The operator signed the consent letter.',
+  }));
+  await write([NUMBER, QUESTION], [first.slice(0, 2), second.slice(0, 2)]);
+  const original = fs.readFileSync(file);
+  expect(await exportQaLog(store, dealId)).toMatchObject({
+    ok: false, error: { kind: 'rejected', message: expect.stringContaining('Import Q&A Log') },
+  });
+  expect(fs.readFileSync(file)).toEqual(original);
+  expect(fs.existsSync(path.join(folder, '01. Archive'))).toBe(false);
+});
+
+async function saveKeptFixture(
+  folder: string, file: string, rows: string[][], sheets: SpreadsheetCodec, headings = ORIGINAL,
+) {
   const base = fs.readFileSync(file);
   const name = path.basename(file);
   const archive = path.join(folder, '01. Archive');
   fs.mkdirSync(archive);
   fs.writeFileSync(path.join(archive, `${path.basename(name, '.csv')} 2026-11-17 1000.csv`), base);
   const kept = path.join(folder, asideFixtureName(name, { base }));
-  const { bytes } = value(await sheets.write('Sheet1', [ORIGINAL, ...rows]));
+  const { bytes } = value(await sheets.write('Sheet1', [headings, ...rows]));
   fs.writeFileSync(kept, bytes);
   const stat = fs.statSync;
   const age = vi.spyOn(fs, 'statSync').mockImplementation(((file: fs.PathLike, options?: never) => {
@@ -204,6 +224,27 @@ async function saveKeptFixture(folder: string, file: string, rows: string[][], s
   }) as typeof fs.statSync);
   return { kept, stopAging: () => age.mockRestore() };
 }
+
+it('follows exact case-distinct headings when restoring retained responses', async () => {
+  const headers = [...ORIGINAL, 'response'];
+  const rows = portfolio(2_000).map((row) => [...row, '']);
+  const { store, dealId, folder, file, write, read } = await linkedLog(headers, rows, { response: 2 });
+  const answers = rows.map(([number, question], index) => [
+    number, question, index < 120 ? 'Approved by transaction counsel.' : '', '',
+  ]);
+  const { stopAging } = await saveKeptFixture(folder, file, answers, store.services.sheets, headers);
+  try {
+    const swapped = [NUMBER, QUESTION, 'response', RESPONSE];
+    await write(swapped, rows);
+    value(await exportQaLog(store, dealId));
+    const saved = read();
+    const misplaced = saved.slice(1, 121).filter((row) => row[2]).length;
+    expect(misplaced, 'retained edits written under lowercase response').toBe(0);
+    expect(saved).toEqual([swapped, ...answers.map(([number, question, reply]) => [number, question, '', reply])]);
+  } finally {
+    stopAging();
+  }
+}, 45_000);
 
 it('resolves the columns again when a save with kept edits is refused and the file is reread', async () => {
   const [first, second] = portfolio(2);

@@ -77,7 +77,7 @@ export function tableFrom(all: Sheet[], opts?: SheetReadOptions): ReadTable | nu
   const sheet = opts?.sheet && sheets.includes(opts.sheet) ? opts.sheet : sheets.find((n) => { const g = grids.get(n)!; return suggestMapping(g.table[findHeaderRow(g.table)]).text != null; }) ?? sheets[0];
   const { table, first } = grids.get(sheet)!;
   const included = new Set(opts?.includeColumns);
-  const width = Math.max(...table.map((row) => row.length), ...[...included].map((column) => column + 1));
+  const width = Math.max(...table.map((row) => row.length));
   const square = table.map((row) => [...row, ...Array(width - row.length).fill('')]);
   const h = opts?.headerRow != null ? Math.max(0, Math.min(square.length - 1, Math.round(opts.headerRow) - first)) : findHeaderRow(square);
   const header = square[h];
