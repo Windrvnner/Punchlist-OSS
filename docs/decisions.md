@@ -178,9 +178,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The Wording heading checkbox selects or clears every available suggestion, and each row keeps its own checkbox (#377).
 - A rewording accepted when a list was brought in is offered again for that list. Remapping sections keeps the review's
   choices for the same rows. Import asks for a fresh review if the destination items or General wording used for a
-  checked removal changed. A refreshed review or wording retry keeps the same row’s choices when the offered wording
-  matches exactly, including each part of a split. A new file, paste, or sheet starts a new review. While General is in two
-  versions, duplicate checks use only items both versions hold (#56).
+  checked removal changed. Refresh and Retry keep choices for the same rows when their offered wording or duplicate
+  matches still apply. This includes each part of a split and the exact General wording. A new file, paste, or sheet starts
+  a new review. While General is in two versions, duplicate checks use only items both versions hold (#56).
 - **Choose Columns** preselects a column only when its heading is a known name; otherwise the person picks it (#1018).
 - In an open checklist import, a review that needs the model waits for a pending review request. The Duplicates line
   and footer show the latest retry failure, and a partial check keeps its pairs and checked removals (#378).

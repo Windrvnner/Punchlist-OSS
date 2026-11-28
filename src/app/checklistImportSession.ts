@@ -242,7 +242,15 @@ export class ChecklistImportSession {
   setAskSame = (askSame: boolean) => this.choose({ askSame });
   setAskReword = (askReword: boolean) => this.choose({ askReword });
   flipBringIn = (line: number) => this.choose({ bringIn: toggled(this.choices.bringIn, line) });
-  flipRemove = (at: number) => this.choose({ remove: toggled(this.choices.remove, at) });
+  flipRemove = (at: number) => {
+    if (!this.live || this.busy === 'importing') return;
+    const review = this.review;
+    if (review?.pendingRemovals?.length) {
+      const pendingRemovals = review.pendingRemovals.filter((choice) => choice.at !== at);
+      this.review = { ...review, pendingRemovals };
+    }
+    this.choose({ remove: toggled(this.choices.remove, at) });
+  };
   flipReword = (at: number) => {
     if (!this.choices.remove.has(at)) this.choose({ useReword: toggled(this.choices.useReword, at) });
   };
@@ -395,20 +403,20 @@ export class ChecklistImportSession {
   }
 
   private showReview = (change: ChecklistReviewChange) => {
-    if (change.kind === 'fresh' || (change.kind === 'retry' && change.wording && !change.failure)) {
-      this.error = '';
-      const defaults = change.kind === 'fresh' ? change.checked : new Set<number>();
-      const { review, ...checked } = keepChecklistReviewChoices(this.review, change.review, defaults, this.choices);
-      this.review = review;
-      const opened = change.kind === 'fresh' ? { shown: true, askedFor: change.signature } : {};
-      this.choose({ ...opened, ...checked });
-    } else if (change.kind === 'retry') {
-      this.review = change.review;
-      if (change.failure) this.error = `${NOT_DONE[change.failure]} again`;
-      this.choose({ shown: change.open || this.choices.shown });
-    } else {
+    if (change.kind === 'open') {
       this.review = change.review;
       this.choose({ shown: true });
+      return;
+    }
+    const defaults = change.kind === 'fresh' ? change.checked : new Set<number>();
+    const { review, ...checked } = keepChecklistReviewChoices(this.review, change.review, defaults, this.choices);
+    this.review = review;
+    if (change.kind === 'fresh') {
+      this.error = '';
+      this.choose({ shown: true, askedFor: change.signature, ...checked });
+    } else {
+      if (change.failure) this.error = `${NOT_DONE[change.failure]} again`;
+      this.choose({ shown: change.open || this.choices.shown, ...checked });
     }
   };
 

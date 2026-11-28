@@ -1,7 +1,7 @@
 import { findList, key, listId, type FirmList, type Layer } from '../domain/checklist';
 import { alphabetical } from '../domain/order';
 import { sameContent } from '../domain/versions';
-import type { Review, WordingChoice } from './checklistImport';
+import type { RemovalChoice, Review, WordingChoice } from './checklistImport';
 import { usableFirm } from './commands/checklist';
 import { versionsWord, type State } from './state';
 
@@ -68,29 +68,41 @@ function duplicateChoices(review: Review) {
 function keepRemovals(previous: Review, current: Review, checked: Set<number>) {
   const was = duplicateChoices(previous);
   const now = duplicateChoices(current);
-  return new Set([...checked].filter((at) => {
-    const prior = was.get(at);
-    const matching = now.get(at);
-    return prior && matching && [...prior].every((pair) => matching.has(pair));
-  }));
+  const remembered = new Map<number, RemovalChoice>(previous.pendingRemovals?.map((choice) => [choice.at, choice]));
+  for (const at of checked) {
+    const pairs = was.get(at);
+    if (pairs) remembered.set(at, { at, pairs: [...pairs] });
+  }
+  const incomplete = current.sameMissed || current.asked.same === 'unreachable' || current.asked.same === 'failed';
+  const remove = new Set<number>();
+  const pendingRemovals: RemovalChoice[] = [];
+  for (const choice of remembered.values()) {
+    const matching = now.get(choice.at);
+    if (matching && choice.pairs.every((pair) => matching.has(pair))) remove.add(choice.at);
+    else if (incomplete) pendingRemovals.push(choice);
+  }
+  return { remove, pendingRemovals };
 }
 
 function keepWording(previous: Review, current: Review, checked: Set<number>, defaults: Set<number>) {
   const remembered = new Map<number, WordingChoice>(previous.pendingWording?.map((choice) => [choice.at, choice]));
-  for (const { at, text, also } of previous.rewords) {
-    remembered.set(at, { at, text, also, checked: checked.has(at) });
+  for (const { at, text, also, earlier } of previous.rewords) {
+    remembered.set(at, { at, text, also, earlier, checked: checked.has(at) });
   }
   const useReword = new Set<number>();
-  for (const { at, text, also } of current.rewords) {
+  for (const { at, text, also, earlier } of current.rewords) {
     const prior = remembered.get(at);
-    const applies = prior?.text === text && sameContent(prior.also, also);
+    const applies = prior?.text === text && !!prior.earlier === !!earlier && sameContent(prior.also, also);
     if (applies ? prior.checked : defaults.has(at)) useReword.add(at);
     remembered.delete(at);
   }
   const failed = current.asked.reword === 'unreachable' || current.asked.reword === 'failed';
   const excluded = new Set(current.noReword);
-  const pending = failed ? [...remembered.values()].filter(({ at }) => !excluded.has(at)) : [];
-  return { review: { ...current, pendingWording: pending.length ? pending : undefined }, useReword };
+  // A recalled approval that vanished was changed in the saved list, rather than missed by the model.
+  const pendingWording = failed
+    ? [...remembered.values()].filter(({ at, earlier }) => !earlier && !excluded.has(at))
+    : [];
+  return { useReword, pendingWording };
 }
 
 /** Carry choices only for the same reviewed rows, options and destination (#56). */
@@ -98,8 +110,7 @@ export function keepChecklistReviewChoices(previous: Review | null, review: Revi
   if (!previous || previous.choicesKey !== review.choicesKey || !sameContent(previous.items, review.items)) {
     return { review, useReword: checked, remove: new Set<number>() };
   }
-  return {
-    ...keepWording(previous, review, was.useReword, checked),
-    remove: keepRemovals(previous, review, was.remove),
-  };
+  const { useReword, pendingWording } = keepWording(previous, review, was.useReword, checked);
+  const { remove, pendingRemovals } = keepRemovals(previous, review, was.remove);
+  return { review: { ...review, pendingWording, pendingRemovals }, useReword, remove };
 }

@@ -248,8 +248,8 @@ A deal's checklist is made up of its own item records, linked to the findings an
   once more by the thorough model), and tied out so that every line is accounted for (`src/app/listRead.ts`,
   `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one
   **Undo** for all of them. The import session rebinds section metadata and refreshes recalled approvals.
-  The retained review keeps wording checks temporarily absent after a service failure, and restores a check only if the
-  same source row offers the exact wording again.
+  The retained review keeps checks inactive when a service failure leaves suggestions or matches unavailable. A
+  check returns only when the same row offers the same wording or all the same duplicate matches.
 - **An issues list** is attached or pasted as text, and read through `src/app/issuesList.ts`. The model reads the
   file once, then proposes titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command
   resolve the same matches through `src/app/issuesListJoins.ts`.

@@ -127,7 +127,8 @@ export interface Rewording {
   /** the further items an item split into */
   also?: string[];
 }
-export type WordingChoice = Pick<Rewording, 'at' | 'text' | 'also'> & { checked: boolean };
+export type WordingChoice = Pick<Rewording, 'at' | 'text' | 'also' | 'earlier'> & { checked: boolean };
+export type RemovalChoice = { at: number; pairs: string[] };
 
 export interface Review {
   choicesKey: string;
@@ -138,6 +139,8 @@ export interface Review {
   rewords: Rewording[];
   /** Choices for suggestions absent after a failed wording request, until the service returns them again. */
   pendingWording?: WordingChoice[];
+  /** Checked removals whose matches have not all been found by an incomplete duplicate check. */
+  pendingRemovals?: RemovalChoice[];
   pairs: Pair[];
   asked: { reword: Asked; same: Asked };
   sameMissed?: { kind: 'unreachable' | 'failed'; at: number[] };
@@ -325,7 +328,7 @@ type ReviewFailure = 'unreachable' | 'failed';
 export type ChecklistReviewChange =
   | { kind: 'open'; review: Review }
   | { kind: 'fresh'; review: Review; checked: Set<number>; signature: string }
-  | { kind: 'retry'; review: Review; failure: ReviewFailure | null; open: boolean; wording?: true };
+  | { kind: 'retry'; review: Review; failure: ReviewFailure | null; open: boolean };
 
 type ShowReview = (change: ChecklistReviewChange) => void;
 type ChecklistRequests = ReturnType<typeof checklistRequests>;
@@ -386,7 +389,7 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
       // Wording uses the imported items. General's items are only inputs to duplicate matching.
       const changed = requested.length !== currentTexts.length
         || requested.some((text, index) => text !== currentTexts[index]);
-      if (!changed) show({ kind: 'retry', ...next, open: false, wording: true });
+      if (!changed) show({ kind: 'retry', ...next, open: false });
     });
   }
   function next(plan: ReviewPlan, show: ShowReview) {
