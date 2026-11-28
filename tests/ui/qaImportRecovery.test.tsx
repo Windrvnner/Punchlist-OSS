@@ -8,6 +8,9 @@ import { ImportDialog } from '../../src/ui/qaImport';
 import { App } from '../../src/ui/app';
 import { importKey, initializeKeptImports, keptImport, keepImport, keptImportsReady } from '../../src/app/keptImports';
 import { MemoryKeptImports } from '../../src/adapters/keptImports';
+import { ImportQuestions } from '../../src/app/commands/importQuestions';
+import { prepareImport } from '../../src/domain/importExport';
+import { ELSEWHERE } from '../adapters/memRepo';
 import { readImportBytes, type ImportTable } from '../../src/app/transfer';
 import {
   copyRecoveryDisk, failRecoveryWrite, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal, type RecoveryApp,
@@ -307,3 +310,104 @@ it.each(['start over', 'replace'] as const)('keeps Append recovery when local st
   expect(next.store.get().deals[dealId].qaLogs[0].file).toBe('Lender Q&A.csv');
   await next.repo.close();
 });
+
+
+async function interruptedMergeFixture() {
+  const port = new MemoryKeptImports();
+  initializeKeptImports(port);
+  const app = recoveryApp();
+  const dealId = await recoveryDeal(app);
+  const key = importKey.qa(dealId);
+  const { table, choices } = await preparedImport(app, dealId);
+  const rows = prepareImport(table.rows, { ...table.mapping, ...choices.mapping }).rows;
+  const initialRows = [{ ...rows[0], response: 'Initial response' }];
+  expect((await app.store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: initialRows })).ok).toBe(true);
+  const question = Object.values(app.store.get().questions)[0];
+  keepImport(key, { choices: { ...choices, mode: 'merge' } });
+
+  const original = await openImport(app, dealId);
+  const hold = holdRecoveryWrite(app, (transaction) => operationWrite(transaction, 'ImportQuestions', 'succeeded'));
+  await act(() => original.querySelector<HTMLButtonElement>('#im-go')!.click());
+  await hold.entered;
+  const disk = copyRecoveryDisk(app.saved);
+  const parts = await port.read();
+  hold.release();
+  await vi.waitFor(() => expect(keptImport(key)).toBeUndefined());
+  app.store.closing();
+  await app.repo.close();
+
+  const retained = new MemoryKeptImports();
+  await retained.write(parts);
+  const reloadDraft = async () => {
+    const read = retained.read.bind(retained);
+    const hydration = vi.spyOn(retained, 'read').mockImplementation(async () => (await read()).map((part) => {
+      if (part.part !== 'table') return part;
+      const table = part.value as ImportTable;
+      return { ...part, value: { ...table, bytes: Uint8Array.from(table.bytes) } };
+    }));
+    initializeKeptImports(retained);
+    await keptImportsReady;
+    hydration.mockRestore();
+  };
+  return { disk, dealId, key, question, retained, reloadDraft };
+}
+
+it.each(['start over', 'replace'] as const)(
+  'preserves another PC’s response after local removal refuses %s', async (action) => {
+    const { disk, dealId, key, question, retained, reloadDraft } = await interruptedMergeFixture();
+    await reloadDraft();
+    const next = recoveryApp(disk);
+    const response = 'Newer response saved from another PC';
+    next.repo.peer.change('question', question.id, { ...question, response }, ELSEWHERE);
+    await next.store.boot();
+    await next.store.loadDeal(dealId, { gaps: false });
+    const interrupted = next.store.interruptedOps()[0];
+    expect(interrupted.command).toBe('ImportQuestions');
+    expect(interrupted.baseRevs?.[question.id]).toBe(question.rev);
+    expect(next.store.get().questions[question.id].response).toBe(response);
+
+    // Control: the original operation refuses to overwrite a newer revision.
+    expect(await next.store.retryOp(interrupted.id)).toMatchObject({ ok: false, error: { message: 'Changed since' } });
+    const form = await openImport(next, dealId);
+    const write = retained.write.bind(retained);
+    const persist = vi.spyOn(retained, 'write').mockImplementation((changes, replace) =>
+      changes.some((change) => 'drop' in change) ? Promise.resolve(false) : write(changes, replace));
+    if (action === 'start over') await confirmStartOver(form);
+    else await replaceImportFile(form);
+    await vi.waitFor(() => expect(form.textContent).toContain('Couldn’t clear'));
+    expect(keptImport(key)?.submission).toBeDefined();
+    persist.mockRestore();
+    const postFailure = copyRecoveryDisk(next.saved);
+    next.store.closing();
+    await next.repo.close();
+
+    await reloadDraft();
+    const restarted = recoveryApp(postFailure);
+    try {
+      await restarted.store.boot();
+      await restarted.store.loadDeal(dealId, { gaps: false });
+      const restored = await openImport(restarted, dealId);
+      await act(() => restored.querySelector<HTMLButtonElement>('#im-go')!.click());
+      await vi.waitFor(() => {
+        expect(!keptImport(key) || restored.textContent?.includes('Couldn’t import')).toBe(true);
+      });
+      const saved = await restarted.repo.get('question', question.id);
+      expect(saved).toMatchObject({ ok: true, value: { envelope: { data: { response } } } });
+      expect(Object.keys(restarted.store.get().questions)).toHaveLength(1);
+      expect(keptImport(key)?.submission).toBeDefined();
+
+      await confirmStartOver(restored);
+      await vi.waitFor(() => expect(keptImport(key)).toBeUndefined());
+      expect(restarted.store.interruptedOps()).toHaveLength(0);
+      await vi.waitFor(async () => {
+        const op = await restarted.repo.get('op', interrupted.id);
+        expect(op).toMatchObject({ ok: true, value: { envelope: { data: { state: 'discarded' } } } });
+        if (!op.ok || !op.value) throw new Error('The discarded operation could not be read');
+        expect((op.value.envelope.data as { idempotencyKey?: string }).idempotencyKey).toBeUndefined();
+      });
+    } finally {
+      restarted.store.closing();
+      await restarted.repo.close();
+    }
+  },
+);
