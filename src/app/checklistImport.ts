@@ -5,7 +5,10 @@
  * "Undo all" undoes each of them that has not changed since, and names the deals where something had.
  */
 import type { Store } from './store';
-import { BringInList, AddDealItems, RegroupDealItems, SetItemsOff, dealsForBringIn, missingItems, regrouped, usableFirm } from './commands/checklist';
+import {
+  BringInList, AddDealItems, RegroupDealItems, SetItemsOff, dealsForBringIn, missingItems, regrouped, usableFirm,
+  type ListReviewRevisions,
+} from './commands/checklist';
 import {
   findList, firmOf, itemId, itemsFor, key, LAYERS, listId, type FirmLayerList, type FirmList, type Layer, type ListItem,
 } from '../domain/checklist';
@@ -23,9 +26,9 @@ import { FIRM, versionsWord, type State } from './state';
 export interface BringInResult { opIds: string[]; items: number; deals: number; /** deals the items could not be added to, by name, and why */ missed: { deal: string; why: string }[] }
 
 type ListForImport = Pick<FirmLayerList, 'layer' | 'name' | 'items' | 'file' | 'fileDate'>;
-export async function bringIn(store: Store, list: ListForImport, reviewedRevision?: number | null) {
+export async function bringIn(store: Store, list: ListForImport, reviewed?: ListReviewRevisions) {
   const id = listId(list.layer, list.name);
-  const input = { list, reviewedRevision };
+  const input = { list, reviewed };
   const r = await store.dispatch(BringInList, input, { quiet: true, idempotencyKey: 'bring-in-list' });
   if (!r.ok) return r;
   // a list brought in again unchanged writes nothing, so there is nothing of it to undo: only an operation in the journal is
@@ -124,6 +127,8 @@ export interface Rewording {
 }
 export interface Review {
   destination: string;
+  destinationItems: ListItem[] | null;
+  generalTexts: string[];
   items: ListItem[];
   rewords: Rewording[];
   pairs: Pair[];
@@ -141,6 +146,7 @@ export const theList = (layer: Layer, name: string) => (layer === 'broad' ? 'The
 
 /** Which list the import brings in or replaces, as the person has chosen it so far. */
 export interface ListTarget {
+  id: string;
   layer: Layer;
   name: string;
   /** the general list needs no name; the others do, as deals will pick it */
@@ -155,6 +161,7 @@ export interface ListTarget {
   hasGeneral: boolean;
   /** the general list's items, which another list's items are checked against for duplicates */
   generalTexts: string[];
+  generalRevision: number;
 }
 
 export function listTarget(state: State, firm: FirmList, layer: Layer, name: string): ListTarget {
@@ -166,22 +173,23 @@ export function listTarget(state: State, firm: FirmList, layer: Layer, name: str
   const split = named ? state.conflicts[id] : undefined;
   const versions = split ? versionsWord(split.versions.length).toLowerCase() : '';
   const splitSays = split ? `${theList(layer, replaces?.name ?? name)} has ${versions}` : '';
-  const general = findList(firm, 'broad', '');
+  const general = state.firmList[listId('broad', '')];
   const generalTexts = layer === 'broad' ? [] : (general?.items ?? []).map((item) => item.text);
   const listNames = alphabetical(firm.lists.filter((list) => list.layer === layer).map((list) => list.name));
-  return { layer, name, named, replaces, revision, split, splitSays, generalTexts, listNames, hasGeneral: !!general };
+  return {
+    id, layer, name, named, replaces, revision, split, splitSays, generalTexts, listNames,
+    generalRevision: general?.rev ?? 0, hasGeneral: !!general,
+  };
 }
 
 /** What a new review is made from: the items, the person's choices, and the model's replies (null when not asked). */
 interface ReviewInput {
   items: ListItem[];
-  destination: string;
+  target: ListTarget;
   earlier: ReturnType<typeof earlierRewordings>;
-  generalTexts: string[];
   askReword: boolean;
   askSame: boolean;
-  canReword: boolean;
-  canAskSame: boolean;
+  can: Pick<Capabilities, 'reword' | 'sameMeaning'>;
   rewordReply: RewordReply | null;
   sameReply: SameMeaningReply | null;
 }
@@ -204,14 +212,14 @@ function pairsWordedTheSame(items: ListItem[], generalTexts: string[]) {
   return { later, same, inGeneral };
 }
 
-function rewordAsked({ askReword, canReword, rewordReply }: ReviewInput): Asked {
-  if (!askReword || !canReword) return 'off';
+function rewordAsked({ askReword, can, rewordReply }: ReviewInput): Asked {
+  if (!askReword || !can.reword) return 'off';
   return rewordReply?.ok ? 'done' : failedAs(rewordReply);
 }
 
-function sameAsked({ askSame, canAskSame, sameReply }: ReviewInput): Asked {
+function sameAsked({ askSame, can, sameReply }: ReviewInput): Asked {
   if (!askSame) return 'off';
-  return !canAskSame || sameReply?.ok ? 'done' : failedAs(sameReply);
+  return !can.sameMeaning || sameReply?.ok ? 'done' : failedAs(sameReply);
 }
 
 /**
@@ -219,9 +227,9 @@ function sameAsked({ askSame, canAskSame, sameReply }: ReviewInput): Asked {
  * be asked leaves its part out and says so. `checked` holds the rewordings taken last time, which start checked.
  */
 function makeReview(input: ReviewInput): { review: Review; checked: Set<number> } {
-  const { items, rewordReply, sameReply } = input;
+  const { items, rewordReply, sameReply, target } = input;
   const worded = input.askSame
-    ? pairsWordedTheSame(items, input.generalTexts)
+    ? pairsWordedTheSame(items, target.generalTexts)
     : { later: new Set<number>(), same: [], inGeneral: [] };
   const found = new Set([...worded.same, ...worded.inGeneral].map(pairKey));
   const inGeneralAt = new Set(worded.inGeneral.map((pair) => pair.a));
@@ -236,7 +244,7 @@ function makeReview(input: ReviewInput): { review: Review; checked: Set<number> 
     ? rewordReply.value.filter((rewording) => offered(rewording.at) && !checked.has(rewording.at))
     : [];
   const review: Review = {
-    destination: input.destination,
+    destination: target.id, destinationItems: target.replaces?.items ?? null, generalTexts: target.generalTexts,
     items,
     rewords: [...earlier, ...suggested].sort(byRow),
     pairs: [...worded.same, ...worded.inGeneral, ...model],
@@ -284,19 +292,18 @@ function itemsToBringIn(
 type ReviewOptions = Pick<ReviewInput, 'askReword' | 'askSame'>;
 
 function checklistReviewPlan(
-  can: Pick<Capabilities, 'reword' | 'sameMeaning'>, items: ListItem[], target: ListTarget, options: ReviewOptions,
+  can: Pick<Capabilities, 'reword' | 'sameMeaning'>, items: ListItem[], target: ListTarget, choices: ReviewOptions,
   review: Review | null, askedFor: string,
 ) {
   const texts = items.map((item) => item.text);
   const earlier = earlierRewordings(items, target.replaces?.items);
   // Reuse a review only for the same items and sections (#821) and the same list and applicable wording (#56).
-  const destination = JSON.stringify([listId(target.layer, target.name), earlier]);
-  const signature = JSON.stringify([items, options.askReword, options.askSame, target.generalTexts, destination]);
+  const { askReword, askSame } = choices;
+  const signature = JSON.stringify([items, askReword, askSame, target.generalTexts, target.id, earlier]);
   const cached = review && askedFor === signature ? review : null;
-  const needsCall = cached
-    ? can.sameMeaning && hasMissedDuplicates(cached)
-    : (options.askReword && can.reword) || (options.askSame && can.sameMeaning);
-  return { can, items, target, options, texts, earlier, destination, signature, cached, needsCall };
+  const needsCall = cached ? can.sameMeaning && hasMissedDuplicates(cached)
+    : (askReword && can.reword) || (askSame && can.sameMeaning);
+  return { can, items, target, options: choices, texts, earlier, signature, cached, needsCall };
 }
 
 function hasMissedDuplicates(review: Review) {
@@ -347,7 +354,7 @@ type ReviewPlan = ReturnType<typeof checklistReviewPlan>;
 type ReviewFailure = 'unreachable' | 'failed';
 
 export type ChecklistReviewChange =
-  | { kind: 'open' }
+  | { kind: 'open'; review: Review }
   | { kind: 'fresh'; review: Review; checked: Set<number>; signature: string }
   | { kind: 'retry'; review: Review; failure: ReviewFailure | null; open: boolean };
 
@@ -414,19 +421,17 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
     });
   }
   function next(plan: ReviewPlan, show: ShowReview) {
-    const { target, options, texts, cached, needsCall, can, items, earlier, destination } = plan;
+    const { target, options, texts, cached, needsCall, can, items, earlier } = plan;
     // the items are those of the worksheet being read until that read ends (#821)
     if (requests.tableReadPending()) return;
     if (!texts.length || !target.named || signature !== plan.signature) return;
     if (cached) {
-      if (!needsCall) return show({ kind: 'open' });
-      return duplicates(cached, target.generalTexts, show, true, texts);
+      const review = { ...cached, destinationItems: target.replaces?.items ?? null };
+      if (!needsCall) return show({ kind: 'open', review });
+      return duplicates(review, target.generalTexts, show, true, texts);
     }
     const fresh = ([rewordReply, sameReply]: readonly [RewordReply | null, SameMeaningReply | null] = [null, null]) => {
-      const result = makeReview({
-        items, earlier, destination, generalTexts: target.generalTexts, ...options,
-        canReword: can.reword, canAskSame: can.sameMeaning, rewordReply, sameReply,
-      });
+      const result = makeReview({ items, earlier, target, ...options, can, rewordReply, sameReply });
       show({ kind: 'fresh', ...result, signature: plan.signature });
     };
     if (!needsCall) return fresh();
@@ -480,13 +485,13 @@ export function checklistShelf(state: State) {
 
 export async function submitChecklist(
   store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string,
-  reviewedRevision?: number | null,
+  reviewed?: ListReviewRevisions,
 ) {
   const kept = keptImport(importKey);
   const name = target.layer === 'broad' ? '' : target.name;
   // The draft stays kept until the list is written, so a reload or a failure mid-write loses nothing (#931).
   // Kept after a write, it is offered again; bringing in the same list again writes nothing.
-  const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' }, reviewedRevision);
+  const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' }, reviewed);
   if (result.ok && kept && keptUnchanged(kept, keptImport(importKey))) dropImport(importKey);
   return result;
 }

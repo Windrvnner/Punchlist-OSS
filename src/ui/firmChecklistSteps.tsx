@@ -179,7 +179,7 @@ function pairRow(view: ImportView, review: Review, pair: Pair) {
       {removeBox(view, review, pair.a)}
       {pair.inAgainst
         ? <div class="rv-row"><span class="nobox" />
-          <div class="rv-new">{view.target.generalTexts[pair.b]}<span class="tag">General</span></div>
+          <div class="rv-new">{review.generalTexts[pair.b]}<span class="tag">General</span></div>
         </div>
         : removeBox(view, review, pair.b)}
       {pair.why && <div class="rv-why">{pair.why}</div>}
