@@ -224,21 +224,29 @@ it('preserves a synced destination addition even without previously approved wor
   expect(session.view.work.error).toContain('The list changed');
 });
 
-it.each(['before Import', 'at commit'])('preserves rows when General changes %s (#56)', async (when) => {
+it.each(['before Import', 'at commit', 'before repeat Import'])('keeps draft if General changes %s', async (when) => {
   const questions = portfolioQuestions().slice(0, 2_000);
   const edited = 'Provide the latest independent energy yield report.';
   app.store.services.ai.reword = async () => ok([{ at: 120, text: edited, why: '' }]);
   const general = questions.slice(0, 120).map((text) => ({ text }));
   const id = await savePriorList('broad', '', general);
+  const wind = listId('technology', 'Wind');
+  const repeat = when === 'before repeat Import';
+  if (repeat) {
+    const items = [{ text: edited, was: questions[120] }, ...questions.slice(121).map((text) => ({ text }))];
+    expect((await app.store.dispatch(BringInList, {
+      list: { layer: 'technology', name: 'Wind', items, file: '', fileDate: '' },
+    })).ok).toBe(true);
+  }
   const session = await technologyReview(questions, 'Wind', true, true);
-  session.flipReword(120);
+  if (!repeat) session.flipReword(120);
   expect(session.view.listReview.review?.pairs).toHaveLength(120);
   for (let index = 0; index < 120; index++) session.flipRemove(index);
   const changed = [{ text: 'Confirm all lender notice periods and deliverables.' }, ...general.slice(1)];
 
-  if (when === 'before Import') {
+  if (when !== 'at commit') {
     peerChangesList(id, changed);
-    await app.store.refreshSync();
+    if (!repeat) await app.store.refreshSync();
     await session.bringIn();
   } else {
     const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
@@ -249,8 +257,8 @@ it.each(['before Import', 'at commit'])('preserves rows when General changes %s 
     await importing;
   }
 
-  const wind = listId('technology', 'Wind');
-  expect(app.store.get().firmList[wind]?.items.length ?? 0).toBe(0);
+  expect(app.store.get().firmList[wind]?.items.length ?? 0).toBe(repeat ? 1_880 : 0);
+  expect(session.view.work.error).not.toBe('');
   expect(keptImport(key)).toBeDefined();
   expect(session.view.listReview.review?.generalTexts[0]).toBe(questions[0]);
   await app.store.refreshSync();

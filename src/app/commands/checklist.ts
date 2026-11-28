@@ -164,6 +164,11 @@ function reviewedGeneral(rev: number | undefined): Plan['expects'] {
   return rev === undefined ? undefined : [{ kind: 'firmList', id: generalListId, rev }];
 }
 
+function sameImportedList(current: ListRecord, next: ListRecord) {
+  return sameContent(current, next) && current.file === next.file
+    && current.fileDate === next.fileDate && current.name === next.name;
+}
+
 /**
  * Bring in one list of the firm's: the general list, or the list for one structure, sector or technology. It is a record
  * of its own (`listId`), so it replaces only the list of that layer and name. This writes the list only; the deals then
@@ -189,10 +194,16 @@ export const BringInList = define({
     if (reviewedListChanged(state, cur, input.reviewed)) return fail(rejected(LIST_CHANGED_SINCE_REVIEW));
     const record = ListRecord.parse({ ...l, name, items, by: ctx.actor, at: ctx.at, id, rev: cur?.rev ?? 0, createdAt: cur?.createdAt ?? ctx.at, updatedAt: ctx.at });
     // the same items from the same file write nothing: the deals are still given what they lack. Another file or date is kept, as one version still
-    if (cur && sameContent(cur, record) && cur.file === record.file && cur.fileDate === record.fileDate && cur.name === record.name) return ok({ upserts: [], audit: [] });
+    const expects = reviewedGeneral(input.reviewed?.general);
+    if (cur && sameImportedList(cur, record)) {
+      const unchanged = input.reviewed
+        ? [{ kind: 'firmList' as const, id, rev: cur.rev }, ...(expects ?? [])]
+        : undefined;
+      return ok({ upserts: [], audit: [], expects: unchanged });
+    }
     return ok({
       upserts: [{ kind: 'firmList', record, expectedRev: cur ? cur.rev : null }],
-      expects: reviewedGeneral(input.reviewed?.general),
+      expects,
       audit: [],
       inverse: { command: 'RestoreList', input: { id, list: cur ?? null } },
       message: `${l.layer === 'broad' ? 'The general list' : `The ${name} list`} imported`,

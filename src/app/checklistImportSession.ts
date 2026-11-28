@@ -8,7 +8,7 @@ import {
 } from './checklistImport';
 import { keepChecklistImport, readKeptChecklist, type ChecklistChoices } from './checklistKept';
 import { NOT_DONE, showChecklistOutcome } from './checklistOutcome';
-import { keepChecklistReviewChoices, reviewChanged } from './checklistReview';
+import { keepChecklistReviewChoices, reviewedListRevisions } from './checklistReview';
 import { LIST_CHANGED_SINCE_REVIEW } from './commands/checklist';
 import { dropImport, importKey } from './keptImports';
 import {
@@ -494,9 +494,8 @@ export class ChecklistImportSession {
     const { items } = this.selection(review, remove, useReword);
     const file = this.table?.name ?? this.text?.name ?? '';
     const target = this.target;
-    if (reviewChanged(review, target, remove)) return this.activity('', LIST_CHANGED_SINCE_REVIEW);
-    const usesGeneral = review.pairs.some(({ a, inAgainst }) => inAgainst && remove.has(a));
-    const reviewed = { destination: target.revision, general: usesGeneral ? target.generalRevision : undefined };
+    const reviewed = reviewedListRevisions(review, target, remove);
+    if (!reviewed) return this.activity('', LIST_CHANGED_SINCE_REVIEW);
     this.activity('importing');
     try {
       const result = await submitChecklist(this.store, this.key, target, items, file, reviewed);

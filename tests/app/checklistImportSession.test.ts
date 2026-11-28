@@ -8,6 +8,7 @@ import { BringInList, RestoreList } from '../../src/app/commands/checklist';
 import { listId } from '../../src/domain/checklist';
 import { fail, ok } from '../../src/domain/result';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
+import { ELSEWHERE } from '../adapters/memRepo';
 import { holdRecoveryWrite, recoveryApp } from './recoveryKit';
 
 const key = importKey.checklist();
@@ -134,6 +135,34 @@ it('refuses a queued Import when an earlier write changes the reviewed list (#56
   expect(app.store.get().firmList[id].items).toHaveLength(1);
   expect(session.view.work.error).toContain('The list changed');
   expect(keptImport(key)).toBeDefined();
+});
+
+it.each([false, true])('checks a repeat import without writing a version (peer edit: %s) (#41)', async (changed) => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const id = listId('broad', '');
+  expect((await app.store.dispatch(BringInList, {
+    list: { layer: 'broad', name: '', items: questions.map((text) => ({ text })), file: '', fileDate: '' },
+  })).ok).toBe(true);
+  const saved = app.store.get().firmList[id];
+  app.store.services.ai.readList = async ({ lines }) => ok({
+    lines: lines.map((_, index) => ({ n: index + 1, k: 'item' })),
+  });
+  const review = open();
+  review.setAskReword(false);
+  review.setAskSame(false);
+  review.setPaste(questions.join('\n'));
+  await review.pasted();
+  await review.next();
+  const updated = 'Provide the executed amendment to the grid connection agreement.';
+  if (changed) {
+    const items = [{ text: updated }, ...saved.items.slice(1)];
+    app.repo.peer.change('firmList', id, { ...saved, items, rev: saved.rev + 1 }, ELSEWHERE);
+  }
+  await review.bringIn();
+  expect(!!keptImport(key)).toBe(changed);
+  await app.store.refreshSync();
+  expect(app.store.get().firmList[id].items[0].text).toBe(changed ? updated : questions[0]);
+  expect(app.store.get().firmList[id].rev).toBe(saved.rev + Number(changed));
 });
 
 it('brings in the restored review, holds the draft until the write, and offers Undo All', async () => {

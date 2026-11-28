@@ -1234,6 +1234,10 @@ export class Store {
     command: Command<I, In>, input: I, plan: Plan, opId: string, opts: ExecuteOptions,
     at: string, previousRev: number | null,
   ): Promise<Result<{ opId: string; unchanged: true }>> {
+    if (plan.expects?.length) {
+      const checked = await this.services.repo.transaction({ writes: [], expects: plan.expects });
+      if (!checked.ok) return this.refusePlan(checked.error, opts);
+    }
     if (command.name === 'ImportQuestions' && opts.idempotencyKey?.startsWith('qa-import:')) {
       const operation: Operation = {
         id: opId, command: command.name, input, targets: [], results: {},

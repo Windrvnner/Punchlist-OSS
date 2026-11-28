@@ -1124,6 +1124,17 @@ export class LogRepository implements Repository {
     return ok(undefined);
   }
 
+  /** Read-only preconditions require the revisions the plan read (#88). */
+  private changedRead(expects: Transaction['expects'], asHad: Set<string>): Failure | undefined {
+    for (const expected of expects ?? []) {
+      const had = asHad.has(recKey(expected.kind, expected.id));
+      const rev = this.loaded(expected.kind, expected.id, had)?.rev ?? 0;
+      if (rev !== expected.rev) {
+        return { kind: 'conflict', message: CHANGED, recordId: expected.id, expected: expected.rev, actual: rev };
+      }
+    }
+  }
+
   private async commit(asked: Transaction): Promise<Result<Record<string, number>>> {
     let tx = asked;
     this.settleNow();
@@ -1132,7 +1143,7 @@ export class LogRepository implements Repository {
     let writes = tx.writes.filter((w) => w.kind !== 'op'); let deletes = (tx.deletes ?? []).filter((d) => d.kind !== 'op');
     const local = opTx.writes.length + opTx.deletes!.length > 0;
     const shared = writes.length || deletes.length || tx.audit?.length || tx.index || tx.purgeDeal || tx.reopen?.length;
-    if (!shared) return this.saveJournal(opTx);
+    if (!shared && !tx.expects?.length) return this.saveJournal(opTx);
     // a deal deleted says what this PC had taken in when the person began deleting it (the window asked then: `seen`), or else
     // before this change: never lines that arrived since, which the person never saw
     const seen = tx.purgeDeal ? tx.seen ?? this.view.seenNow() : undefined;
@@ -1170,14 +1181,11 @@ export class LogRepository implements Repository {
       else if (cur?.conflict && !cur.conflict.every((v) => d.seen?.includes(v.id))) return fail({ kind: 'conflict', message: CHANGED, recordId: d.id });
       if (d.expectedRev !== null && (cur?.rev ?? 0) !== d.expectedRev) return fail({ kind: 'conflict', message: CHANGED, recordId: d.id, expected: d.expectedRev, actual: cur?.rev ?? 0 });
     }
-    for (const e of tx.expects ?? []) {   // read-only preconditions (#88): a record read by the plan must be unchanged
-      const rev = this.loaded(e.kind, e.id, had(e.kind, e.id))?.rev ?? 0;
-      if (rev !== e.rev) {
-        return fail({ kind: 'conflict', message: CHANGED, recordId: e.id, expected: e.rev, actual: rev });
-      }
-    }
+    const changedRead = this.changedRead(tx.expects, asHad);
+    if (changedRead) return fail(changedRead);
     const added = this.unexpectedMember(tx, had);
     if (added) return fail({ kind: 'conflict', message: CHANGED, recordId: added });
+    if (!shared) return this.saveJournal(opTx);
     // 2. one line for the whole transaction
     const seq = this.seq + 1; const recs: RecChange[] = []; const retract: string[] = [];
     // A version's id names this install and line, plus a random part: a copied install that has not been found out yet writes
@@ -1351,7 +1359,7 @@ export class LogRepository implements Repository {
     for (const a of tx.audit ?? []) if (a.dealId) deals.add(a.dealId);
     for (const w of writes) { const d = (w.data as { dealId?: unknown } | null | undefined)?.dealId; if (typeof d === 'string') deals.add(d); }
     for (const d of deals) if (!this.readScope(this.scopeName(d))) return false;
-    for (const r of [...writes, ...deletes]) {
+    for (const r of [...writes, ...deletes, ...(tx.expects ?? [])]) {
       // a deal, or who has it, is in `_`, but a change to it may be held back on that deal's own lines (an edit to the deal
       // that also changed its checklist items): the deal is read, so the change is built on its latest version
       if (r.kind === 'deal' && !this.readScope(this.scopeName(r.id))) return false;
