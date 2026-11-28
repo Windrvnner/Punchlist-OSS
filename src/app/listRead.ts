@@ -8,13 +8,14 @@
  */
 import { decodeText } from '../domain/textEncoding';
 import type { AiService } from '../ports';
+import type { SpreadsheetReadOptions } from '../domain/sheets';
 import {
   cellText, fillUnplaced, unplaced, textLines, tableLines, tableRowsAsWritten, tieOut, readingOf, type ListReading,
   type TiedOut,
 } from '../domain/listRead';
 import { prepareChecklist, suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
 import { keptImport, keepImport } from './keptImports';
-import { readImportBytes, type ImportTable } from './transfer';
+import { readImportBytes, type ImportLocation, type ImportTable } from './transfer';
 import type { Store } from './store';
 import { ok, fail, type Result } from '../domain/result';
 
@@ -71,7 +72,10 @@ export async function readListFile(
   if (!LIST_FILES.test(file.name)) return fail({ kind: 'invalid', message: 'Choose a spreadsheet, a Word file, a PDF or a text file' });
   let bytes: Uint8Array;
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }
-  if (SHEET.test(file.name)) { const t = await readImportBytes(store, file.name, bytes, { headerRow: 1 }); return t.ok ? ok({ table: t.value }) : t; }
+  if (SHEET.test(file.name)) {
+    const read = await readImportBytes(store, file.name, bytes, { headings: 'checklist', headerRow: 1 });
+    return read.ok ? ok({ table: read.value }) : read;
+  }
   let text: string;
   // by byte-order mark, else UTF-8, else Windows-1252, as a CSV is read (#382)
   if (PLAIN.test(file.name)) {
@@ -116,9 +120,10 @@ export async function loadChecklistSource(
 
 /** When reading with the model, keep rows above any heading so they can be tied out too. */
 export async function readChecklistColumns(
-  store: Store, table: ImportTable, options: { sheet?: string; headerRow?: number }, byColumns: boolean,
+  store: Store, table: ImportTable, options: ImportLocation, byColumns: boolean,
 ) {
-  const layout = byColumns ? options : { ...options, headerRow: 1 };
+  const layout: SpreadsheetReadOptions = { ...options, headings: 'checklist' };
+  if (!byColumns) layout.headerRow = 1;
   const read = await readImportBytes(store, table.name, table.bytes, layout);
   return read.ok ? ok(mappedTable(read.value)) : read;
 }

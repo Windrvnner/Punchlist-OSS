@@ -244,7 +244,8 @@ A deal's checklist is made up of its own item records, linked to the findings an
   through `parts.ts`, when the service refuses it as too long or cuts the reply off; lines it leaves unplaced are read
   once more by the thorough model), and tied out so that every line is accounted for (`src/app/listRead.ts`,
   `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one
-  **Undo** for all of them.
+  **Undo** for all of them. Checklist heading names select the default worksheet and the heading row in Choose Columns.
+  The model reads the chosen worksheet from row 1.
 - **An issues list** is attached or pasted as text, and read through `src/app/issuesList.ts`. The model reads the
   file once, then proposes titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command
   resolve the same matches through `src/app/issuesListJoins.ts`.
