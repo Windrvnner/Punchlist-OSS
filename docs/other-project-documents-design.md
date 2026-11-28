@@ -40,8 +40,8 @@ A blackline is called this deal's own only when that is confirmed; otherwise the
   folder reads, the `read` tool, and first-turn attachments. In the `read` tool and first-turn attachments,
   chat names deferred or unavailable files by id for another read (#1213). Chat sends a paired blackline when its
   clean draft is also sent or the same model context already received it whole. A fresh context or helper call
-  needs the clean file on that call. A withheld blackline stays out of the read count and is named with the
-  unavailable evidence (#1430).
+  needs the clean file on that call. A withheld blackline stays out of the read count. Helper results give its
+  exact retry ID, or count it among the files past the room of a folder result (#480, #1430).
 - The parent design's cap of two places in any pick for a document of another project.
 
 ## New

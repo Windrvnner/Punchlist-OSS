@@ -232,14 +232,19 @@ export class AgentRun {
     return typeof handle === 'string' && this.readTargets.has(handle);
   }
 
-  /** name an unread file by its existing id, even when another file has the same display path */
-  private readList(docs: DealDoc[]): string {
+  /** Name unread files and allow those exact ids to be requested again. */
+  readList(docs: DealDoc[]): string {
     for (const doc of docs) this.readTargets.add(this.idOf(doc));
     return this.readLines(docs);
   }
 
+  /** An unread file's permanent handle, even when another file has the same display path. */
+  readLine(doc: DealDoc): string {
+    return `- ${this.idOf(doc)} (${this.kit.where(doc.rec)})`;
+  }
+
   private readLines(docs: DealDoc[]): string {
-    return docs.map((doc) => `- ${this.idOf(doc)} (${this.kit.where(doc.rec)})`).join('\n');
+    return docs.map((doc) => this.readLine(doc)).join('\n');
   }
 
   /** a unique document named by its whole path or its whole file name, in any case */

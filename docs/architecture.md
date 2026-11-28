@@ -185,7 +185,8 @@ The code is in `src/backend/ai.ts`, `agent.ts`, and `lenient.ts`.
   batch keeps a blackline with its clean draft. The model gets each deferred or unavailable file's id and path.
   Chat records whole files when the provider accepts a turn. The saved `ModelThread.whole` identifies whole drafts in
   that provider context. A new context, including a fallback or compaction, prepares its own attachments. Search and
-  folder helper calls each check their own actual files and name omitted evidence (#1430).
+  folder helper calls each check their own actual files and return exact retry IDs for missing files. Folder results
+  keep the unavailable evidence alongside reply failures and count files past the existing result budget (#480, #1430).
   Only files returned by the send enter the searched count and citation list. A listed id can be used in a new read.
 - **No model call starts on a timer.** Background retries only continue work that a person or an event started.
 

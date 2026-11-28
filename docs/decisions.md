@@ -228,7 +228,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The chat's `read` tool and first-turn attachments use the same batches as a folder read. A batch boundary keeps a
   blackline with its clean draft. The tool names deferred and unavailable files by id. Only files sent count (#1213).
   A paired blackline needs its clean draft in the same model context. Chat can use the clean file it already gave
-  that context. Search and folder helpers each need the clean file in their own call and name unavailable files (#1430).
+  that context. Search and folder helpers need the clean file in their own call. They give exact retry IDs for
+  unavailable files. A folder result counts unavailable files whose names are past its existing room (#480, #1430).
 - A question asked across deals reaches only the person's own deals.
 - A chat is one conversation on the model service; past its limit, it is compacted into an uploaded transcript.
 - Each PC keeps its own word index of the data room; nothing is added to the shared folder.

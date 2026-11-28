@@ -203,6 +203,8 @@ class FolderPass {
   private quietBatches = 0;
   /** why each batch that could not be read was not, in the batches' order */
   private readonly failed: string[] = [];
+  /** Files the helper could not open, even when the reply on the remaining files fails. */
+  private readonly omitted: DealDoc[][] = [];
   /** the next batch to start */
   private nextBatch = 0;
   private fast = '';
@@ -252,10 +254,7 @@ class FolderPass {
     try {
       // a batch refused as too long lists fewer tracked changes, while it lists any, before it is not read (#1381)
       const read = await withFewerChanges((share) => this.askBatch(reading, share));
-      if (!read) {
-        this.recordOmissions(reading, []);
-        return finish(reading.step, 'could not be opened');
-      }
+      if (!read) return this.notRead(reading, 'they could not be opened on this PC', 'could not be opened');
       if (!read.reply) return this.notRead(reading, 'the reply on them could not be read', 'could not be read');
       this.keep(reading, read.got, read.reply);
     } catch (e) {
@@ -272,6 +271,7 @@ class FolderPass {
   private async askBatch(reading: BatchReading, share: ChangeShare) {
     const { kit } = this.run;
     const { files, listing, got } = await kit.send(reading.batch.recs, this.run.spansDeals, share);
+    this.omitted[reading.index] = reading.batch.recs.filter((doc) => !got.some((sent) => sameDoc(sent, doc)));
     if (!got.length) {
       return null;
     }
@@ -302,7 +302,10 @@ class FolderPass {
   private keep(reading: BatchReading, got: Sent[], reply: Record<string, unknown>): void {
     const { kit } = this.run;
     const { batch, step } = reading;
-    this.recordOmissions(reading, got);
+    const missing = this.omitted[reading.index].length;
+    if (missing) {
+      this.failed[reading.index] = `${reading.at.toLowerCase()} (${missing} could not be opened on this PC)`;
+    }
     this.readCount += got.length;
     for (const x of batch.recs) if (got.some((g) => sameDoc(g, x))) this.readNow.add(dealDocKey(x));
     const { text, sources } = kit.fit(prose(reply.text).join(' '), reply.sources as Cited[], got, true);
@@ -336,14 +339,6 @@ class FolderPass {
     finish(reading.step, result);
   }
 
-  /** Name the files a partially or entirely unavailable batch could not give to the model (#1430). */
-  private recordOmissions(reading: BatchReading, got: Sent[]): void {
-    const missing = reading.batch.recs.filter((doc) => !got.some((sent) => sameDoc(sent, doc)));
-    if (!missing.length) return;
-    const paths = missing.map(({ rec }) => this.run.kit.where(rec)).join('; ');
-    this.failed[reading.index] = `${reading.at.toLowerCase()} (could not be opened on this PC: ${paths})`;
-  }
-
   /**
    * The read's result: its heading, what the batches found, what found nothing and what could not be read. The whole
    * of it, with the documents it lists, is within the room this read began with (#480), unless the heading and the
@@ -351,14 +346,38 @@ class FolderPass {
    */
   result(heading: string): string {
     const failed = this.failed.some(Boolean) ? `\nNot read: ${this.failed.filter(Boolean).join('; ')}.` : '';
-    if (!this.findings.some(Boolean)) return `${heading}\nNone of them says anything about it.${failed}`;
+    if (!this.findings.some(Boolean)) {
+      const result = `${heading}\nNone of them says anything about it.${failed}`;
+      return result + this.omissionDetails(this.room - result.length);
+    }
     const quiet = this.quietBatches
       ? `\n${this.quietBatches} ${noun(this.quietBatches, 'batch', 'batches')} said nothing about it; their documents `
         + 'are not listed, but can be read by path.'
       : '';
     const said = `${heading}\nWhat they say:`;
-    const found = this.boundedFindings(this.room - `${said}${quiet}${failed}`.length);
-    return `${said}${found.map((x) => `\n${x}`).join('')}${quiet}${failed}`;
+    const room = this.room - `${said}${quiet}${failed}`.length;
+    const found = this.boundedFindings(room);
+    const omitted = this.omissionDetails(room - found.cost);
+    return `${said}${found.lines.map((x) => `\n${x}`).join('')}${quiet}${failed}${omitted}`;
+  }
+
+  /** Use the existing folder result budget for retry handles as well as passages (#480, #1430). */
+  private omissionDetails(room: number): string {
+    const missing = [...new Map(this.omitted.flat().map((doc) => [dealDocKey(doc), doc])).values()];
+    if (!missing.length || room <= 0) return '';
+    const heading = '\nUnavailable files (ask to read by id):\n';
+    const lines = missing.map((doc) => this.run.readLine(doc).length + 1);
+    const total = heading.length + lines.reduce((sum, length) => sum + length, -1);
+    if (total <= room) return heading + this.run.readList(missing);
+
+    let left = room - heading.length - moreOmitted(missing.length).length + 1;
+    let count = 0;
+    while (count < lines.length && lines[count] <= left) {
+      left -= lines[count++];
+    }
+    const tail = moreOmitted(missing.length - count);
+    if (!count) return tail.length <= room ? tail : '';
+    return heading + this.run.readList(missing.slice(0, count)) + tail;
   }
 
   /**
@@ -366,7 +385,7 @@ class FolderPass {
    * past it is counted, and its documents are not listed to the model, so the prompt stays bounded however large the
    * folder. The line counting them takes room too, so the findings are fitted again until it fits beside them.
    */
-  private boundedFindings(room: number): string[] {
+  private boundedFindings(room: number): { lines: string[]; cost: number } {
     let reserve = 0;
     let fit = this.fitFindings(room);
     // fewer findings fit beside a longer line, which counts more of them: the reserve only grows, up to the line that
@@ -376,14 +395,15 @@ class FolderPass {
       fit = this.fitFindings(room - reserve);
     }
     for (const x of fit.over.flat()) this.run.quiet.add(x);
-    return fit.over.length ? [...fit.lines, moreLine(fit.over.length)] : fit.lines;
+    if (!fit.over.length) return { lines: fit.lines, cost: fit.used };
+    return { lines: [...fit.lines, moreLine(fit.over.length)], cost: fit.used + moreCost(fit.over.length) };
   }
 
   /**
    * the batches' findings that fit `room`, each line with the line break before it and the documents it newly lists;
    * past it, the new documents of each batch left over
    */
-  private fitFindings(room: number): { lines: string[]; over: Sent[][] } {
+  private fitFindings(room: number): { lines: string[]; over: Sent[][]; used: number } {
     let used = 0;
     const lines: string[] = [];
     const over: Sent[][] = [];
@@ -401,8 +421,12 @@ class FolderPass {
         over.push(newDocs);
       }
     }
-    return { lines, over };
+    return { lines, over, used };
   }
+}
+
+function moreOmitted(count: number): string {
+  return `\n${count} more unavailable ${noun(count, 'file')} in those batches. Ask to read that folder again.`;
 }
 
 /** what the line counting the batches past the room adds to the result, with the line break before it */
