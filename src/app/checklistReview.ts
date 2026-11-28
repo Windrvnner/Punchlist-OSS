@@ -92,7 +92,9 @@ function keepWording(previous: Review, current: Review, checked: Set<number>, de
   const useReword = new Set<number>();
   for (const { at, text, also, earlier } of current.rewords) {
     const prior = remembered.get(at);
-    const applies = prior?.text === text && !!prior.earlier === !!earlier && sameContent(prior.also, also);
+    // An identical offer can become a saved approval. A revoked approval loses its previous check (#56).
+    const revoked = prior?.earlier && !earlier;
+    const applies = prior?.text === text && sameContent(prior.also, also) && !revoked;
     if (applies ? prior.checked : defaults.has(at)) useReword.add(at);
     remembered.delete(at);
   }
