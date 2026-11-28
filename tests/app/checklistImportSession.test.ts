@@ -536,3 +536,33 @@ it('restores checks only for identical wording returned after a failed refresh a
   expect(final[120]).toEqual({ text: wording.text, was: questions[120] });
   expect(final[121]).toEqual({ text: questions[121] });
 });
+
+it('keeps checks after a failed sheet read and starts over on an accepted new sheet (#56)', async () => {
+  const text = 'Confirm the executed interconnection agreement.';
+  const revised = 'Provide the executed interconnection agreement and its amendments.';
+  app.store.services.sheets = { ...csvCodec, read: async (_bytes, _name, options) =>
+    options?.sheet === 'Unavailable'
+      ? fail({ kind: 'failed', message: 'Could not read sheet' })
+      : ok({ sheet: options?.sheet ?? 'Main', sheets: ['Main', 'Supplement'], columns: ['Item'], rows: [[text]] }),
+  };
+  app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
+  app.store.services.ai.reword = async () => ok([{ at: 0, text: revised, why: '' }]);
+  const session = open();
+  await session.load(new File(['test workbook'], 'Checklist.xlsx'));
+  session.setAskReword(true);
+  session.setAskSame(false);
+  await session.chooseColumns();
+  await session.next();
+  session.flipReword(0);
+  session.backToList();
+  await session.reread({ sheet: 'Unavailable' });
+  await session.next();
+  expect(session.view.listReview.useReword.has(0)).toBe(true);
+
+  session.backToList();
+  await session.reread({ sheet: 'Supplement' });
+  await session.next();
+  expect(session.view.source.table?.sheet).toBe('Supplement');
+  expect(session.view.listReview.review?.rewords[0]?.text).toBe(revised);
+  expect(session.view.listReview.useReword.has(0)).toBe(false);
+});
