@@ -10,13 +10,15 @@ import { listId } from '../../src/domain/checklist';
 import { fail, ok } from '../../src/domain/result';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { ELSEWHERE } from '../adapters/memRepo';
-import { holdRecoveryWrite, recoveryApp } from './recoveryKit';
+import { copyRecoveryDisk, holdRecoveryWrite, recoveryApp } from './recoveryKit';
 
 const key = importKey.checklist();
 let app: ReturnType<typeof recoveryApp>;
+let drafts: MemoryKeptImports;
 const sessions: ChecklistImportSession[] = [];
 beforeEach(async () => {
-  initializeKeptImports(new MemoryKeptImports());
+  drafts = new MemoryKeptImports();
+  initializeKeptImports(drafts);
   await keptImportsReady;
   registry.set(RestoreList.name, RestoreList);
   app = recoveryApp();
@@ -442,4 +444,95 @@ it('rechecks a changed prior approval and keeps another row’s wording choice (
   expect(app.store.get().firmList[id].items[0]).toEqual(changed[0]);
   expect(app.store.get().firmList[id].items[1]).toEqual({ text: questions[1] });
   expect(app.store.get().firmList[id].items[120]).toEqual({ text: edited, was: questions[120] });
+});
+
+it('keeps other choices after a list replacement and a reopened Section remap (#56)', async () => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const wording = 'Provide the latest independent energy yield report.';
+  app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
+  app.store.services.ai.reword = async () => ok([{ at: 120, text: wording, why: '' }]);
+  const sections = questions.map((question) => ['Operations', 'Financing', question]);
+  const encoded = await csvCodec.write('Sheet1', [['Section', 'Alternate area', 'Item'], ...sections]);
+  if (!encoded.ok) throw new Error(encoded.error.message);
+  const prior = priorItems(questions, 'offshore wind');
+  const id = await savePriorList('technology', 'Wind', prior);
+  const session = open();
+  session.setLayer('technology');
+  session.setName('Wind');
+  await session.load(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.csv'));
+  session.setAskReword(true);
+  session.setAskSame(false);
+  await session.chooseColumns();
+  await session.next();
+  session.flipReword(1);
+  session.flipReword(120);
+  session.backToList();
+  session.close();
+
+  const updated = [...prior];
+  updated[0] = { ...prior[0], text: 'Provide the amended offshore turbine EPC agreement.' };
+  await savePriorList('technology', 'Wind', updated);
+  const reopened = open();
+  reopened.pickColumn('section', 1);
+  await reopened.next();
+  expect(reopened.view.listReview.review?.rewords[0].text).toBe(updated[0].text);
+  expect(reopened.view.listReview.review?.items[1].section).toBe('Financing');
+  expect(reopened.view.listReview.useReword.has(1)).toBe(false);
+  expect(reopened.view.listReview.useReword.has(120)).toBe(true);
+  await reopened.bringIn();
+  const final = app.store.get().firmList[id].items;
+  expect(final).toHaveLength(2_000);
+  expect([final[0], final[1], final[120]]).toEqual([
+    { ...updated[0], section: 'Financing' },
+    { text: questions[1], section: 'Financing' },
+    { text: wording, was: questions[120], section: 'Financing' },
+  ]);
+});
+
+it('restores checks only for identical wording returned after a failed refresh and restart (#56)', async () => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const wording = { at: 120, text: 'Provide the latest independent energy yield report.', why: '' };
+  const split = {
+    at: 121, text: 'Confirm the current grid connection capacity.',
+    also: ['Provide the latest grid connection agreement.'], why: '',
+  };
+  app.store.services.ai.reword = async () => ok([wording, split]);
+  const prior = priorItems(questions, 'offshore wind');
+  const id = await savePriorList('technology', 'Wind', prior);
+  const session = await technologyReview(questions, 'Wind', false, true);
+  session.flipReword(120);
+  session.flipReword(121);
+  session.backToList();
+  const updated = [...prior];
+  updated[0] = { ...prior[0], text: 'Provide the amended offshore turbine EPC agreement.' };
+  await savePriorList('technology', 'Wind', updated);
+  app.store.services.ai.reword = async () => fail({ kind: 'unreachable', message: 'Wording service unavailable' });
+  await session.next();
+  expect(session.view.listReview.review?.asked.reword).toBe('unreachable');
+  expect(session.view.listReview.useReword.has(120)).toBe(false);
+  await session.retryWording();
+  expect(session.view.listReview.review?.asked.reword).toBe('unreachable');
+  session.close();
+
+  const saved = copyRecoveryDisk(app.saved);
+  app.store.closing();
+  await app.repo.close();
+  app = recoveryApp(saved);
+  await app.store.boot();
+  initializeKeptImports(drafts);
+  await keptImportsReady;
+  const reopened = open();
+  expect(reopened.view.step).toBe('review');
+  const changedSplit = { ...split, also: ['Provide an executed amendment to the grid connection agreement.'] };
+  app.store.services.ai.reword = async () => ok([wording, changedSplit]);
+  await reopened.retryWording();
+  expect(reopened.view.listReview.review?.rewords.slice(-2)).toEqual([wording, changedSplit]);
+  expect(reopened.view.listReview.useReword.has(120)).toBe(true);
+  expect(reopened.view.listReview.useReword.has(121)).toBe(false);
+  await reopened.bringIn();
+  const final = app.store.get().firmList[id].items;
+  expect(final).toHaveLength(2_000);
+  expect(final[0]).toEqual(updated[0]);
+  expect(final[120]).toEqual({ text: wording.text, was: questions[120] });
+  expect(final[121]).toEqual({ text: questions[121] });
 });
