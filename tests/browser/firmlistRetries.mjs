@@ -303,3 +303,50 @@ async function holdAppendix(page) {
     };
   });
 }
+
+export async function checkStaleReviewKeyboard(start, say) {
+  const { ctx, page } = await start();
+  const text = 'Provide the executed EPC contract and appendices';
+  const other = 'Confirm tax filing dates and payment notices';
+  const unique = 'Provide the original turbine installation certificate';
+  try {
+    await page.evaluate(async ({ text, other }) => {
+      const list = { layer: 'broad', name: '', items: [{ text }, { text: other }] };
+      const result = await store.dispatch(store.commandNamed('BringInList'), { list }, { quiet: true });
+      if (!result.ok) throw new Error(result.error.message);
+    }, { text, other });
+    await page.click('#u-menu');
+    await page.click('#s-checklist-open');
+    await page.click('#fl-import');
+    await page.fill('#cl-paste', [text, unique].join('\n'));
+    await page.click('#cl-paste-next');
+    await page.click('[data-layer=technology]');
+    await page.fill('#cl-name', 'Wind');
+    await page.click('#cl-next');
+    await page.locator('#cl-pairs input[data-remove]').first().check();
+    await page.focus('#cl-go');
+    const split = await page.evaluate(async (remaining) => {
+      const general = Object.values(store.get().firmList).find((list) => list.layer === 'broad');
+      await __peer.edit(general.id, { items: [{ text: remaining }] });
+      await store.refreshSync();
+      return store.get().conflicts[general.id]?.versions.length;
+    }, other);
+    const focus = await page.evaluate(() => document.activeElement.id);
+    if (focus === 'cl-go') {
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => document.querySelector('#cl-line')?.getAttribute('role') === 'alert'
+        || document.querySelector('#fl-count'));
+    }
+    const result = await page.evaluate(() => ({
+      focus: document.activeElement.id,
+      refused: document.querySelector('#cl-line')?.getAttribute('role') === 'alert',
+      saved: Object.values(store.get().firmList).some((list) => list.name === 'Wind'),
+    }));
+    const stayedOnImport = focus === 'cl-go' && result.focus === focus;
+    say('Import keeps keyboard focus and refuses a removal based on a stale General review (#56)',
+      split === 2 && stayedOnImport && result.refused && !result.saved && !page.errors.length,
+      JSON.stringify({ split, before: focus, ...result, errors: page.errors }));
+  } finally {
+    await ctx.close();
+  }
+}
