@@ -28,7 +28,7 @@ import { Operation, AuditEntry, Deal, Question, Finding, Tombstone, Member, CURR
 import { keepUnseen, movedHash } from './recovered';
 import { scopeOfKey } from './conversations';
 import { Item, ListRecord } from '../domain/checklist';
-import { Undo } from './commands/undo';
+import { Undo, changedSince } from './commands/undo';
 import { lastImport } from './commands/importQuestions';
 import { merged, localConversations } from './threads';
 import { seenSince } from './draftsSeen';
@@ -42,7 +42,7 @@ type Listener = (s: State) => void;
 type DispatchOptions = {
   idempotencyKey?: string;
   quiet?: boolean;
-  /** The action's caller has its own wording for this refusal. */
+  /** The caller reports this failure itself. Success and recovery still use the normal paths. */
   quietRefusal?: (error: Failure) => boolean;
   /** The caller keeps the input and offers its own retry. */
   noRetry?: boolean;
@@ -347,8 +347,7 @@ export class Store {
     // off; this is the one place that holds for all of them. The app's own record keeping goes on (SIGNED_OUT_OK).
     const ro = this.readOnly();
     if (ro && !opts.system && !SIGNED_OUT_OK.has(command.name)) {
-      if (!opts.quiet) this.toast(ro, 'warn');
-      return fail({ kind: 'rejected', message: ro });
+      return this.refuse({ kind: 'rejected', message: ro }, opts);
     }
     const parsed = command.input.safeParse(rawInput);
     if (!parsed.success) {
@@ -367,8 +366,7 @@ export class Store {
       await Promise.all(numbered.map((d) => this.loadDeal(d, { gaps: false })));
       if (numbered.some((d) => this.state.dealLoad[d] !== 'loaded')) {
         const message = 'The deal’s questions could not be loaded, so no number can be given yet. Try again in a moment.';
-        if (!opts.quiet) this.toast(message, 'warn');
-        return fail({ kind: 'rejected', message });
+        return this.refuse({ kind: 'rejected', message }, opts);
       }
     }
     if (opts.idempotencyKey && this.pendingKeys.has(opts.idempotencyKey)) return fail({ kind: 'rejected', message: 'Already in progress' });
@@ -422,19 +420,13 @@ export class Store {
     const actor = this.state.user?.name ?? 'Unknown';
     const firm = FIRM;
     const planned = command.plan(this.state, input, { at, actor, firm, opId, ids: this.services.ids });
-    if (!planned.ok) return this.refusePlan(planned.error, opts);
+    if (!planned.ok) return this.refuse(planned.error, opts);
     const plan = planned.value;
     // nothing longer than an export cell holds is saved: the one place the limit is checked (domain/importExport.ts)
     const long = plan.upserts.map((u) => overLimit(u.kind, u.record as Record<string, unknown>)).find(Boolean);
-    if (long) {
-      if (!opts.quiet) this.toast(TOO_LONG, 'warn');
-      return fail({ kind: 'invalid', message: TOO_LONG, fields: { [long]: TOO_LONG } });
-    }
+    if (long) return this.refuse({ kind: 'invalid', message: TOO_LONG, fields: { [long]: TOO_LONG } }, opts);
     const blocked = this.blockedBy(plan);
-    if (blocked) {
-      if (!opts.quiet) this.toast(blocked, 'warn');
-      return fail({ kind: 'rejected', message: blocked });
-    }
+    if (blocked) return this.refuse({ kind: 'rejected', message: blocked }, opts);
     if (!plan.upserts.length && !plan.removes?.length) {
       return this.finishUnchanged(command, input, plan, opId, opts, at, previousRev);
     }
@@ -486,8 +478,8 @@ export class Store {
     return ok({ opId });
   }
 
-  private refusePlan(error: Failure, opts: DispatchOptions) {
-    if (!opts.quiet && !opts.quietRefusal?.(error)) this.toast(error.message, 'warn');
+  private refuse(error: Failure, opts: DispatchOptions, notice = error.message) {
+    if (!opts.quiet && !opts.quietRefusal?.(error)) this.toast(notice, 'warn');
     return fail(error);
   }
 
@@ -543,15 +535,48 @@ export class Store {
    * Pending and interrupted operations are never removed, nor a save that could not be written (pending in the journal),
    * nor a deal's last import while it can be undone.
    */
-  /** The retained import still needs its success identity if its reply or log-link step was interrupted. */
+  /** Keep the journal outcome while a retained import may still refer to it. */
   private canPrune(operation: Operation, kept: Set<string>, lastImports: Set<string>) {
     return operation.state !== 'pending' && operation.state !== 'interrupted'
       && !this.unwritten.has(operation.id) && !kept.has(operation.id) && !lastImports.has(operation.id)
-      && !(operation.state === 'succeeded' && operation.idempotencyKey?.startsWith('qa-import:'));
+      && !operation.idempotencyKey?.startsWith('qa-import:');
   }
 
-  /** A retained import durably recorded completion; its correlation key may now leave the journal. */
-  async releaseImport(key: string): Promise<boolean> {
+  /** A receipt can reach the journal without reaching the window that sent the import. */
+  async refreshCommittedImportStep(operation: Operation): Promise<Result<void>> {
+    const { id, dealId, resultRevs } = operation;
+    const applied = resultRevs && Object.entries(resultRevs).every(([recordId, rev]) => this.revOf(recordId) === rev);
+    if (dealId && !applied) {
+      const loaded = await this.reloadImportStepRecords(operation.command, dealId);
+      if (!loaded) {
+        return fail({ kind: 'unreachable', message: 'The saved import could not be read. Retry to finish.' });
+      }
+    }
+    this.unsettledHere.delete(id);
+    this.unwritten.delete(id);
+    this.set({ ...this.state, ops: { ...this.state.ops, [id]: operation } });
+    this.offerRecoveredImportUndo(operation);
+    return ok(undefined);
+  }
+
+  private offerRecoveredImportUndo(operation: Operation) {
+    const { id, command, inverse, results, undoneBy } = operation;
+    if (command !== 'ImportQuestions' || !inverse || !results || undoneBy || this.lastMessage.has(id)) return;
+    if (changedSince(this.state, results)?.length !== 0) return;
+    const message = 'Import saved';
+    this.lastMessage.set(id, message);
+    if (this.lastMessage.size > 50) this.lastMessage.delete(this.lastMessage.keys().next().value!);
+    this.toast(message, 'done', { label: 'Undo', opId: id });
+  }
+
+  private async reloadImportStepRecords(command: string, dealId: string) {
+    if (command !== 'ImportQuestions') return this.reloadRecord('deal', dealId);
+    await this.loadDealRecords(dealId);
+    return this.state.dealLoad[dealId] === 'loaded';
+  }
+
+  /** Retire an import correlation after completion, or discard its unfinished action when the file is cleared. */
+  async releaseImport(key: string, options: { abandon?: boolean } = {}): Promise<boolean> {
     const read = await this.services.repo.list('op');
     if (!read.ok) return false;
     const writes: Transaction['writes'] = [];
@@ -559,15 +584,34 @@ export class Store {
     for (const loaded of read.value) {
       const operation = this.parse('op', loaded) as Operation | null;
       if (operation?.idempotencyKey !== key) continue;
-      if (operation.state === 'pending' || operation.state === 'interrupted') return false;
-      const next = { ...operation, idempotencyKey: undefined };
+      // Keep the outcome linked until the kept file is durably gone.
+      if (options.abandon && ['succeeded', 'discarded'].includes(operation.state)) continue;
+      const next = this.retireImportOperation(operation, options.abandon === true);
+      if (!next) return false;
       writes.push({ kind: 'op', id: operation.id, data: next, expectedRev: loaded.rev });
       released[operation.id] = next;
     }
     if (!writes.length) return true;
     const result = await this.services.repo.transaction({ writes });
-    if (result.ok) this.set({ ...this.state, ops: { ...this.state.ops, ...released } });
-    return result.ok;
+    if (!result.ok) return false;
+    for (const id of Object.keys(released)) {
+      this.unsettledHere.delete(id);
+      this.unwritten.delete(id);
+    }
+    this.set({ ...this.state, ops: { ...this.state.ops, ...released } });
+    return true;
+  }
+
+  /** Retire unfinished work without touching a live write or releasing its correlation early. */
+  private retireImportOperation(operation: Operation, abandon: boolean): Operation | undefined {
+    if (operation.state === 'interrupted' && !abandon) return;
+    if (operation.state === 'pending') {
+      const failedHere = this.unsettledHere.has(operation.id) || this.unwritten.has(operation.id);
+      if (!abandon || (this.isLive(operation) && !failedHere)) return;
+    }
+    if (abandon && this.rerun.has(operation.id)) return;
+    if (!abandon) return { ...operation, idempotencyKey: undefined };
+    return { ...operation, state: 'discarded', settledAt: this.services.clock.now() };
   }
 
   private pruning = false;
@@ -945,6 +989,10 @@ export class Store {
 
   private toTransaction(plan: Plan, op: Operation, at: string, actor: string, pendingRev: number): Transaction {
     const settled: Operation = { ...op, ...(plan.settledInput !== undefined ? { input: plan.settledInput } : {}), state: 'succeeded', settledAt: at, inverse: plan.inverse };
+    // Keep result identities in the first receipt, so losing its reply cannot lose Import Undo.
+    if (op.command === 'ImportQuestions' && op.idempotencyKey?.startsWith('qa-import:')) {
+      settled.results = resultsOf(plan, {});
+    }
     return {
       writes: [
         ...plan.upserts.map((u) => ({ kind: u.kind, id: u.record.id, data: u.record, expectedRev: u.expectedRev, ...(u.resolves ? { resolves: u.resolves } : {}), ...(u.beside ? { beside: true } : {}), ...this.seenOf(u.kind, u.record.id) })),
@@ -1000,20 +1048,19 @@ export class Store {
    * Something threw where a Result was expected. Before the journal entry exists nothing has been written, and the message says so.
    * After it, the write may or may not have happened: the entry is marked failed, and the message offers to read the records again.
    */
-  private async crashed(e: unknown, name: string, opId: string | null, targets: string[], opts: { quiet?: boolean; keep?: boolean; idempotencyKey?: string }): Promise<Result<{ opId: string }>> {
+  private async crashed(
+    e: unknown, name: string, opId: string | null, targets: string[], opts: DispatchOptions,
+  ): Promise<Result<{ opId: string }>> {
     console.error(`command ${name} threw`, e);
     const op = opId ? this.state.ops[opId] : undefined;
-    if (!op) {                                                                          // no journal entry: nothing was written
-      const message = 'That didn’t work. Nothing was changed.';
-      if (!opts.quiet) this.toast(message, 'warn');
-      return fail({ kind: 'failed', message });
-    }
+    if (!op) return this.refuse({ kind: 'failed', message: 'That didn’t work. Nothing was changed.' }, opts);
     if (op.state === 'pending') await this.recordCrashedWrite(op, e, opts.keep);
     const ids = [...new Set([...targets, ...op.targets])];
-    if (!opts.quiet) {
+    const error = { kind: 'failed' as const, message: 'That didn’t finish. Reload to see what was saved.' };
+    if (!opts.quiet && !opts.quietRefusal?.(error)) {
       this.toast('That didn’t finish ·', 'warn', { label: 'Reload', run: () => void this.reloadTargets(ids) });
     }
-    return fail({ kind: 'failed', message: 'That didn’t finish. Reload to see what was saved.' });
+    return fail(error);
   }
 
   /** A thrown write may have committed before the adapter could return its receipt. */
@@ -1129,6 +1176,7 @@ export class Store {
     // The offline bar says the backend is out of reach, but its Retry only reconnects: the action is also said not to have
     // happened, with a Retry of its own, as any other failed action is. A quiet caller says it in its own way.
     if (err.kind === 'unreachable') this.netDown();
+    if (opts.quietRefusal?.(err)) return;
     // only a field's own save leaves a field marked "Not saved"; anything else is said plainly, short enough to show whole
     // a waiting draft saves itself once there is room: the notice says only the cause, with Retry now (decisions: one name per thing)
     if (err.kind === 'storageFull' && opts.keep) {
@@ -1194,28 +1242,24 @@ export class Store {
   commandNamed(name: string) { return this.commands.get(name); }
 
   /** Hydrate from Home without dropping the durable action before Retry. */
-  async retryOp(opId: string) {
+  async retryOp(opId: string, opts: Pick<DispatchOptions, 'quietRefusal'> = {}) {
     const operation = this.state.ops[opId];
     if (!operation || this.rerun.has(opId) || !['interrupted', 'failed'].includes(operation.state)) return;
     const command = this.commands.get(operation.command);
     if (!command) return;
     const readOnly = this.readOnly();
-    if (readOnly) {
-      this.toast(readOnly, 'warn');
-      return fail({ kind: 'rejected', message: readOnly });
-    }
+    if (readOnly) return this.refuse({ kind: 'rejected', message: readOnly }, opts);
     this.rerun.add(opId);
     try {
       if (operation.dealId) {
         await this.loadDeal(operation.dealId, { gaps: false });
         if (this.state.dealLoad[operation.dealId] !== 'loaded') {
           const message = 'The deal could not be loaded. Retry when it is available.';
-          this.toast(message, 'warn');
-          return fail({ kind: 'unreachable', message });
+          return this.refuse({ kind: 'unreachable', message }, opts);
         }
       }
       const result = await this.dispatchAction(command, operation.input as any, {
-        opId, idempotencyKey: operation.idempotencyKey,
+        ...opts, opId, idempotencyKey: operation.idempotencyKey,
       });
       // A retry that leaves the journal pending must still have its Retry and Discard notices (#565).
       const current = this.state.ops[opId];
@@ -1236,7 +1280,7 @@ export class Store {
   ): Promise<Result<{ opId: string; unchanged: true }>> {
     if (plan.expects?.length) {
       const checked = await this.services.repo.transaction({ writes: [], expects: plan.expects });
-      if (!checked.ok) return this.refusePlan(checked.error, opts);
+      if (!checked.ok) return this.refuse(checked.error, opts);
     }
     if (command.name === 'ImportQuestions' && opts.idempotencyKey?.startsWith('qa-import:')) {
       const operation: Operation = {
@@ -1296,10 +1340,7 @@ export class Store {
     let revision: number | null = null;
     if (opts.opId) {
       const loaded = await this.readJournalOperation(opId);
-      if (!loaded.ok) {
-        this.toast(loaded.error.message, 'warn');
-        return loaded;
-      }
+      if (!loaded.ok) return this.refuse(loaded.error, opts);
       const operation = loaded.value?.operation;
       if (!operation || operation.command !== command.name) {
         return fail({ kind: 'rejected', message: 'This action has already finished' });
@@ -1320,12 +1361,11 @@ export class Store {
       const bases = operation.baseRevs ?? {};
       if (!(await this.reloadTargets(Object.keys(bases)))) {
         const message = 'The saved records could not be loaded. Nothing was written.';
-        this.toast(message, 'warn');
-        return fail({ kind: 'unreachable', message });
+        return this.refuse({ kind: 'unreachable', message }, opts);
       }
       if (Object.entries(bases).some(([id, rev]) => this.revOf(id) !== rev)) {
-        this.toast(`${CHANGED_SINCE}; Discard it, then make the change again`, 'warn');
-        return fail({ kind: 'rejected', message: 'Changed since' });
+        const message = `${CHANGED_SINCE}; Discard it, then make the change again`;
+        return this.refuse({ kind: 'rejected', message: opts.quietRefusal ? message : 'Changed since' }, opts, message);
       }
       revision = loaded.value!.revision;
     }

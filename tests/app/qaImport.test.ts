@@ -11,7 +11,7 @@ import {
 import { previewImport, proposeLayout, readImportBytes, type ImportTable } from '../../src/app/transfer';
 import { QaImportLayout } from '../../src/app/qaImportLayout';
 import { SetResponse } from '../../src/app/commands/questions';
-import { ImportQuestions, UndoLastImport } from '../../src/app/commands/importQuestions';
+import { ImportQuestions, UndoLastImport, undoLastImportPlan } from '../../src/app/commands/importQuestions';
 import { TakeFromQaLog } from '../../src/app/commands/qaLogs';
 import { logOf, updateQaLog } from '../../src/app/qaLog';
 import { dealQuestions, qaChanged, qaKept, qaVersions } from '../../src/app/state';
@@ -188,6 +188,11 @@ it('reopens the kept choices after a committed Append loses its reply, without a
     const rows = prepareQaImport(saved.table, saved.choices.mapping).prepared.rows;
     expect(await submitQaImport(reopened.store, dealId, saved, rows)).toEqual(ok(undefined));
     expect(dealQuestions(reopened.store.get(), dealId).map((row) => row.text)).toEqual(questions);
+    const state = reopened.store.get();
+    const undo = undoLastImportPlan(state, dealId);
+    expect(undo).toMatchObject({ ok: true, value: { removed: 2 } });
+    if (!undo.ok) throw new Error(undo.error.message);
+    expect(state.ui.toasts.some((toast) => toast.action?.opId === undo.value.op.id)).toBe(true);
     const [log] = reopened.store.get().deals[dealId].qaLogs;
     expect(log).toMatchObject({ file: NAME, headerRow: 1, mapping: { text: 1, response: 4 } });
     expect(Object.keys(log.last!.sent)).toHaveLength(2);

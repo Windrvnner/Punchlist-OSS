@@ -15,7 +15,9 @@
  * the file they are in. How lines become records is in changeLog.ts.
  */
 import type { Repository, Transaction, Loaded, Version, SyncState, Recovered, Write, Delete, Seen } from '../ports';
-import { CURRENT_SCHEMA, CLASH_KINDS, Envelope, schemaOf, type AuditEntry, type ClashKind, type RecordKind } from '../domain/model';
+import {
+  CURRENT_SCHEMA, CLASH_KINDS, Envelope, schemaOf, type AuditEntry, type ClashKind, type Operation, type RecordKind,
+} from '../domain/model';
 import { ok, fail, type Result, type Failure } from '../domain/result';
 import { Combined, isLine, recKey, type Line, type RecChange, type RecState } from './changeLog';
 import { lineSchema, type Ver } from './changeLines';
@@ -1258,10 +1260,25 @@ export class LogRepository implements Repository {
 
   /** Use the confirmed change line if the journal cannot take its receipt yet (#565). */
   private async noteAppendedOperation(tx: Transaction, id: string | undefined, revs: Record<string, number>) {
-    const saved = await this.ops.transaction(tx).catch(() => null);
+    const writes = tx.writes.map((write) => this.withImportResultRevisions(write, id, revs));
+    const saved = await this.ops.transaction({ ...tx, writes }).catch(() => null);
     if (saved?.ok) Object.assign(revs, saved.value);
     // The Store will try the journal again with its complete result and Undo data.
     else if (id) this.ops.landed([id], false);
+  }
+
+  /** The commit assigns revisions before the caller can receive its receipt. */
+  private withImportResultRevisions(
+    write: Write, operationId: string | undefined, revs: Record<string, number>,
+  ): Write {
+    if (write.id !== operationId) return write;
+    const operation = write.data as Operation | null;
+    if (operation?.command !== 'ImportQuestions' || !operation.results) return write;
+    const results = Object.fromEntries(Object.entries(operation.results).map(([key, result]) => {
+      const id = key.slice(key.indexOf('/') + 1);
+      return [key, result && typeof revs[id] === 'number' ? { ...result, rev: revs[id] } : result];
+    }));
+    return { ...write, data: { ...operation, results } };
   }
 
   /** Forwarded saves must remain distinguishable from edits made directly in the recovered copy. */

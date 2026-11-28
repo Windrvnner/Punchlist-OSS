@@ -141,8 +141,14 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   // what the change files hold: an import refused for want of room writes nothing to them
   const stored = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('dil/2/shared/')).reduce((n, k) => n + localStorage.getItem(k).length, 0)); const storedBefore = await stored();
   await page.click('#im-go'); await page.waitForFunction(() => /Couldn’t import/.test(document.getElementById('im-line').textContent));
-  const full = { n: (await qs(page, dealId)).length, toast: await page.textContent('#toast'), stored: await stored(), storedBefore };
-  say('import-storage-full-atomic', full.n === beforeImport.length && full.stored === storedBefore && storedBefore > 0 && /storage is full/.test(full.toast), JSON.stringify(full));
+  const full = {
+    n: (await qs(page, dealId)).length, stored: await stored(), storedBefore,
+    footer: await page.textContent('#im-line'), notices: await page.locator('.toasts .toast').allTextContents(),
+  };
+  const onlyFormReportsFailure = /The disk is full/.test(full.footer)
+    && !full.notices.some((notice) => /storage is full|Couldn’t save/i.test(notice));
+  say('import-storage-full-atomic', full.n === beforeImport.length && full.stored === storedBefore
+    && storedBefore > 0 && onlyFormReportsFailure, JSON.stringify(full));
   await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('qaQuotaFixture')) localStorage.removeItem(k); });
   await page.click('#im-go'); await page.waitForFunction(() => !document.querySelector('.imdlg'));
   say('import-after-room', (await qs(page, dealId)).length === 4);
@@ -304,6 +310,34 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   }
   console.log('screenshots in', shots);
 }
+
+// Interrupt a real journaled import before its rows land, then recover it by keyboard.
+{ const { ctx, page } = await fresh();
+  const dealId = await newDeal(page, 'Import Recovery');
+  await page.goto(URL + '#qa-' + dealId);
+  await page.click('#qa-cols');
+  await page.click('#qa-import');
+  await page.setInputFiles('#im-file', file('recovery.csv', 'Question\nProvide the signed escrow agreement\n'));
+  await page.waitForSelector('#im-go');
+  await page.evaluate(() => {
+    const repo = store.services.repo;
+    const transaction = repo.transaction.bind(repo);
+    repo.transaction = (tx) => tx.writes.some((write) => write.kind === 'question')
+      ? new Promise(() => { window.importWriteHeld = true; })
+      : transaction(tx);
+  });
+  await page.click('#im-go');
+  await page.waitForFunction(() => window.importWriteHeld);
+  await page.reload();
+  const retry = page.locator('.intop .tundo').getByText('Retry', { exact: true });
+  await retry.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#im-go');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.imdlg', { state: 'detached' });
+  const focused = await retry.evaluate((button) => document.activeElement === button);
+  say('interrupted-import-escape-returns-to-retry', focused && (await qs(page, dealId)).length === 0);
+  await ctx.close(); }
 
 // ---- 2 Excel's two date systems: read through LibreOffice, tested in tests/backend/sheets.test.ts (the stand-in reads CSV only)
 

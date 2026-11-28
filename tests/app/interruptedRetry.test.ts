@@ -8,7 +8,7 @@ import { ALIVE_MS } from '../../src/app/store';
 import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { Operation } from '../../src/domain/model';
 import {
-  copyRecoveryDisk, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal,
+  copyRecoveryDisk, failRecoveryWrite, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal,
   type RecoveryApp,
 } from './recoveryKit';
 
@@ -438,25 +438,32 @@ describe('Retry of interrupted work from Home', () => {
     await peer.repo.close();
   });
 
-  it('keeps a completed import’s correlation through pruning until metadata completion is acknowledged', async () => {
+  const retainedStates = ['succeeded', 'failed', 'discarded'] as const;
+  it.each(retainedStates)('keeps a %s import correlated through pruning', async (state) => {
     const app = recoveryApp();
     const dealId = await recoveryDeal(app);
     const rows = (text: string) => prepareImport([[text]], suggestMapping(['Question'])).rows;
-    const imported = await app.store.dispatch(ImportQuestions, {
+    const key = 'qa-import:retained';
+    const restore = state !== 'succeeded'
+      ? failRecoveryWrite(app, (tx) => operationWrite(tx, 'ImportQuestions', 'succeeded'), 'Question write failed')
+      : undefined;
+    await app.store.dispatch(ImportQuestions, {
       dealId, mode: 'append', rows: rows('Original import'),
-    }, { idempotencyKey: 'qa-import:retained' });
-    expect(imported.ok).toBe(true);
-    if (!imported.ok) throw new Error('Import failed');
+    }, { idempotencyKey: key, quiet: true });
+    restore?.();
+    const imported = Object.values(app.store.get().ops).find((op) => op.idempotencyKey === key);
+    if (!imported) throw new Error('The import did not reach the journal');
+    if (state === 'discarded') expect(await app.store.releaseImport(key, { abandon: true })).toBe(true);
     await app.store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rows('Later import') });
     for (let number = 0; number < 260; number++) {
       await app.store.dispatch(CreateQuestion, { dealId, text: `Later question ${number}` }, { quiet: true });
     }
     await vi.waitFor(() => expect(Object.keys(app.store.get().ops).length).toBeLessThan(251));
-    const retained = await app.repo.get('op', imported.value.opId);
+    const retained = await app.repo.get('op', imported.id);
     if (!retained.ok || !retained.value) throw new Error('The retained operation was pruned');
-    expect(Operation.parse(retained.value.envelope.data).idempotencyKey).toBe('qa-import:retained');
-    expect(await app.store.releaseImport('qa-import:retained')).toBe(true);
-    const released = await app.repo.get('op', imported.value.opId);
+    expect(Operation.parse(retained.value.envelope.data)).toMatchObject({ idempotencyKey: key, state });
+    expect(await app.store.releaseImport(key)).toBe(true);
+    const released = await app.repo.get('op', imported.id);
     if (!released.ok || !released.value) throw new Error('The acknowledged operation could not be read');
     expect(Operation.parse(released.value.envelope.data).idempotencyKey).toBeUndefined();
     await app.repo.close();

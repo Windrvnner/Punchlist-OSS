@@ -7,10 +7,13 @@ import { StoreContext } from '../../src/ui/hooks';
 import { ImportDialog } from '../../src/ui/qaImport';
 import { keptImport, keepImport, importKey, keptImportsReady } from '../../src/app/keptImports';
 import { readImportBytes } from '../../src/app/transfer';
-import { ImportQuestions, lastImport } from '../../src/app/commands/importQuestions';
+import { ImportQuestions, lastImport, RevertImport } from '../../src/app/commands/importQuestions';
+import { registry } from '../../src/app/commands/undo';
 import { SetResponse } from '../../src/app/commands/questions';
 import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { copyRecoveryDisk, recoveryApp, recoveryDeal, operationWrite } from '../app/recoveryKit';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
+import { csvCodec } from '../../src/adapters/spreadsheet';
 
 it('finishes an unchanged import without replaying rows over a later edit or hiding the previous Undo', async () => {
   vi.stubGlobal('ResizeObserver', class {
@@ -115,7 +118,48 @@ it('keeps earlier Undo hidden when a real committed import restarts without its 
   }
 });
 
-it('keeps a refused import correlated when its notice Retry succeeds', async () => {
+async function openPortfolioImport(app: ReturnType<typeof recoveryApp>, dealId: string, screen: HTMLDivElement) {
+  await keptImportsReady;
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const rows = questions.map((text) => [text, 'See the signed agreement', 'For internal review']);
+  const headers = ['Question', 'Reviewed answer', 'Response'];
+  const encoded = await csvCodec.write('Sheet1', [headers, ...rows]);
+  if (!encoded.ok) throw new Error(encoded.error.message);
+  const read = await readImportBytes(app.store, 'Portfolio.csv', Uint8Array.from(encoded.value.bytes));
+  if (!read.ok) throw new Error(read.error.message);
+  keepImport(importKey.qa(dealId), {
+    table: read.value,
+    choices: {
+      mapping: { ...read.value.mapping, response: 1 }, path: '/synthetic/Portfolio.csv', mode: 'append',
+      answered: true, makeLog: true, touched: true,
+    },
+  });
+  await act(() => render(
+    <StoreContext.Provider value={app.store}><ImportDialog dealId={dealId} /></StoreContext.Provider>, screen,
+  ));
+  await vi.waitFor(() => expect(screen.querySelector('#im-go')).not.toBeNull());
+}
+
+async function undoImportedRows(app: ReturnType<typeof recoveryApp>) {
+  const undo = app.store.get().ui.toasts.find(({ action }) => action?.label === 'Undo')?.action?.opId;
+  expect(undo).toBeDefined();
+  const previous = registry.get(RevertImport.name);
+  registry.set(RevertImport.name, RevertImport);
+  try {
+    expect((await app.store.undo(undo!)).ok).toBe(true);
+    expect(Object.values(app.store.get().questions)).toHaveLength(0);
+  } finally {
+    if (previous) registry.set(RevertImport.name, previous);
+    else registry.delete(RevertImport.name);
+  }
+}
+
+it.each([
+  { command: 'ImportQuestions', state: 'pending', kind: 'unreachable', savedRows: 0 },
+  { command: 'ImportQuestions', state: 'succeeded', kind: 'storageFull', savedRows: 0 },
+  { command: 'KeepQaLog', state: 'succeeded', kind: 'storageFull', savedRows: 2_000 },
+  { command: 'RecordQaLogExport', state: 'succeeded', kind: 'storageFull', savedRows: 2_000 },
+] as const)('retries a kept import in its form after $command $state fails (#270)', async (phase) => {
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     disconnect() {}
@@ -125,40 +169,38 @@ it('keeps a refused import correlated when its notice Retry succeeds', async () 
   document.body.append(screen);
   try {
     const dealId = await recoveryDeal(app);
-    await keptImportsReady;
-    const bytes = Uint8Array.from(new TextEncoder().encode('Question\nOriginal submitted question'));
-    const read = await readImportBytes(app.store, 'Original.csv', bytes);
-    if (!read.ok) throw new Error(read.error.message);
-    keepImport(importKey.qa(dealId), {
-      table: read.value,
-      choices: {
-        mapping: read.value.mapping, path: null, mode: 'append',
-        answered: false, makeLog: false, touched: true,
-      },
-    });
-    await act(() => render(
-      <StoreContext.Provider value={app.store}><ImportDialog dealId={dealId} /></StoreContext.Provider>, screen,
-    ));
-    await vi.waitFor(() => expect(screen.querySelector('#im-go')).not.toBeNull());
+    await openPortfolioImport(app, dealId, screen);
     const transact = app.repo.transaction.bind(app.repo);
-    app.repo.transaction = async (transaction) => operationWrite(transaction, 'ImportQuestions', 'pending')
-      ? { ok: false, error: { kind: 'unreachable', message: 'Journal unavailable' } } : transact(transaction);
-    await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
-    await vi.waitFor(() => expect(screen.textContent).toContain('Journal unavailable'));
-    expect(Object.values(app.store.get().questions)).toHaveLength(0);
-    const submission = keptImport(importKey.qa(dealId))!.submission as { key: string };
-    const notice = app.store.get().ui.toasts.find((toast) => toast.text === 'Couldn’t save ·')!;
-    expect(notice.action?.label).toBe('Retry');
+    const message = 'The Punchlist folder cannot be written to';
+    app.repo.transaction = async (transaction) => operationWrite(transaction, phase.command, phase.state)
+      ? { ok: false, error: { kind: phase.kind, message } } : transact(transaction);
+    const clickImport = () => act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+    await clickImport();
+    await vi.waitFor(() => expect(screen.textContent).toContain(message));
+    expect(Object.values(app.store.get().questions)).toHaveLength(phase.savedRows);
+    const key = importKey.qa(dealId);
+    const initial = keptImport(key)?.submission;
+    expect(initial).toBeDefined();
+    if (phase.savedRows === 0) {
+      await clickImport();
+      await vi.waitFor(() => expect(screen.textContent).toContain(message));
+      expect(keptImport(key)?.submission).toEqual(initial);
+    }
+    const notices = app.store.get().ui.toasts;
+    expect(notices.some(({ action }) => action?.label === 'Retry')).toBe(false);
+    expect(notices.some(({ text }) => /storage is full|Couldn’t save/.test(text))).toBe(false);
+
     app.repo.transaction = transact;
-    notice.action!.run!();
-    await vi.waitFor(() => expect(Object.values(app.store.get().questions)).toHaveLength(1));
-    const success = Object.values(app.store.get().ops).find((operation) =>
-      operation.command === 'ImportQuestions' && operation.state === 'succeeded')!;
-    expect(success.idempotencyKey).toBe(submission.key);
-    expect(keptImport(importKey.qa(dealId))).toBeDefined();
-    await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
-    await vi.waitFor(() => expect(keptImport(importKey.qa(dealId))).toBeUndefined());
-    expect(Object.values(app.store.get().questions)).toHaveLength(1);
+    await clickImport();
+    await vi.waitFor(() => expect(keptImport(key)).toBeUndefined());
+    const result = Object.values(app.store.get().questions);
+    expect(result).toHaveLength(2_000);
+    expect(result.every(({ response, status }) => response === 'See the signed agreement' && status === 'answered'))
+      .toBe(true);
+    expect(screen.textContent).not.toContain(message);
+    const log = app.store.get().deals[dealId].qaLogs[0];
+    expect([log.file, log.mapping.response, Object.keys(log.last!.sent).length]).toEqual(['Portfolio.csv', 1, 2_000]);
+    await undoImportedRows(app);
   } finally {
     render(null, screen);
     screen.remove();
