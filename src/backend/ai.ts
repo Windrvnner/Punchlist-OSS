@@ -70,6 +70,7 @@ import { foldersOf, matchFolders, inside } from './folderList';
 import { cleanDrafts, againstOf, otherProject, isBlackline, type Against } from './blacklines';
 import { coreSet, shortNamesIn, BEST as CORE_BEST } from './core';
 import { sweep as sweepReports, stateOf as reportStateOf, incompleteReports, type ReportLine } from './reports';
+import { documentProgress } from './dealProgress';
 import {
   ReportSweeps, knownFindings, raiseFinding, citeFinding, reportFindingId, reportCandidates,
 } from './reportsKit';
@@ -131,8 +132,8 @@ export interface AiOptions {
   /** `converse`, where the service has it, makes a chat one conversation there; `upload` and `remove` then keep its transcript at a compaction */
   service: Pick<ModelService, 'complete' | 'models'> & Partial<Pick<ModelService, 'converse' | 'upload' | 'remove' | 'outputLimit' | 'inputLimit'>>;
   docs: AiDocs; keeper: Pick<StoreKeeper, 'ensure'>; repo: Repository;
-  /** tell the window about a finding the first pass wrote */
-  announce?: (kind: 'finding', id: string) => void;
+  /** Tell the window about a saved finding or background review progress. */
+  announce?: (kind: 'finding' | 'progress', id: string) => void;
   /** what each run cost in calls, told when the run ends; a run that made no call tells nothing */
   usage?: (entry: UsageEntry) => void;
   /** why a document outside the core set was read: called once per branch-out */
@@ -1097,6 +1098,26 @@ export function nodeAi(o: AiOptions) {
     return reportCandidates(records, { where, shut, blacklines: cleanOf(dealId) });
   }
 
+  /** Only a check that came to a result contributes its documents to the read count. */
+  const checkedDocuments = (line: CheckLine) => line.result && line.result !== 'unsettled' ? line.docs ?? [] : [];
+
+  /** The checked document ids and latest checklist results in the same check-log snapshot. */
+  function progressResults(all: CheckLine[]) {
+    const read = new Set<string>();
+    const latest = new Map<string, CheckLine>();
+    let done: string[] | undefined;
+    const group = groupsOf(all);
+    for (const line of all) {
+      if (!line.item) {
+        if (line.done) done = line.done.items;
+        continue;
+      }
+      keep(latest, line, group);
+      for (const id of checkedDocuments(line)) read.add(id);
+    }
+    return { read, latest, done };
+  }
+
   function reportReadStatus(dealId: string, all: CheckLine[], records: DocRecord[]) {
     const state = reportStateOf(reportLines(all));
     const incomplete = incompleteReports(records, state);
@@ -1114,7 +1135,10 @@ export function nodeAi(o: AiOptions) {
       dealId, docs, earlier, where, system: RULES, models: { fast: m.fast, standard: m.standard },
       workstreams: WORKSTREAMS, workstreamOf, fitParas,
       lines: async () => reportLines(await lines(dealId)),
-      say: async (report) => { await say(dealId, { report }); },
+      say: async (report) => {
+        await say(dealId, { report });
+        if (report.tried?.step === 'read' || report.read) o.announce?.('progress', dealId);
+      },
       claim: (keys) => claimReports(dealId, keys),
       release: async (keys) => { if (o.shared) await release(dealId, keys).catch(() => undefined); },
       again: () => reportsSoon(dealId),
@@ -3843,23 +3867,21 @@ export function nodeAi(o: AiOptions) {
      */
     async progress(dealId: string): Promise<Result<DealProgress>> {
       try {
-        const all = await lines(dealId); const read = new Set<string>(); const latest = new Map<string, CheckLine>(); let done: string[] | undefined; let core: string[] = [];
-        const group = groupsOf(all);
-        for (const l of all) { if (l.item) { keep(latest, l, group); if (l.result && l.result !== 'unsettled') for (const id of l.docs ?? []) read.add(id); } else if (l.done) done = l.done.items; }
-        core = await coreOf(dealId, true);   // worked out as a check would, with nothing described for it
-        const isCore = new Set(core); const folders = new Map<string, { folder: string; files: number; read: number; core: number; coreRead: number; copies?: number }>();
-        const entry = (folder: string) => { const f = folders.get(folder) ?? { folder, files: 0, read: 0, core: 0, coreRead: 0 }; folders.set(folder, f); return f; };
-        for (const r of o.docs.records(dealId)) {
-          const f = entry(r.folder); f.files++; if (read.has(r.docId)) f.read++; if (isCore.has(r.docId)) { f.core++; if (read.has(r.docId)) f.coreRead++; }
-          // a document's other places are copies: each is counted where it sits, and the document itself only at its first place
-          for (const c of r.copies ?? []) { const g = entry(c.folder); g.copies = (g.copies ?? 0) + 1; }
-        }
-        const has = new Set(o.docs.records(dealId).map((r) => r.docId)); const items = (await shownItems(dealId, latest, done)).map(({ id }) => { const l = latest.get(id); return unmoored(l, (d) => has.has(d)) ? 'unsettled' : l?.result; }); const count = (r: Outcome) => items.filter((x) => x === r).length;
+        const all = await lines(dealId);
+        const { read, latest, done } = progressResults(all);
+        const core = await coreOf(dealId, true);   // worked out as a check would, with nothing described for it
+        const folders = documentProgress(o.docs.records(dealId), read, core);
+        const has = new Set(o.docs.records(dealId).map((record) => record.docId));
+        const items = (await shownItems(dealId, latest, done)).map(({ id }) => {
+          const line = latest.get(id);
+          return unmoored(line, (docId) => has.has(docId)) ? 'unsettled' : line?.result;
+        });
+        const count = (outcome: Outcome) => items.filter((result) => result === outcome).length;
         const records = o.docs.records(dealId);
         const also = await alsoIn(dealId, records);
         const reportStatus = reportReadStatus(dealId, all, records);
         return ok({
-          folders: [...folders.values()],
+          folders,
           ...(also.length ? { alsoIn: also } : {}),
           ...reportStatus,
           checklist: {

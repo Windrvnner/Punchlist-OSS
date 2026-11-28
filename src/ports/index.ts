@@ -110,6 +110,8 @@ export interface SyncState {
 /** What `recover` made: the copy's deal id, and each record's id in it by its id in the deleted deal. */
 export interface Recovered { dealId: string; ids: Record<string, string> }
 
+export type RepositoryChange = { kind: RecordKind | 'sync' | 'progress'; id: string };
+
 export interface Repository {
   get(kind: RecordKind, id: string): Promise<Result<Loaded | null>>;
   /** every record of a kind, optionally limited to one deal's index */
@@ -117,8 +119,8 @@ export interface Repository {
   /** all-or-nothing; rejects with conflict/storageFull/unreachable */
   transaction(tx: Transaction): Promise<Result<Record<string, number> /* id → new rev */>>;
   audit(recordId: string): Promise<Result<AuditEntry[]>>;
-  /** fires when another tab or user changed a record; `{kind: 'sync'}` when what sync() reports has changed */
-  watch(onChange: (change: { kind: RecordKind | 'sync'; id: string }) => void): () => void;
+  /** Fires for record and sync changes, and with the deal id when background review progress is written. */
+  watch(onChange: (change: RepositoryChange) => void): () => void;
   /** Optional: only a backend that shares records between PCs has anything to report. Asking also means "look again now". */
   sync?(): Promise<Result<SyncState>>;
   /**

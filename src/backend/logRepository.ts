@@ -14,7 +14,9 @@
  * install, a restored folder, a conflict copy) is read like any other: lines are told apart by what they say, not by
  * the file they are in. How lines become records is in changeLog.ts.
  */
-import type { Repository, Transaction, Loaded, Version, SyncState, Recovered, Write, Delete, Seen } from '../ports';
+import type {
+  Repository, RepositoryChange, Transaction, Loaded, Version, SyncState, Recovered, Write, Delete, Seen,
+} from '../ports';
 import {
   CURRENT_SCHEMA, CLASH_KINDS, Envelope, schemaOf, type AuditEntry, type ClashKind, type Operation, type RecordKind,
 } from '../domain/model';
@@ -384,7 +386,7 @@ export class LogRepository implements Repository {
   private read = new Map<string, number>();                 // file name → how much of it has been taken in
   private ops: Journal;
   private clock: () => string;
-  private watchers = new Set<(change: { kind: RecordKind | 'sync'; id: string }) => void>();
+  private watchers = new Set<(change: RepositoryChange) => void>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastSync = '';
   private outSince: string | null = null;                   // when this PC's files were found out of touch with the shared folder, while they still are (kept in touch.json, so a restart does not reset it)
@@ -779,7 +781,7 @@ export class LogRepository implements Repository {
     try { this.keepInstall(JSON.stringify(this.install((this.o.newId ?? (() => globalThis.crypto.randomUUID()))()))); } catch { /* the check runs again at the next start */ }
   }
   /** Tell whoever is watching about a record written here by something other than the window (the first pass writing a finding). */
-  announce(kind: RecordKind, id: string) { for (const w of this.watchers) w({ kind, id }); }
+  announce(kind: RecordKind | 'progress', id: string) { for (const w of this.watchers) w({ kind, id }); }
   /** set by close: a change that arrives later (a check finishing after the shared folder was changed) is refused, not written */
   private closed = false;
   /** Stop: later changes are refused, and this resolves when every change already started has been written (or refused). */
@@ -1397,7 +1399,7 @@ export class LogRepository implements Repository {
   }
 
   /** Changes made on other PCs are found by looking: sync clients do not reliably say when a file has changed. */
-  watch(onChange: (change: { kind: RecordKind | 'sync'; id: string }) => void, everyMs = 5000): () => void {
+  watch(onChange: (change: RepositoryChange) => void, everyMs = 5000): () => void {
     this.watchers.add(onChange);
     if (!this.timer) { this.timer = setInterval(() => this.refresh(), everyMs); (this.timer as any).unref?.(); }
     return () => { this.watchers.delete(onChange); if (!this.watchers.size && this.timer) { clearInterval(this.timer); this.timer = null; } };

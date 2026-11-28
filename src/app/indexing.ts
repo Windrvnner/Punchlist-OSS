@@ -158,13 +158,18 @@ export function folderProgress(
   }));
   const total = grouped ? { ...readingTotals(rows), notice: summary } : null;
   const core = coreDocuments(reading, away, empty, Boolean(summary));
+  const incomplete = progress?.incompleteReports ?? [];
+  const reportReads = incomplete.length ? {
+    label: `${incomplete.length.toLocaleString('en-US')} incomplete report read${incomplete.length === 1 ? '' : 's'}`,
+    documents: incomplete,
+  } : undefined;
   // Only the first two reported matches are considered, even if one of those deals is no longer present.
   const alsoIn = (progress?.alsoIn ?? []).slice(0, 2).flatMap(({ dealId, docs, of }) => {
     const match = state.deals[dealId];
     return match ? [{ deal: match, docs, of: Math.max(of, docs) }] : [];
   });
   return {
-    rows, total, folderCount: folders.length, core, alsoIn,
+    rows, total, folderCount: folders.length, core, alsoIn, reportReads,
     showLocate: Boolean(summary),
     showFolders: awayCount === 0,
     stopped: indexingStopped(state, deal),
