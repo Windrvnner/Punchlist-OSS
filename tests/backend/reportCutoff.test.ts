@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { cutOff } from '../../src/backend/limits';
+import { derivedId } from '../../src/domain/derivedId';
+import type { Finding } from '../../src/domain/model';
 import { stateOf, type ReportLine } from '../../src/backend/reports';
 import type { Repository } from '../../src/ports';
 import { checkLines, deal, doc, Mem, setup, val, type Call } from './reviewKit';
@@ -203,5 +205,108 @@ it('asks again for a refused write while keeping an independent issue from the s
     expect(complete).toEqual([first.title, next.title].sort());
   } finally {
     await s.ai.close();
+  }
+});
+
+it('consumes the existing attempt budget across a cutoff and unusable replies (#1212)', async () => {
+  const first = row('the inverter warranty ends before debt maturity');
+  let corrections = 0;
+  const s = await reader(({ prompt }, attempt) => {
+    if (attempt === 1) cutAfter([first], 1);
+    if (prompt.includes('provide an issues array')) corrections++;
+    return '{"report":true}';
+  });
+  try {
+    await s.sweep();
+    expect(corrections).toBe(2);
+    expect(s.state().tries('read', docId)).toBe(3);
+    expect(s.state().read.has(docId)).toBe(false);
+    expect(val(await s.repo.list('finding', 'd1'))).toHaveLength(1);
+    expect(val(await s.ai.progress('d1')).incompleteReports).toEqual([{ docId, name: report.name }]);
+    await s.sweep();
+    expect(s.calls).toHaveLength(5);
+  } finally {
+    await s.ai.close();
+  }
+});
+
+it('keeps a continued report incomplete after a contradictory reply and an uncitable final issue (#1212)', async () => {
+  const kept = row('the inverter warranty ends before debt maturity');
+  const uncitable = row('the replacement budget excludes transformers', 61);
+  const s = await reader((_call, attempt) => {
+    if (attempt === 1) cutAfter([kept], 1);
+    if (attempt === 2) return '{"report":false}';
+    return JSON.stringify({ issues: [uncitable] });
+  });
+  try {
+    await s.sweep();
+    expect(s.calls).toHaveLength(3);
+    expect(s.state().verdict.get(docId)).toBe(true);
+    expect(s.state().read.has(docId)).toBe(false);
+    expect(s.state().tries('read', docId)).toBe(3);
+    expect(val(await s.ai.progress('d1')).incompleteReports).toEqual([{ docId, name: report.name }]);
+    expect(val(await s.repo.list('finding', 'd1'))).toHaveLength(1);
+  } finally {
+    await s.ai.close();
+  }
+});
+
+it('settles separate cutoff citation obligations across 100 finding conflicts (#1212)', async () => {
+  const findings = reportIssues().slice(0, 100).map(({ title, workstream, body }) => ({
+    id: derivedId('f', [title]), dealId: 'd1', title, workstream, body, status: 'open', sources: [],
+  }));
+  const covers = (page: number) => findings.map(({ id }) => ({ covered: id, sources: [{ doc: docId, page }] }));
+  const unavailable = () => Object.assign(new Error('The service cannot be reached'), { code: 'unreachable' });
+  const first = await reader((_call, attempt) => {
+    if (attempt === 1) cutAfter(covers(12), findings.length);
+    throw unavailable();
+  });
+  const repo = first.repo;
+  try {
+    val(await repo.transaction({
+      writes: findings.map((data) => ({
+        kind: 'finding', id: data.id, data, expectedRev: null, alongside: [{ ...data, note: 'Further review' }],
+      })),
+      index: { dealId: 'd1', add: findings.map(({ id }) => ({ kind: 'finding', id })) },
+    }));
+    await first.sweep();
+    const conflicts = val(await repo.list('finding', 'd1'));
+    expect(conflicts.filter(({ conflict }) => conflict?.length === 2)).toHaveLength(100);
+    expect(first.state().owed).toHaveLength(100);
+    val(await repo.transaction({ writes: conflicts.map((finding) => ({
+      kind: 'finding', id: (finding.envelope.data as Finding).id, data: finding.envelope.data, expectedRev: finding.rev,
+      resolves: finding.conflict?.map(({ id }) => id),
+    })) }));
+  } finally {
+    await first.ai.close();
+  }
+  const second = await reader((_call, attempt) => {
+    if (attempt === 1) cutAfter(covers(24), findings.length);
+    throw unavailable();
+  }, first);
+  const transact = repo.transaction;
+  repo.transaction = async (tx) => {
+    const blocked = tx.writes.some((write) => (write.data as Finding)?.sources?.some(({ loc }) => loc === 'p. 24'));
+    if (blocked) return { ok: false, error: { kind: 'storageFull', message: 'Disk full' } };
+    return transact.call(repo, tx);
+  };
+  try {
+    await second.sweep();
+    expect(second.state().owed).toHaveLength(100);
+    expect(second.state().owed.every(({ sources }) => sources[0].loc === 'p. 24')).toBe(true);
+  } finally {
+    repo.transaction = transact;
+    await second.ai.close();
+  }
+  const last = await reader(() => '{"issues":[]}', second);
+  try {
+    await last.sweep();
+    expect(last.state().owed).toEqual([]);
+    const saved = val(await repo.list('finding', 'd1')).map(({ envelope }) => envelope.data as Finding);
+    expect(saved).toHaveLength(100);
+    expect(saved.every(({ sources }) => sources.map(({ loc }) => loc).join(',') === 'p. 12,p. 24')).toBe(true);
+    expect(last.state().read.get(docId)?.issues).toHaveLength(200);
+  } finally {
+    await last.ai.close();
   }
 });
