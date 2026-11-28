@@ -68,12 +68,22 @@ export const SetQaLogFolder = define({
 /** An update saved: what the log holds of the app's, so the next one knows which cells are still the app's. No Undo: the file is written. */
 export const RecordQaLogExport = define({
   name: 'RecordQaLogExport',
-  input: z.object({ dealId: DealId, name: z.string().min(1), last: QaLog.shape.last.unwrap() }),
+  input: z.object({
+    dealId: DealId, name: z.string().min(1), last: QaLog.shape.last.unwrap(),
+    source: z.object({ dealRev: z.number().int(), questions: z.record(QuestionId, z.number().int()) }).optional(),
+  }),
   targets: (_s, i) => [i.dealId],
   plan(state, input, ctx) {
-    const d = state.deals[input.dealId]; if (!d) return fail(notFound('Deal not found', input.dealId));
-    const logs = d.qaLogs.map((l) => (l.name === input.name ? { ...l, last: input.last } : l));
-    return ok({ dealId: d.id, upserts: [{ kind: 'deal', record: withLogs(d, logs, ctx.at), expectedRev: d.rev }], audit: [] });
+    const deal = state.deals[input.dealId];
+    if (!deal) return fail(notFound('Deal not found', input.dealId));
+    const logs = deal.qaLogs.map((log) => (log.name === input.name ? { ...log, last: input.last } : log));
+    const expectedRev = input.source?.dealRev ?? deal.rev;
+    const expects = input.source && Object.entries(input.source.questions)
+      .map(([id, rev]) => ({ kind: 'question' as const, id, rev }));
+    return ok({
+      dealId: deal.id, upserts: [{ kind: 'deal', record: withLogs(deal, logs, ctx.at), expectedRev }],
+      expects, audit: [],
+    });
   },
 });
 

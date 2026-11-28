@@ -4,6 +4,7 @@ import {
   parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
 } from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
+import { KeepQaLog, RecordQaLogExport } from './commands/qaLogs';
 import type { AcceptedMatch } from '../domain/qaMatch';
 import {
   dropImport, dropSavedImport, finishKeptSubmission, importKey, keepImport, keptImport, keptImportsReady,
@@ -223,7 +224,8 @@ function savedSubmission(key: string): Submission | null {
 
 export function isCorrelatedQaImport(op: Operation | undefined):
   op is Operation & { dealId: string; idempotencyKey: string } {
-  return op?.command === ImportQuestions.name && !!op.dealId && !!op.idempotencyKey?.startsWith('qa-import:');
+  return !!op?.dealId && !!op.idempotencyKey?.startsWith('qa-import:')
+    && [ImportQuestions.name, KeepQaLog.name, RecordQaLogExport.name].includes(op.command);
 }
 
 /** The interrupted action reopens its complete import instead of retrying only the rows (#270). */
@@ -284,5 +286,5 @@ async function makeTheLog(store: Store, dealId: string, submission: Submission) 
   const { table, choices } = submission;
   const { sheet, headerRow, rows } = table;
   const log = { path: choices.path, sheet, headerRow, mapping: choices.mapping, make: choices.makeLog, rows };
-  return keepImportedLog(store, dealId, log);
+  return keepImportedLog(store, dealId, log, submission.key);
 }

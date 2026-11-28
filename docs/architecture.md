@@ -239,10 +239,10 @@ A deal's checklist is made up of its own item records, linked to the findings an
 - **Q&A import** reads and proposes a table layout through `src/app/transfer.ts`. Its preview uses prepared dates
   where available. `src/app/qaImportLayout.ts` publishes the selected table and its accepted matches together. The
   preview and `src/app/qaImport.ts` both send the accepted matches and prepared rows to `ImportQuestions`. The
-  submission workflow resumes by journal correlation and finishes the saved log choice. The form owns failure
-  presentation. The interrupted-action notice reopens the correlated submission with its original choices. Starting
-  over or replacing the file discards its unfinished journal action before clearing the kept submission. A committed
-  row write keeps its correlation until local storage confirms the submission was removed.
+  submission workflow resumes the question write, log association, and log metadata through their original journal
+  entries. The form reports failures, and an interrupted-action notice reopens the correlated submission with its
+  original choices. Starting over or replacing the file discards unfinished entries. Committed and discarded entries
+  keep their correlation until local storage confirms removal, so a stale draft cannot write rows again.
 - **The master checklist** is brought in pasted or from a file, read whole by the model in one call (in halves,
   through `parts.ts`, when the service refuses it as too long or cuts the reply off; lines it leaves unplaced are read
   once more by the thorough model), and tied out so that every line is accounted for (`src/app/listRead.ts`,
