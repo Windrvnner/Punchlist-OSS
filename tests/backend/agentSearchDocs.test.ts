@@ -39,6 +39,8 @@ function setupIn(
   refuseOver = Infinity,
   help: Record<string, unknown> = NO_HELP,
   otherRooms: Record<string, DocRecord[]> = {},
+  unavailable: string[] = [],
+  toolCalls?: 'native',
 ) {
   const turns: Call[] = []; const reads: Call[] = []; const picks: Call[] = [];
   const svc = new StandInService(async (c) => {
@@ -49,15 +51,17 @@ function setupIn(
     if (isRead(call)) reads.push(call);
     return JSON.stringify(help);
   });
-  (svc as { converse?: unknown }).converse = undefined;
+  if (!toolCalls) (svc as { converse?: unknown }).converse = undefined;
   const keeper = new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock });
   const records = (dealId: string) => otherRooms[dealId] ?? room;
   const docs = {
     records,
-    wanted: async (dealId: string, ids: string[]) => records(dealId).filter((r) => ids.includes(r.docId))
+    wanted: async (dealId: string, ids: string[]) => records(dealId)
+      .filter((r) => ids.includes(r.docId) && !unavailable.includes(r.docId))
       .map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) })),
   };
-  const ai = nodeAi({ service: svc, keeper, repo: memRepo(clock), clock, docs, width: 8, library: [] });
+  const ai = nodeAi({ service: svc, keeper, repo: memRepo(clock), clock, docs, width: 8, library: [],
+    retry: { sleep: async () => {} }, ...(toolCalls ? { toolCalls } : {}) });
   return { ai, turns, reads, picks };
 }
 /** the documents a read was given, in the order it lists them */
@@ -159,23 +163,64 @@ describe('first-turn attachments use the same batches as the read tool (#1213)',
     } });
   });
 
-  it('uses the qualified path to defer a file on Home when a deal has the same path', async () => {
+  it('uses the deal-qualified id to defer a file on Home when a deal has the same path', async () => {
     const own = 'me_00112233aabbccdd';
     const credit = doc(10, 'Credit Agreement.pdf');
     const room = [...first, doc(9, 'Technical Due Diligence.pdf'), credit];
-    const path = `${own}/vdr/${credit.name}`;
+    const handle = `${own}/${credit.docId}`;
     const s = setupIn(room, [
-      { tool: 'read', docs: [path] },
-      { text: 'The facility is secured. [1]', sources: [{ doc: `${own}/${credit.docId}`, page: 2 }] },
+      { tool: 'read', docs: [handle] },
+      { text: 'The facility is secured. [1]', sources: [{ doc: handle, page: 2 }] },
     ], Infinity, NO_HELP, { d1: [doc(11, credit.name)] });
     const result = await s.ai.answer({ message: 'Summarize.', history: [], model: 'standard',
       dealIds: ['d1'], files: own, attachments: attachments(room) });
-    expect(s.turns[0].prompt).toContain(path);
+    expect(s.turns[0].prompt).toContain(`${handle} (vdr/${credit.name})`);
     expect(sentNames(s.turns[0])).toEqual(room.slice(0, 8).map(({ name }) => name).sort());
     expect(sentNames(s.turns[1])).toEqual([credit.name]);
     expect(result).toMatchObject({ ok: true, value: {
       sources: [{ docId: credit.docId, dealId: own, loc: 'p. 2' }],
     } });
+  });
+
+  it.each([undefined, 'native'] as const)('retries the selected file when two attachments share a path (%s)',
+    async (mode) => {
+      const name = 'Credit Agreement.pdf';
+      const copy = (n: number): DocRecord => {
+        const rec = doc(n, name);
+        return { ...rec, folder: '@attachments', rel: `d1/pc-one/${rec.docId}.pdf` };
+      };
+      const other = copy(10);
+      const selected = copy(11);
+      const requested = [...first, doc(9, 'Technical Due Diligence.pdf'), selected];
+      const s = setupIn([other, ...requested], [
+        { tool: 'read', docs: [selected.docId] },
+        { text: 'The facility is secured. [1]', sources: [{ doc: selected.docId, page: 2 }] },
+      ], Infinity, NO_HELP, {}, [], mode);
+      const result = await s.ai.answer({ ...ask('Summarize.'), attachments: attachments(requested) });
+      expect(s.turns[0].prompt).toContain(`${selected.docId} (@attachments/d1/pc-one/${name})`);
+      expect(s.turns[1].files.map(({ name }) => fromStoreName(name)?.docId)).toEqual([selected.docId]);
+      expect(result).toMatchObject({ ok: true, value: { sources: [{ docId: selected.docId, loc: 'p. 2' }] } });
+    });
+
+  it('names an unavailable clean draft and does not count or cite either half of the pair', async () => {
+    const clean = doc(8, 'Credit Agreement.pdf');
+    const blackline = doc(9, 'Credit Agreement (blackline).pdf');
+    const s = setupIn([clean, blackline, first[0]], [
+      { tool: 'read', docs: [blackline.name, first[0].name] },
+      { text: 'The facility is secured. [1]', sources: [{ doc: clean.docId, page: 2 }] },
+      { text: 'I only have the term sheet. [1]', sources: [{ doc: first[0].docId, page: 1 }] },
+    ], Infinity, NO_HELP, {}, [clean.docId]);
+    const result = await s.ai.answer({ ...ask('Summarize.'), runId: 'unavailable-draft' });
+    expect(sentNames(s.turns[1])).toEqual([first[0].name]);
+    expect(s.turns[1].prompt).toContain(`vdr/${clean.name}`);
+    expect(s.turns[1].prompt).toContain(`vdr/${blackline.name}`);
+    expect(names(s.turns[1])).not.toContain(clean.name);
+    expect(names(s.turns[1])).not.toContain(blackline.name);
+    expect(result).toMatchObject({ ok: true, value: {
+      sources: [{ docId: first[0].docId, loc: 'p. 1' }], research: { read: { docs: 1, of: 3 } },
+    } });
+    if (result.ok) expect(result.value.research?.steps.filter(({ kind }) => kind === 'read'))
+      .toEqual([expect.objectContaining({ text: `Reviewed ${first[0].name}` })]);
   });
 });
 
