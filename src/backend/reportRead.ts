@@ -11,7 +11,7 @@ import { unknownIds } from './recordIds';
 import { withFewerChanges } from './limits';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
-  type ReportCut, type KeptReportIssue, isCut, reportPlace, reportTitleKey,
+  type ReportCut, type KeptReportIssue, isCut, no, reportIssueText, reportPlacement, reportTitleKey, sameReportIssue,
 } from './reportTypes';
 
 /** sentences of one paragraph, written out for the model */
@@ -114,18 +114,11 @@ function isOwn(k: ReportKit, doc: string, f: Known) {
 /** the title as the model wrote it; a blank one is none (#1215) */
 const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string' && row.title.trim() ? row.title : '');
 
-const placement = (s: Source) => JSON.stringify([reportPlace(s), s.quote ?? '']);
-const atPlaces = (key: string, sources: Source[]) => JSON.stringify([key, ...sources.map(placement).sort()]);
+const atPlaces = (key: string, sources: Source[]) => JSON.stringify([key, ...sources.map(reportPlacement).sort()]);
 const issueId = (issue?: ReadIssue) => issue?.finding ?? issue?.covered ?? '';
 
 const earlierIssue = (row: Record<string, unknown>, before?: ReadLine) =>
   before?.issues[(tagNumber(row.still, 'E') ?? 0) - 1];
-
-function issueSignature(doc: string, title: string, body: string[], sources: Source[]) {
-  // Source order matters because the body numbers refer to it.
-  const parts = [title, body, ...sources.map(placement)];
-  return `${doc}:${createHash('sha256').update(JSON.stringify(parts)).digest('hex')}`;
-}
 
 const hasWriteup = (row: Record<string, unknown>) => !!titleOf(row) && prose(row.body).length > 0;
 
@@ -236,16 +229,15 @@ class ReportRead {
   }
 
   /** Continue the existing title ordinals, including a finding written before its cutoff was logged. */
-  private idFor(title: string, signature: string, known: Known[]) {
-    const same = known.find((finding) => finding.signature === signature);
+  private idFor(issue: Issue, known: Known[]) {
+    const same = known.find((finding) => finding.signature === issue.signature);
     if (same) return same.id;
-    const key = reportTitleKey(title);
+    const key = reportTitleKey(issue.title);
     let nth = (this.titles.get(key) ?? 0) + 1;
     for (;;) {
-      const id = this.k.idFor(this.rec.docId, title, nth);
+      const id = this.k.idFor(this.rec.docId, issue.title, nth);
       const had = known.find((finding) => finding.id === id);
-      // Legacy findings and deletions keep their existing title ordinal.
-      if (!this.reserved.has(id) && had?.signature === undefined) {
+      if (!this.reserved.has(id) && (!had || sameReportIssue(had, issue))) {
         this.titles.set(key, nth);
         return id;
       }
@@ -260,9 +252,9 @@ class ReportRead {
     // an issue stands on a page of the report a person can open, as any finding does
     if (!fitted.text || !fitted.sources.length) { this.unplaced++; return true; }
     const body = k.fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()));
-    const signature = issueSignature(this.rec.docId, title, body, fitted.sources);
+    const text = reportIssueText({ title, body, sources: fitted.sources });
+    const signature = `${this.rec.docId}:${createHash('sha256').update(text).digest('hex')}`;
     if (this.seen.has(signature)) return true;
-    const id = this.idFor(title, signature, known);
     const issue: Issue = {
       title,
       workstream: k.workstreamOf(row.workstream),
@@ -273,6 +265,7 @@ class ReportRead {
     // a closed finding on the same issue is named, by its id: with none named, the one given as covering it
     const was = known.find((f) => f.id === row.earlier) ?? covering;
     if (was?.closed && !was.deleted) issue.earlier = was.id;
+    const id = this.idFor(issue, known);
     if (!(await k.raise(id, issue))) return false;
     const saved = { title, finding: id };
     this.issues.push(saved);
@@ -345,10 +338,11 @@ export const knownUnusable = (known: Known[], keys: string[]) => (text: string) 
 };
 
 /** The explicit reply that the document is not a report, as the prompt asks. */
-const notReport = (reply: Record<string, unknown>) => reply.report === false && !('issues' in reply);
+const notReport = (reply: Record<string, unknown>) => no(reply.report) && !('issues' in reply);
 
 /** Keep the existing single-row form. Only an explicit empty list says the report raises no issues (#1212). */
 function reportIssueRows(reply: Record<string, unknown>, before?: ReadLine): Record<string, unknown>[] | null {
+  if (no(reply.report)) return null;
   const issues = reply.issues;
   if (Array.isArray(issues)) return issues.every((row) => issueRow(row, before)) ? issues : null;
   return issueRow(issues, before) ? [issues] : null;
@@ -387,7 +381,7 @@ async function ask(r: ReportRead, known: Known[]) {
 async function checkedPrefix(failure: { text?: string; partial?: unknown },
   unusable: (text: string) => Promise<boolean>) {
   const partial = failure.text ? readCutJson(failure.text, ['issues']) : failure.partial;
-  if (!isObject(partial)) return null;
+  if (!isObject(partial) || no(partial.report)) return null;
   const read = listOf(partial.issues);
   // A repaired partial without its original text cannot prove that its last entry was complete.
   const issues = failure.text ? read : read.slice(0, -1);

@@ -23,17 +23,16 @@
  * before it raised. A cutoff records the verified issues with the attempt. The next sweep reads the whole file
  * for the remaining issues. Deal progress lists reads still incomplete after the existing attempt budget (#1212).
  * Work is claimed first, so two PCs seldom pay for
- * the same call; two that start on one report before either claim arrives can both read it, and the second
- * raises again only what it titles differently from the first.
+ * the same call. If two start before either claim arrives, an occupied finding id only satisfies the same issue.
  */
 import type { DocRecord } from './documents';
-import { list as listOf, readJson, word } from './lenient';
+import { list as listOf, readJson } from './lenient';
 import { unknownIds } from './recordIds';
 import { read, type ReportReadResult } from './reportRead';
 import { withFewerChanges, type ChangeShare } from './limits';
 import {
   type ReportKit, type ReportLine, type ReadLine, type ReadIssue, type ReportCut, type Owed,
-  SORT_PART, TRIES, isCut, isTooLong, isUnreachable, yes, reportPlace,
+  SORT_PART, TRIES, isCut, isTooLong, isUnreachable, no, yes, reportPlace,
 } from './reportTypes';
 
 export type { ReportKit, ReportLine, ReadIssue, Known, Issue } from './reportTypes';
@@ -226,7 +225,7 @@ async function lookOnce(k: ReportKit, rec: DocRecord, share: ChangeShare): Promi
   });
   if (!reply || !('report' in reply)) return null;
   if (yes(reply.report)) return true;
-  return reply.report === false || ['false', 'no'].includes(word(reply.report)) ? false : null;
+  return no(reply.report) ? false : null;
 }
 
 /** a step's failure that is the document's own and counts as its try at once; any other is thrown */

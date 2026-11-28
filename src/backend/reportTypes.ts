@@ -68,12 +68,18 @@ export interface ReportCut {
 
 export const reportTitleKey = (title: string) => title.toLowerCase().replace(/\s+/g, ' ');
 export const reportPlace = (source: Source) => JSON.stringify([source.docId, source.loc]);
+export const reportPlacement = (source: Source) => JSON.stringify([reportPlace(source), source.quote ?? '']);
+
+/** Use the body and the citation order as written. The body's markers refer to that order. */
+export const reportIssueText = (issue: IssueContent) =>
+  JSON.stringify([issue.title, issue.body, ...issue.sources.map(reportPlacement)]);
 
 /** a finding on the deal, as a report's issues are compared with it */
 export interface Known {
   id: string;
   title: string;
   signature?: string;
+  unsigned?: IssueContent;
   closed?: boolean;
   /** a person deleted it: an issue it covers is not raised again */
   deleted?: boolean;
@@ -88,6 +94,14 @@ export interface Issue {
   signature?: string;
   /** a closed finding on the same issue: a person settled that one, and the advisor raises it again */
   earlier?: string;
+}
+
+export type IssueContent = Pick<Issue, 'title' | 'body' | 'sources'>;
+
+/** Signed findings can be edited. Old findings can only be matched by the exact issue that remains on disk. */
+export function sameReportIssue(saved: Pick<Known, 'signature' | 'unsigned'>, issue: Issue) {
+  if (saved.signature !== undefined) return saved.signature === issue.signature;
+  return !!saved.unsigned && reportIssueText(saved.unsigned) === reportIssueText(issue);
 }
 
 /** one call to the model */
@@ -180,3 +194,4 @@ export const isUnreachable = (e: unknown) => codeOf(e) === 'unreachable';
  */
 export const isTooLong = (e: unknown) => codeOf(e) === 'toolong';
 export const yes = (x: unknown) => x === true || ['true', 'yes'].includes(word(x));
+export const no = (x: unknown) => x === false || ['false', 'no'].includes(word(x));
