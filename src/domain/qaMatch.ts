@@ -140,7 +140,7 @@ export function withAccepted(
   const taken = new Set(matched.values());
   for (const [idx, row] of rows.entries()) {
     const choice = accepted.find((a) => a.line === lineOf(row, idx));
-    // a choice made for other wording (the mapping or sheet changed since) no longer applies
+    // a choice made for other wording (the mapping changed since) no longer applies
     if (!choice || choice.text !== row.text) continue;
     if (result.has(idx) || taken.has(choice.questionId) || !known.has(choice.questionId)) continue;
     result.set(idx, choice.questionId);
