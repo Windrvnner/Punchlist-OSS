@@ -37,8 +37,8 @@ type Place = { read: Set<string>; agreed: boolean };
 type FolderList = { label: string; docs: DealDoc[] };
 /** what a batch found, for the main session */
 type BatchFinding = { at: string; ids: string; text: string; places: string; got: Sent[] };
-/** one batch being read: its step, and the documents opened for it, with those opened before it */
-type BatchReading = { index: number; batch: Batch; at: string; step: ResearchStep; sent: Sent[]; had: Set<Sent> };
+/** one batch being read with its step in the research trail */
+type BatchReading = { index: number; batch: Batch; at: string; step: ResearchStep };
 
 /** keep the last few of a map, the most recent last */
 function keepRecent<V>(map: Map<string, V>, key: string, value: V): void {
@@ -252,7 +252,10 @@ class FolderPass {
     try {
       // a batch refused as too long lists fewer tracked changes, while it lists any, before it is not read (#1381)
       const read = await withFewerChanges((share) => this.askBatch(reading, share));
-      if (!read) return this.notRead(reading, 'they could not be opened on this PC', 'could not be opened');
+      if (!read) {
+        this.recordOmissions(reading, []);
+        return finish(reading.step, 'could not be opened');
+      }
       if (!read.reply) return this.notRead(reading, 'the reply on them could not be read', 'could not be read');
       this.keep(reading, read.got, read.reply);
     } catch (e) {
@@ -268,7 +271,7 @@ class FolderPass {
   /** a batch's documents sent and the fast model's reply on them; null when none of them could be opened on this PC */
   private async askBatch(reading: BatchReading, share: ChangeShare) {
     const { kit } = this.run;
-    const { files, listing, got } = await kit.send(reading.sent, this.run.spansDeals, share);
+    const { files, listing, got } = await kit.send(reading.batch.recs, this.run.spansDeals, share);
     if (!got.length) {
       return null;
     }
@@ -279,16 +282,13 @@ class FolderPass {
     return { got, reply: await kit.askJson(ask, BATCH_KEYS, '{"text": "…", "sources": […]}') };
   }
 
-  /** a batch's step, and its documents opened to be listed to the model */
+  /** a batch's step before attaching its files to the helper */
   private startBatch(index: number): BatchReading {
     const batch = this.batches[index];
     const at = batch.first === batch.last ? `Document ${batch.first}` : `Documents ${batch.first}–${batch.last}`;
     const text = `Reviewed ${at.toLowerCase()} of ${this.folder.toRead} in ${quoted(this.folder.label)}`;
     const step = this.run.step({ kind: 'read', text });
-    // opened to be listed to the model; a document it was not given after all is not opened, nor counted
-    const had = new Set(this.run.opened);
-    const sent = batch.recs.map((x) => this.run.open(x.dealId, x.rec));
-    return { index, batch, at, step, sent, had };
+    return { index, batch, at, step };
   }
 
   /** what a batch asks of the fast model */
@@ -302,16 +302,18 @@ class FolderPass {
   private keep(reading: BatchReading, got: Sent[], reply: Record<string, unknown>): void {
     const { kit } = this.run;
     const { batch, step } = reading;
-    this.unopenNew(reading, got);
+    this.recordOmissions(reading, got);
     this.readCount += got.length;
     for (const x of batch.recs) if (got.some((g) => sameDoc(g, x))) this.readNow.add(dealDocKey(x));
     const { text, sources } = kit.fit(prose(reply.text).join(' '), reply.sources as Cited[], got, true);
-    const ids = this.run.idsOf(sources);
     // a document that said nothing on this is not listed to the model again; one cited is
-    for (const s of got) {
-      if (sources.some((x) => cites(x, s))) this.run.quiet.delete(s);
-      else if (!reading.had.has(s)) this.run.quiet.add(s);
-    }
+    const opened = got.map((doc) => {
+      const had = this.run.opened.some((sent) => sameDoc(sent, doc));
+      const sent = this.run.open(doc.dealId, doc.rec);
+      if (!had && !sources.some((source) => cites(source, sent))) this.run.quiet.add(sent);
+      return sent;
+    });
+    const ids = this.run.idsOf(sources);
     if (sources.length) step.found = sources.map(foundAt);
     if (!sources.length) {
       this.quietBatches++;
@@ -323,21 +325,23 @@ class FolderPass {
       ids: got.map((x) => this.run.idOf(x)).join(', '),
       text: withPlaces(text, ids, sources),
       places: [...new Set(sources.map((x, i) => `${ids[i]} ${x.loc}`))].join(', '),
-      got,
+      got: opened,
     };
     finish(step, `${sources.length} ${noun(sources.length, 'passage')}`);
   }
 
-  /** a batch that could not be read: its new documents are not opened, and why is told to the main session */
+  /** a batch that could not be read: tell the main session why */
   private notRead(reading: BatchReading, why: string, result: string): void {
-    this.unopenNew(reading, []);
     this.failed[reading.index] = `${reading.at.toLowerCase()} (${why})`;
     finish(reading.step, result);
   }
 
-  /** the documents opened for this batch that were new to it and the model was not given are not opened */
-  private unopenNew(reading: BatchReading, keep: Sent[]): void {
-    for (const s of reading.sent) if (!keep.includes(s) && !reading.had.has(s)) this.run.unopen(s);
+  /** Name the files a partially or entirely unavailable batch could not give to the model (#1430). */
+  private recordOmissions(reading: BatchReading, got: Sent[]): void {
+    const missing = reading.batch.recs.filter((doc) => !got.some((sent) => sameDoc(sent, doc)));
+    if (!missing.length) return;
+    const paths = missing.map(({ rec }) => this.run.kit.where(rec)).join('; ');
+    this.failed[reading.index] = `${reading.at.toLowerCase()} (could not be opened on this PC: ${paths})`;
   }
 
   /**

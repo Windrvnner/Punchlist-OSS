@@ -79,7 +79,8 @@ async function searchDocuments(run: AgentRun, asked: Asked, query: string, repor
     if (looked.error.kind === 'unreachable') {
       throw Object.assign(new Error(looked.error.message), { code: 'unreachable' });
     }
-    report.out.push(`Documents: ${looked.error.message}.`);
+    const missing = notOpened(run, shown.items, []);
+    report.out.push(`Documents: ${looked.error.message}.${missing}\n${pageLine('documents', asked, shown)}`);
     report.said.push(looked.error.message);
     return;
   }
