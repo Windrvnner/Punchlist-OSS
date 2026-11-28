@@ -67,6 +67,30 @@ describe('durable retained import submission', () => {
     expect(await retrying).toBe(true);
   });
 
+  it('keeps the draft available until the IndexedDB removal commits', async () => {
+    const { imports, transactions } = await indexedImportStore();
+    const key = imports.importKey.qa('renewables');
+    const parts = { file: 'Lender Q&A.csv', submission: { key: 'qa-import:one' } };
+    const saving = imports.saveImport(key, parts);
+    await Promise.resolve();
+    transactions.at(-1)!.oncomplete!();
+    expect(await saving).toBe(true);
+
+    const refused = imports.dropSavedImport(key);
+    await Promise.resolve();
+    expect(imports.keptImport(key)).toEqual(parts);
+    transactions.at(-1)!.onabort!();
+    expect(await refused).toBe(false);
+    expect(imports.keptImport(key)).toEqual(parts);
+
+    const removing = imports.dropSavedImport(key);
+    await Promise.resolve();
+    expect(imports.keptImport(key)).toEqual(parts);
+    transactions.at(-1)!.oncomplete!();
+    expect(await removing).toBe(true);
+    expect(imports.keptImport(key)).toBeUndefined();
+  });
+
   it('resends the replacement file when choices change between a request error and its abort', async () => {
     const { imports, transactions } = await indexedImportStore();
     const key = imports.importKey.qa('renewables');
