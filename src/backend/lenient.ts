@@ -50,39 +50,70 @@ export function readJson(reply: string, keys: string[], allowUnkeyed = false): R
   return keys.length && !allowUnkeyed ? null : fallback;
 }
 
-/** The closed values at the root or in its lists, before repair can complete a cut-off row. */
+// Match complete strings first, so that brackets and escaped quotes inside them are ignored.
+const cutTokens = new RegExp([
+  String.raw`"(?:[^"\\]|\\[\s\S])*"`, String.raw`'(?:[^'\\]|\\[\s\S])*'`,
+  String.raw`“(?:[^”\\]|\\[\s\S])*”`, String.raw`‘(?:[^’\\]|\\[\s\S])*’`,
+  String.raw`["'“‘{}\[\]]`,
+].join('|'), 'g');
+const openedBy: Record<string, string> = { ']': '[', '}': '{' };
+const closesWith: Record<string, string> = { '[': ']', '{': '}' };
+
+/** The last complete value in the root or its lists, with only the outer delimiters still needed. */
 function closedPrefix(text: string) {
-  // Match complete strings first, so that brackets and escaped quotes inside them are ignored.
-  const tokens = /"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|["'{}\[\]]/g;
-  const closing: Record<string, string> = { ']': '[', '}': '{' };
   const stack: string[] = [];
   let end = 0;
-  for (const match of text.matchAll(tokens)) {
+  let suffix = '';
+  for (const match of text.matchAll(cutTokens)) {
     const token = match[0];
     if (token.length > 1) continue;
-    if (token === '"' || token === "'") break;
-    if (!closing[token]) {
+    if (closesWith[token]) {
       stack.push(token);
       continue;
     }
-    if (stack.pop() !== closing[token]) break;
-    if (stack.length <= 1 || (stack.length === 2 && stack.at(-1) === '[')) end = match.index + 1;
-    if (!stack.length) break;
+    if (!openedBy[token] || stack.pop() !== openedBy[token]) break;
+    if (stack.length <= 1 || (stack.length === 2 && stack.at(-1) === '[')) {
+      end = match.index + 1;
+      suffix = [...stack].reverse().map((opening) => closesWith[opening]).join('');
+    }
+    if (!stack.length) return { end, suffix, whole: true };
   }
-  return text.slice(0, end);
+  return { end, suffix, whole: false };
 }
+
+/** Normalize the delimiters of a complete lenient string before reading its closed array. */
+function cutString(token: string) {
+  if (token.length < 2 || token[0] === '"') return token;
+  const value = parse(token);
+  return typeof value === 'string' ? JSON.stringify(value) : token;
+}
+
+const firstOpening = (text: string) => text.search(/[\[{]/);
 
 /** Read only the structurally complete entries of a raw cut-off array or object. */
 export function readCutJson(reply: string, keys: string[]): Record<string, unknown> | null {
   const fence = /^\s*```[a-zA-Z0-9]*\s*([\[{])/m.exec(reply);
   const line = /^[\t ]*[\[{]/m.exec(reply);
   const at = (match: RegExpExecArray | null) => match ? match.index + match[0].length - 1 : -1;
-  const openings = [at(fence), reply.search(/[\[{]/), at(line)];
+  const openings = [at(fence), firstOpening(reply), at(line)];
   for (const open of new Set(openings)) {
     if (open < 0) continue;
-    const raw = parse(closedPrefix(reply.slice(open)));
+    const raw = cutObject(reply.slice(open), keys);
+    if (raw) return raw;
+  }
+  return null;
+}
+
+function cutObject(text: string, keys: string[]): Record<string, unknown> | null {
+  while (text.length) {
+    const { end, suffix, whole } = closedPrefix(text);
+    const raw = parse(text.slice(0, end).replace(cutTokens, cutString) + suffix);
     if (Array.isArray(raw) && raw.some(isObject)) return { [keys[0]]: raw };
     if (isObject(raw) && keys.some((key) => key in raw)) return raw;
+    if (!whole) break;
+    const next = firstOpening(text.slice(end));
+    if (next < 0) break;
+    text = text.slice(end + next);
   }
   return null;
 }

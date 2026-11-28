@@ -380,22 +380,19 @@ async function ask(r: ReportRead, known: Known[]) {
     return { reply: await k.ask(input, keys, correction), cut: false };
   } catch (e) {
     if (!isCut(e)) throw e;
-    return { reply: await checkedPrefix(e as { text?: string; partial?: unknown }, keys, unusable), cut: true };
+    return { reply: await checkedPrefix(e as { text?: string; partial?: unknown }, unusable), cut: true };
   }
 }
 
-async function checkedPrefix(failure: { text?: string; partial?: unknown }, keys: string[],
+async function checkedPrefix(failure: { text?: string; partial?: unknown },
   unusable: (text: string) => Promise<boolean>) {
-  const partial = failure.text ? readCutJson(failure.text, keys) : failure.partial;
+  const partial = failure.text ? readCutJson(failure.text, ['issues']) : failure.partial;
   if (!isObject(partial)) return null;
   const read = listOf(partial.issues);
   // A repaired partial without its original text cannot prove that its last entry was complete.
-  const complete = failure.text ? read : read.slice(0, -1);
-  const issues = [];
-  for (const row of complete) {
-    if (isObject(row) && !(await unusable(JSON.stringify({ issues: [row] })))) issues.push(row);
-  }
-  return { advisor: partial.advisor, issues };
+  const issues = failure.text ? read : read.slice(0, -1);
+  const prefix = { advisor: partial.advisor, issues };
+  return await unusable(JSON.stringify(prefix)) ? null : prefix;
 }
 
 export type ReportReadResult = ReadLine | { cut: ReportCut } | 'not' | 'lost' | null;

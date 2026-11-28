@@ -167,19 +167,19 @@ it.each([true, false])('preserves differing report titles as written (cutoff: %s
   }
 });
 
-it('drops an unverified cutoff row and keeps its verified sibling (#1212)', async () => {
+it('rejects a cut prefix that names an unshown document (#1212)', async () => {
   const valid = row('the substation transformer has no test record', 2);
   const invalid = row('the maintenance schedule has expired', 3);
   invalid.sources[0].doc = doc(833, 'Another report.pdf').docId;
   const s = await reader((_call, attempt) => {
     if (attempt === 1) cutAfter([valid, invalid], 2);
-    return JSON.stringify({ issues: [] });
+    return JSON.stringify({ issues: [valid] });
   });
   try {
     await s.sweep();
     expect(s.calls).toHaveLength(2);
     expect(s.calls[1].prompt).toContain('remaining issues');
-    expect(s.calls[1].prompt).toContain(valid.title);
+    expect(s.calls[1].prompt).not.toContain(valid.title);
     expect(s.calls[1].prompt).not.toContain(invalid.title);
     expect(s.state().read.get(docId)?.issues.map(({ title }) => title)).toEqual([valid.title]);
   } finally {
@@ -187,23 +187,27 @@ it('drops an unverified cutoff row and keeps its verified sibling (#1212)', asyn
   }
 });
 
-it.each(['', ',', ']'])('keeps the final complete issue at a raw cutoff (%j) (#1212)', async (suffix) => {
-  const verified = row('the substation test report is missing', 2);
-  const s = await reader((_call, attempt) => {
-    if (attempt === 1) {
-      const preface = 'The report raises these issues [in order]:\n```json\n';
-      throw cutOff('Output limit', `${preface}{"issues":[${JSON.stringify(verified)}${suffix}`);
+it.each([['', 'fenced'], [',', 'fenced'], [']', 'fenced'], [',', 'curly'], [',', 'example']])(
+  'keeps the final complete issue at a raw cutoff (%j, %s) (#1212)', async (suffix, variant) => {
+    const verified = row('the substation [test report is missing', 2);
+    const s = await reader((_call, attempt) => {
+      if (attempt === 1) {
+        const preface = variant === 'example' ? 'The report is valid. Use {"report":false} for a non-report. '
+          : 'The report raises these issues [in order]:\n```json\n';
+        const json = JSON.stringify(verified);
+        const issue = variant === 'curly' ? json.replace(JSON.stringify(verified.title), `“${verified.title}”`) : json;
+        throw cutOff('Output limit', `${preface}{"issues":[${issue}${suffix}`);
+      }
+      return '{"issues":[]}';
+    });
+    try {
+      await s.sweep();
+      expect(s.calls[1].prompt).toContain(verified.title);
+      expect(s.state().read.get(docId)?.issues.map(({ title }) => title)).toEqual([verified.title]);
+    } finally {
+      await s.ai.close();
     }
-    return '{"issues":[]}';
   });
-  try {
-    await s.sweep();
-    expect(s.calls[1].prompt).toContain(verified.title);
-    expect(s.state().read.get(docId)?.issues.map(({ title }) => title)).toEqual([verified.title]);
-  } finally {
-    await s.ai.close();
-  }
-});
 
 it('retries if another writer takes a report finding ordinal with a different issue', async () => {
   const issue = row('the switchgear has no factory test certificate', 3);
