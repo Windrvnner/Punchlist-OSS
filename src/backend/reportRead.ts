@@ -5,7 +5,7 @@
 import type { DocRecord } from './documents';
 import type { Cited } from './agent';
 import type { Source } from '../domain/model';
-import { list as listOf, readJson, isObject, strings, tagNumber, prose, PARAGRAPH_SEAM } from './lenient';
+import { list as listOf, readJson, readCutJson, isObject, strings, tagNumber, prose, PARAGRAPH_SEAM } from './lenient';
 import { unknownIds } from './recordIds';
 import { withFewerChanges } from './limits';
 import {
@@ -181,24 +181,54 @@ class ReportRead {
     // an issue the earlier draft raised and this one still does: the report's page is added to its finding
     const was = this.before?.issues[(tagNumber(row.still, 'E') ?? 0) - 1];
     const stillAt = was?.finding ?? was?.covered;
-    if (stillAt) { await this.cite(stillAt, this.placed(row)); return true; }
+    if (was && stillAt) return this.still(row, was, stillAt);
     const covering = known.find((f) => f.id === row.covered);
     const title = titleOf(row);
     // one only a closed finding covers is raised again, so it must come written out: as covered only, it has no page
     if (covering?.closed && !covering.deleted && !title) { this.unplaced++; return true; }
     if (covering && !(covering.closed && title)) { await this.covered(row, covering); return true; }
-    if (!title) return true;
+    if (!title) return this.verifying ? this.miss() : true;
     return this.raise(row, title, known, covering);
+  }
+
+  private async still(row: Record<string, unknown>, was: ReadIssue, id: string) {
+    const places = this.placed(row);
+    if (this.verifying && !places.length) return this.miss();
+    if (this.verifying) this.dropped.delete(id);
+    if (this.seen.has(atPlaces(id, places))) return true;
+    await this.cite(id, places);
+    this.keep(was, places, true);
+    return true;
   }
 
   /** an issue a finding already covers raises none, whatever else the reply gives with it */
   async covered(row: Record<string, unknown>, f: Known) {
+    const places = this.placed(row);
+    if (this.verifying && !places.length) { this.miss(); return; }
+    if (this.seen.has(atPlaces(f.id, places))) return;
     // the report is a source of the finding that covers its issue, whoever raised it; a deleted one is left as it is
-    if (!f.deleted) await this.cite(f.id, this.placed(row));
+    if (!f.deleted) await this.cite(f.id, places);
     // a finding this report raised itself, in a read that did not finish, is its own: a later draft that drops it
     // marks it
     const own = isOwn(this.k, this.rec.docId, f);
-    this.issues.push(own ? { title: f.title, finding: f.id } : { title: f.title, covered: f.id });
+    const issue = own ? { title: f.title, finding: f.id } : { title: f.title, covered: f.id };
+    this.issues.push(issue);
+    this.keep(issue, places);
+  }
+
+  /** Continue the existing title ordinals, including a finding written before its cutoff was logged. */
+  private idFor(title: string, places: Source[], known: Known[]) {
+    const key = this.verifying ? reportTitleKey(title) : title;
+    let nth = (this.titles.get(key) ?? 0) + 1;
+    for (;;) {
+      const id = this.k.idFor(this.rec.docId, title, nth);
+      const had = this.verifying ? known.find((finding) => finding.id === id) : undefined;
+      if (!this.reserved.has(id) && (!had || samePlaces(had, places))) {
+        this.titles.set(key, nth);
+        return id;
+      }
+      nth++;
+    }
   }
 
   /** a new issue: a finding of its own */
@@ -207,9 +237,8 @@ class ReportRead {
     const fitted = k.fit(prose(row.body).join(PARAGRAPH_SEAM), row.sources as Cited[], this.s.sent);
     // an issue stands on a page of the report a person can open, as any finding does
     if (!fitted.text || !fitted.sources.length) { this.unplaced++; return true; }
-    const nth = (this.titles.get(title) ?? 0) + 1;
-    this.titles.set(title, nth);
-    const id = k.idFor(this.rec.docId, title, nth);
+    if (this.seen.has(atPlaces(reportTitleKey(title), fitted.sources))) return true;
+    const id = this.idFor(title, fitted.sources, known);
     const issue: Issue = {
       title,
       workstream: k.workstreamOf(row.workstream),
@@ -220,27 +249,46 @@ class ReportRead {
     const was = known.find((f) => f.id === row.earlier) ?? covering;
     if (was?.closed && !was.deleted) issue.earlier = was.id;
     if (!(await k.raise(id, issue))) return false;
-    this.issues.push({ title, finding: id });
+    const saved = { title, finding: id };
+    this.issues.push(saved);
+    this.keep(saved, fitted.sources);
     return true;
   }
 
   /** each row of a reply, in order. False when a finding could not be written */
   async takeAll(rows: Record<string, unknown>[], known: Known[]) {
+    let saved = true;
     for (const row of rows) {
-      if (row && typeof row === 'object' && !(await this.take(row, known))) return false;
+      if (!row || typeof row !== 'object' || (this.verifying && !isObject(row))) {
+        if (this.verifying) this.miss();
+        continue;
+      }
+      if (await this.take(row, known)) continue;
+      if (!this.retaining) return false;
+      saved = false;
     }
-    return true;
+    return saved;
   }
 
   /** what the reply says beside its issues: who wrote the report, and which of the earlier draft's it drops */
   heard(reply: Record<string, unknown>) {
+    this.hearAdvisor(reply);
+    const still = new Set(this.resume?.issues.filter((row) => row.still).map(({ issue }) => issueId(issue)));
+    for (const e of strings(reply.dropped)) {
+      const f = this.before?.issues[(tagNumber(e, 'E') ?? 0) - 1]?.finding;
+      if (f && !still.has(f)) this.dropped.add(f);
+    }
+  }
+
+  hearAdvisor(reply: Record<string, unknown>) {
     const said = reply.advisor;
     const advisor = typeof said === 'string' && said.trim() ? said : '';
     if (advisor && !this.advisor) this.advisor = advisor;
-    for (const e of strings(reply.dropped)) {
-      const f = this.before?.issues[(tagNumber(e, 'E') ?? 0) - 1]?.finding;
-      if (f) this.dropped.add(f);
-    }
+  }
+
+  cutoff(): { cut: ReportCut } {
+    const owe = [...this.owe].map(([finding, sources]) => ({ finding, sources }));
+    return { cut: { advisor: this.advisor, issues: this.kept, ...(owe.length ? { owe } : {}) } };
   }
 
   /** the line to write. What the earlier draft raised and this one still does is carried over, for the next draft */
@@ -256,6 +304,12 @@ class ReportRead {
       ...(owe.length ? { owe } : {}),
     };
   }
+}
+
+function samePlaces(finding: Known, places: Source[]) {
+  if (!finding.sources) return false;
+  const have = new Set(finding.sources.map(placement));
+  return places.every((place) => have.has(placement(place)));
 }
 
 /**
@@ -299,19 +353,24 @@ async function ask(r: ReportRead, known: Known[]) {
     return { reply: await k.ask(input, keys, correction), cut: false };
   } catch (e) {
     if (!isCut(e)) throw e;
-    return { reply: null, cut: true };
+    const failure = e as { text?: string; partial?: unknown };
+    const partial = failure.text ? readCutJson(failure.text, keys) : failure.partial;
+    const prefix = isObject(partial) && Array.isArray(partial.issues)
+      ? { advisor: partial.advisor, issues: partial.issues.slice(0, -1) }
+      : null;
+    return { reply: prefix && !(await unusable(JSON.stringify(prefix))) ? prefix : null, cut: true };
   }
 }
 
+export type ReportReadResult = ReadLine | { cut: ReportCut } | 'not' | 'lost' | null;
+
 /**
- * Read one report. Returns the line to write; `'not'` when the model says it is not a report; `'lost'` when this PC
- * cannot send it; or null when the read could not finish (a reply that cannot be read, or one cut off at the length
- * limit, or a finding that could not be written): nothing is written then, and the next sweep reads it again. Throws
- * when the service fails.
+ * A full read finishes the report. A cutoff checkpoints verified issues for the next sweep. An unusable
+ * read returns null, and a report this PC cannot send returns 'lost'. Service failures throw.
  */
 export async function read(
-  k: ReportKit, rec: DocRecord, before: ReadLine | undefined, last: boolean,
-): Promise<ReadLine | 'not' | 'lost' | null> {
+  k: ReportKit, rec: DocRecord, before: ReadLine | undefined, last: boolean, resume?: ReportCut,
+): Promise<ReportReadResult> {
   const known = await k.findings();
   // refused as too long, it is sent again with fewer of its tracked changes listed, while any are (#1381)
   const sentAndAsked = await withFewerChanges(async (share) => {
@@ -319,7 +378,7 @@ export async function read(
     if (!s) {
       return null;
     }
-    const r = new ReportRead(k, rec, s, before);
+    const r = new ReportRead(k, rec, s, before, resume);
     return { r, got: await ask(r, known) };
   });
   // cannot be sent from this PC: left for one that can, not a try
@@ -327,13 +386,23 @@ export async function read(
     return 'lost';
   }
   const { r, got } = sentAndAsked;
+  if (got.cut) return keepCut(r, got.reply, known);
   if (!got.reply) return null;
-  if (notReport(got.reply)) return 'not';
+  if (notReport(got.reply)) return resume ? null : 'not';
   const issues = reportIssueRows(got.reply);
   if (!issues) return null;
   r.heard(got.reply);
   if (!(await r.takeAll(issues, known))) return null;
-  return finish(r, last);
+  return finish(r, last && !resume);
+}
+
+async function keepCut(r: ReportRead, reply: Record<string, unknown> | null, known: Known[]) {
+  if (reply) {
+    r.retaining = true;
+    r.hearAdvisor(reply);
+    await r.takeAll(reportIssueRows(reply) ?? [], known);
+  }
+  return r.cutoff();
 }
 
 /**
