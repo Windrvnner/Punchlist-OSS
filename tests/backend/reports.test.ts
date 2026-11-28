@@ -814,7 +814,7 @@ async function sweepReply(
 
 describe('advisor report reply shape (#1212)', () => {
   it.each([
-    { report: true }, { issues: null }, { issues: { title: 'Missing inverter warranty' } },
+    { report: true }, { issues: null }, { issues: 'Missing inverter warranty' }, { issues: {} },
     { advisor: 'Independent engineer' }, {}, { report: null }, { report: false, issues: null },
   ])('sends a thin reply back once and leaves it unread if still thin (%j)', async (reply) => {
     const { report, state, reads, repairs, findings } = await sweepReply(() => reply);
@@ -852,6 +852,18 @@ describe('advisor report reply shape (#1212)', () => {
     expect(reads).toHaveLength(3);
     expect(state.tries('read', report.docId)).toBe(1);
     expect(state.read.get(report.docId)?.issues).toEqual([]);
+  });
+
+  it('keeps an existing single-issue object with its verified report page', async () => {
+    const title = 'The inverter warranty ends before debt maturity';
+    const { report, state, reads, findings } = await sweepReply(({ prompt }) => {
+      const reply = readReply(prompt, '', [title]);
+      return { ...reply, issues: reply.issues[0] };
+    });
+    expect(reads).toHaveLength(1);
+    expect(findings.map((finding) => finding.title)).toEqual([title]);
+    expect(findings[0].sources).toMatchObject([{ docId: report.docId, loc: 'p. 10' }]);
+    expect(state.read.get(report.docId)?.issues).toEqual([{ title, finding: findings[0].id }]);
   });
 
   it('writes a finding from the corrected reply with the report page', async () => {
