@@ -10,12 +10,10 @@ import type { AgentKit, AgentQuestion, DealDoc, Run, Sent } from './agentKit';
 import { oneLine } from './agentPrompts';
 import { questionIdsIn } from './qaRow';
 import { docHandle } from './recordIds';
+import { batchesOf, sameDoc } from './agentBatches';
 
 /** a document's key across deals, as a folder read keeps what it has read */
 export const dealDocKey = (doc: { dealId: string; rec: DocRecord }) => `${doc.dealId}|${doc.rec.docId}`;
-/** whether two documents are the same document of the same deal */
-export const sameDoc = (a: { dealId: string; rec: DocRecord }, b: { dealId: string; rec: DocRecord }) =>
-  a.dealId === b.dealId && a.rec.docId === b.rec.docId;
 /** whether a source cites this document */
 export const cites = (source: Source, doc: Sent) => source.dealId === doc.dealId && source.docId === doc.rec.docId;
 /** a source as a step shows it: where it is and the words it quotes */
@@ -41,6 +39,10 @@ export class AgentRun {
   whole: Sent[] = [];
   /** what each tool found, in order: what the main session is told it has done so far */
   readonly done: string[] = [];
+  /** the result of the read whose files have yet to be attached */
+  private readResult: number | undefined;
+  /** ids the model can request in a read after the files were deferred or unavailable */
+  private readonly readTargets = new Set<string>();
   /** the searches made in this run, so that the same one is not made twice */
   readonly searched = new Set<string>();
   /** what the main session has learned so far, as it last wrote it */
@@ -164,51 +166,75 @@ export class AgentRun {
   read(named: string[], width: number): string {
     const recs = this.question.deals.flatMap((dealId) =>
       this.kit.records(dealId).map((rec) => ({ dealId, rec })));
-    const picked: Sent[] = [];
+    const picked: DealDoc[] = [];
     const missing: string[] = [];
     for (const name of named) {
       // a name is tried as the model wrote it first, so a document whose own name starts or ends with a bracket or
       // quote is found; only when nothing matches is the model's wrapping quote or bracket taken off
       const said = name.trim();
       const unwrapped = said.replace(/^["'`[]+|["'`\]]+$/g, '');
-      const sent = this.opened.find((x) => this.idOf(x) === name)
-        ?? this.byPath(said, recs) ?? this.byPath(unwrapped, recs);
-      if (sent && !picked.includes(sent)) picked.push(sent);
-      else if (!sent) missing.push(unwrapped);
+      const open = this.opened.find((x) => this.idOf(x) === name);
+      const doc = open ?? (this.canRequest(name)
+        ? recs.find((x) => this.idOf(x) === name)
+        : this.byPath(said, recs) ?? this.byPath(unwrapped, recs));
+      if (doc) picked.push(doc);
+      else missing.push(unwrapped);
     }
-    const paired = this.withCleanDrafts(picked);
-    this.whole = paired.slice(0, width);
-    for (const s of this.whole) this.touched.add(s);
+    const deferred = this.readBatch(picked, width);
+    const notFound = missing.length
+      ? `Not found: ${missing.join('; ')}. Name a document by its id or its unique path as listed.`
+      : '';
+    return [deferred, notFound].filter(Boolean).join('\n');
+  }
+
+  /** attach the first batch of resolved documents and report any that still need a read */
+  readBatch(picked: DealDoc[], width: number): string {
+    const unique = [...new Map(picked.map((doc) => [dealDocKey(doc), doc])).values()];
+    const batch = batchesOf(unique, this.kit.cleanDrafts, width)[0]?.recs ?? [];
+    this.whole = batch;
+    this.readResult = this.done.length;
+    const deferred = unique.filter((doc) => !batch.some((picked) => sameDoc(doc, picked)));
+    return deferred.length
+      ? `Ask to read the remaining documents by id in another batch.\n${this.readList(deferred)}` : '';
+  }
+
+  /** Only files the send returned may enter the citation list, count and read steps (#12, #1213). */
+  attached(got: Sent[]): void {
+    const missing = this.whole.filter((s) => !got.includes(s));
+    if (missing.length) this.whole = this.whole.filter((s) => got.includes(s));
+    const result = this.readResult;
+    if (result === undefined) return;
+    this.readResult = undefined;
     for (const s of this.whole) {
+      this.open(s.dealId, s.rec);
       const pages = s.rec.pages ? `${s.rec.pages} pages` : '';
       this.steps.push({ kind: 'read', text: `Reviewed ${s.rec.name}`, result: pages, done: true });
     }
-    const attached = this.whole.length
-      ? `You asked to read ${this.whole.map((s) => this.idOf(s)).join(', ')}: they are attached to this message.`
+    const attached = this.whole.length ? `Attached for reading ${this.whole.map((s) => this.idOf(s)).join(', ')}.`
       : 'No document was attached.';
-    const capped = picked.length > width ? ` Only the first ${width} were attached: ${width} at most at a time.` : '';
-    const notFound = missing.length
-      ? ` Not found: ${missing.join('; ')}. Name a document by its id or its path as listed.`
-      : '';
-    return `${attached}${capped}${notFound}`;
+    const unavailable = missing.length ? `These files could not be attached.\n${this.readList(missing)}` : '';
+    this.done[result] = [attached, this.done[result], unavailable].filter(Boolean).join('\n');
   }
 
-  /** a document named by its whole path or its whole file name, in any case; anything else is not found */
-  private byPath(said: string, recs: DealDoc[]): Sent | undefined {
+  /** whether a tool result gave the model an id to request in another read */
+  canRequest(handle: unknown): boolean {
+    return typeof handle === 'string' && this.readTargets.has(handle);
+  }
+
+  /** name an unread file by its existing id, even when another file has the same display path */
+  private readList(docs: DealDoc[]): string {
+    return docs.map((doc) => {
+      const handle = this.idOf(doc);
+      this.readTargets.add(handle);
+      return `- ${handle} (${this.kit.where(doc.rec)})`;
+    }).join('\n');
+  }
+
+  /** a unique document named by its whole path or its whole file name, in any case */
+  private byPath(said: string, recs: DealDoc[]): DealDoc | undefined {
     const low = said.toLowerCase();
-    const found = recs.find((x) => this.kit.where(x.rec).toLowerCase() === low || x.rec.name.toLowerCase() === low);
-    return found ? this.open(found.dealId, found.rec) : undefined;
-  }
-
-  /** these documents with each blackline's clean draft put just before it, each once */
-  private withCleanDrafts(picked: Sent[]): Sent[] {
-    if (!this.kit.cleanDrafts) return picked;
-    const deals = new Set(picked.map((s) => s.dealId));
-    const cleans = new Map([...deals].map((dealId) => [dealId, this.kit.cleanDrafts!(dealId)]));
-    const paired = picked.flatMap((s) => {
-      const clean = cleans.get(s.dealId)?.get(s.rec.docId);
-      return clean ? [this.open(s.dealId, clean), s] : [s];
-    });
-    return paired.filter((s, i, all) => all.indexOf(s) === i);
+    const matches = recs.filter(({ rec }) =>
+      this.kit.where(rec).toLowerCase() === low || rec.name.toLowerCase() === low);
+    return matches.length === 1 ? matches[0] : undefined;
   }
 }

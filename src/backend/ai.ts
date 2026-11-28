@@ -1335,7 +1335,7 @@ export function nodeAi(o: AiOptions) {
   /**
    * The chat's document search as fixed pages (#1102): the keyword ranking as `top` gives it with no room set, only the
    * documents that answer to a word of the query, best first, across deals in turn as `folderList` takes them. A page
-   * of it is cut as a folder read's batches are (agentFolder.ts `batchesOf`).
+   * of it is cut as a folder read's batches are (agentBatches.ts `batchesOf`).
    */
   async function searchRanking(deals: string[], query: string): Promise<DealDoc[]> {
     const per = await Promise.all(deals.map(async (dealId) =>
@@ -1596,8 +1596,10 @@ export function nodeAi(o: AiOptions) {
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
-      for (const s of mine) {
-        const id = ids[s.rec.docId]; if (!id) continue; files.push(id); got.push(s);
+      const available = mine.filter((s) => ids[s.rec.docId]);
+      for (const s of available) {
+        files.push(ids[s.rec.docId]);
+        got.push(s);
         const rec = o.docs.records(dealId).find((r) => r.docId === s.rec.docId) ?? s.rec;          // a Word file's pages are counted when it is first sent, just now
         lines.push(`${idOf(s)}: ${where(rec)}${rec.pages ? ` (${rec.pages} pages)` : ''}`);
         // a draft's pages show its tracked changes as markup: say so, and send the changes themselves, read from the
@@ -1609,9 +1611,10 @@ export function nodeAi(o: AiOptions) {
         }
         const k = kindsOf(dealId);
         const against = k.against.get(rec.docId) ?? 'own';
-        if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, against, idOf));
-        // another project's document (docs/other-project-documents-design.md): read, never a main source
-        else if (k.precedents.has(rec.docId)) {
+        if (k.pairs.has(rec.docId)) {
+          lines.push(blacklineLine(s, available, k.pairs.get(rec.docId) ?? null, against, idOf));
+        } else if (k.precedents.has(rec.docId)) {
+          // another project's document (docs/other-project-documents-design.md): read, never a main source
           lines.push(`  ${idOf(s)} is another project's document, not this deal's. Its terms are never this deal's: `
             + 'use it only to compare, and cite it only beside a document of this deal. By itself it never shows that '
             + 'a finding is put right or that its problem is back.');
