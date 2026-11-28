@@ -167,24 +167,139 @@ it.each([true, false])('preserves differing report titles as written (cutoff: %s
   }
 });
 
-it('rejects a cut prefix that names an unshown document (#1212)', async () => {
+it('drops an unverified cutoff row and keeps its verified sibling (#1212)', async () => {
   const valid = row('the substation transformer has no test record', 2);
   const invalid = row('the maintenance schedule has expired', 3);
   invalid.sources[0].doc = doc(833, 'Another report.pdf').docId;
   const s = await reader((_call, attempt) => {
     if (attempt === 1) cutAfter([valid, invalid], 2);
-    return JSON.stringify({ issues: [valid] });
+    return JSON.stringify({ issues: [] });
   });
   try {
     await s.sweep();
     expect(s.calls).toHaveLength(2);
     expect(s.calls[1].prompt).toContain('remaining issues');
-    expect(s.calls[1].prompt).not.toContain(valid.title);
+    expect(s.calls[1].prompt).toContain(valid.title);
+    expect(s.calls[1].prompt).not.toContain(invalid.title);
     expect(s.state().read.get(docId)?.issues.map(({ title }) => title)).toEqual([valid.title]);
   } finally {
     await s.ai.close();
   }
 });
+
+it.each(['', ',', ']'])('keeps the final complete issue at a raw cutoff (%j) (#1212)', async (suffix) => {
+  const verified = row('the substation test report is missing', 2);
+  const s = await reader((_call, attempt) => {
+    if (attempt === 1) {
+      const preface = 'The report raises these issues [in order]:\n```json\n';
+      throw cutOff('Output limit', `${preface}{"issues":[${JSON.stringify(verified)}${suffix}`);
+    }
+    return '{"issues":[]}';
+  });
+  try {
+    await s.sweep();
+    expect(s.calls[1].prompt).toContain(verified.title);
+    expect(s.state().read.get(docId)?.issues.map(({ title }) => title)).toEqual([verified.title]);
+  } finally {
+    await s.ai.close();
+  }
+});
+
+it('retries if another writer takes a report finding ordinal with a different issue', async () => {
+  const issue = row('the switchgear has no factory test certificate', 3);
+  const s = await reader(() => JSON.stringify({ issues: [issue] }));
+  const transact = s.repo.transaction.bind(s.repo);
+  let rival = '';
+  s.repo.transaction = async (tx) => {
+    const write = tx.writes.find((candidate) => candidate.kind === 'finding');
+    if (write && !rival) {
+      rival = write.id;
+      const data = { ...(write.data as Finding), body: ['The switchgear has no commissioning records.'],
+        reportIssueSignature: `${docId}:other-issue` };
+      val(await transact({ ...tx, writes: [{ ...write, data }] }));
+    }
+    return transact(tx);
+  };
+  try {
+    await s.sweep();
+    expect(s.state().read.has(docId)).toBe(false);
+    await s.sweep();
+    const written = s.state().read.get(docId)?.issues[0]?.finding;
+    expect(written).toBeTruthy();
+    expect(written).not.toBe(rival);
+    expect(val(await s.repo.get('finding', written!))?.envelope.data).toMatchObject({ body: issue.body });
+  } finally {
+    await s.ai.close();
+  }
+});
+
+it('leaves a truncated issue for the next whole-report reply even when its visible fields are complete', async () => {
+  const verified = row('the substation test report is missing', 2);
+  const truncated = row('the environmental permit expires before construction ends', 4);
+  const s = await reader((_call, attempt) => {
+    if (attempt === 1) cutAfter([verified], 1, JSON.stringify(truncated).slice(0, -1));
+    return JSON.stringify({ issues: [truncated] });
+  });
+  try {
+    await s.sweep();
+    expect(s.calls[1].prompt).toContain(verified.title);
+    expect(s.calls[1].prompt).not.toContain(truncated.title);
+    expect(s.state().read.get(docId)?.issues).toHaveLength(2);
+  } finally {
+    await s.ai.close();
+  }
+});
+
+it.each(['covered first', 'exact issue last'])('keeps distinct findings after a failed cutoff append (%s)',
+  async (order) => {
+    const first = row('the EPC contractor omits the winter maintenance warranty', 3);
+    const another = { ...first, body: ['The agreement excludes emergency on-site repairs from the warranty. [1]'] };
+    const initial = await reader(() => cutAfter([first], 1));
+    const restore = refuse(initial.shared, (text) => text.includes('"cut":'), () => new Error('Disk full'), 1);
+    let savedId = '';
+    try {
+      await initial.sweep();
+      const findings = val(await initial.repo.list('finding', 'd1'));
+      expect(findings).toHaveLength(1);
+      expect(initial.state().tries('read', docId)).toBe(0);
+      savedId = (findings[0].envelope.data as Finding).id;
+    } finally {
+      restore();
+      await initial.ai.close();
+    }
+    const covered = { covered: savedId, sources: first.sources };
+    const issues = order === 'covered first' ? [covered, another] : [another, first];
+    const resumed = await reader(() => JSON.stringify({ issues }), initial);
+    try {
+      await resumed.sweep();
+      const findings = val(await resumed.repo.list('finding', 'd1')).map(({ envelope }) => envelope.data as Finding);
+      expect(resumed.state().read.get(docId)?.issues.map((issue) => issue.finding).sort())
+        .toEqual(findings.map(({ id }) => id).sort());
+      expect(findings.map(({ body }) => body[0]).sort()).toEqual([first.body[0], another.body[0]].sort());
+    } finally {
+      await resumed.ai.close();
+    }
+  });
+
+it.each([{}, { title: 'A closed item still has no write-up' }])('keeps an incomplete closed reference unfinished',
+  async (fields) => {
+    const id = derivedId('f', ['closed transformer testing']);
+    const issues = [{ covered: id, sources: row('test', 2).sources, ...fields }];
+    const s = await reader(() => JSON.stringify({ issues }));
+    try {
+      const data = { id, dealId: 'd1', title: 'Transformer lacks a test record', status: 'closed' };
+      val(await s.repo.transaction({
+        writes: [{ kind: 'finding', id, data, expectedRev: null }],
+        index: { dealId: 'd1', add: [{ kind: 'finding', id }] },
+      }));
+      for (let attempt = 0; attempt < 3; attempt++) await s.sweep();
+      expect(s.state().read.get(docId)).toBeUndefined();
+      expect(s.state().tries('read', docId)).toBe(3);
+      expect(val(await s.ai.progress('d1')).incompleteReports).toEqual([{ docId, name: report.name }]);
+    } finally {
+      await s.ai.close();
+    }
+  });
 
 it('recovers when the finding write succeeds before the cutoff checkpoint append fails (#1212)', async () => {
   const issues = [row('the replacement allowance excludes transformers', 2), row('the switchgear is not tested', 4)];
