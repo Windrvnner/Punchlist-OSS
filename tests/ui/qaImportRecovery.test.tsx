@@ -53,17 +53,22 @@ async function openImport(app: RecoveryApp, dealId: string) {
   return screen;
 }
 
-async function retryInterruptedImport(app: RecoveryApp) {
+async function openRecoveryApp(app: RecoveryApp) {
   const screen = document.createElement('div');
   document.body.append(screen);
   screens.push(screen);
   await act(() => render(<App store={app.store} />, screen));
+  return screen;
+}
+
+async function retryInterruptedImport(app: RecoveryApp) {
+  const screen = await openRecoveryApp(app);
   const retry = screen.querySelector<HTMLButtonElement>('.intop .tundo');
   expect(retry?.textContent).toBe('Retry');
   await act(() => retry!.click());
   await vi.waitFor(() => expect(screen.querySelector('#im-go')).not.toBeNull());
   expect(Object.values(app.store.get().questions)).toHaveLength(0);
-  expect(screen.querySelector('.intop')).toBeNull();
+  expect(screen.querySelector('.intop-covered')).not.toBeNull();
   return screen;
 }
 
@@ -160,4 +165,90 @@ describe('Q&A import recovery handoff', () => {
       await next.repo.close();
     },
   );
+});
+
+async function interruptedImport() {
+  const app = recoveryApp();
+  const dealId = await recoveryDeal(app);
+  await preparedImport(app, dealId);
+  const screen = await openImport(app, dealId);
+  const hold = holdRecoveryWrite(app, (transaction) =>
+    transaction.writes.some((write) => write.kind === 'question')
+      && operationWrite(transaction, 'ImportQuestions', 'succeeded'));
+  await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+  await hold.entered;
+  const disk = copyRecoveryDisk(app.saved);
+  const key = importKey.qa(dealId);
+  const retained = keptImport(key)!;
+  hold.release();
+  await vi.waitFor(() => expect(keptImport(key)).toBeUndefined());
+  app.store.closing();
+  await app.repo.close();
+  keepImport(key, retained);
+  return { app: recoveryApp(disk), dealId, key, retained };
+}
+
+async function confirmStartOver(screen: HTMLElement) {
+  await act(() => screen.querySelector<HTMLButtonElement>('#im-restart')!.click());
+  await act(() => screen.querySelector<HTMLButtonElement>('#im-restart-ask-go')!.click());
+}
+
+it('keeps the recovery notice and choices when the deal is missing after restart', async () => {
+  const { app, dealId, key, retained } = await interruptedImport();
+  app.repo.peer.deleteDeal(dealId, { by: 'Peer', from: 'Other PC', at: '2026-11-20T10:00:00.000Z' });
+  await app.store.boot();
+  const screen = await openRecoveryApp(app);
+  await act(() => screen.querySelector<HTMLButtonElement>('.intop .tundo')!.click());
+
+  await vi.waitFor(() => expect(app.store.get().dealLoad[dealId]).toBe('loaded'));
+  expect(app.store.get().ui.dialog).toBeNull();
+  expect(screen.querySelector('.intop')?.textContent).toContain('Discard');
+  expect(app.store.interruptedOps()).toHaveLength(1);
+  expect(keptImport(key)).toEqual(retained);
+  await app.repo.close();
+});
+
+it('keeps the file if Start Over fails to discard its action, then starts over on retry', async () => {
+  const { app, key, retained } = await interruptedImport();
+  await app.store.boot();
+  const screen = await retryInterruptedImport(app);
+  const op = app.store.interruptedOps()[0];
+  const transaction = app.repo.transaction.bind(app.repo);
+  app.repo.transaction = async (write) => {
+    if (operationWrite(write, 'ImportQuestions', 'discarded')) {
+      return { ok: false, error: { kind: 'failed', message: 'Journal busy' } };
+    }
+    return transaction(write);
+  };
+  await confirmStartOver(screen);
+  await vi.waitFor(() => expect(screen.textContent).toContain('Couldn’t clear'));
+  expect(screen.querySelector('#im-go')).not.toBeNull();
+  expect(keptImport(key)).toEqual(retained);
+  expect(app.store.get().ops[op.id].state).toBe('interrupted');
+
+  app.repo.transaction = transaction;
+  await confirmStartOver(screen);
+  await vi.waitFor(() => expect(keptImport(key)).toBeUndefined());
+  expect(app.store.get().ops[op.id].state).toBe('discarded');
+  await act(() => screen.querySelector<HTMLButtonElement>('.imdlg .x')!.click());
+  expect(screen.querySelector('.intop')).toBeNull();
+  expect(Object.keys(app.store.get().questions)).toHaveLength(0);
+  await app.repo.close();
+});
+
+it('retires the interrupted action only after a replacement file is read', async () => {
+  const { app, key } = await interruptedImport();
+  await app.store.boot();
+  const screen = await retryInterruptedImport(app);
+  await act(() => screen.querySelector<HTMLButtonElement>('#im-back')!.click());
+  expect(app.store.interruptedOps()).toHaveLength(1);
+  const input = screen.querySelector<HTMLInputElement>('#im-file')!;
+  const replacement = new File(['Question\nConfirm the insurance renewal'], 'Renewal.csv', { type: 'text/csv' });
+  Object.defineProperty(input, 'files', { value: [replacement] });
+  await act(() => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+  await vi.waitFor(() => expect(screen.textContent).toContain('Renewal.csv'));
+  expect(keptImport(key)?.submission).toBeNull();
+  expect(app.store.interruptedOps()).toHaveLength(0);
+  expect(Object.keys(app.store.get().questions)).toHaveLength(0);
+  await app.repo.close();
 });
