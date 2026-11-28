@@ -3855,8 +3855,9 @@ export function nodeAi(o: AiOptions) {
           for (const c of r.copies ?? []) { const g = entry(c.folder); g.copies = (g.copies ?? 0) + 1; }
         }
         const has = new Set(o.docs.records(dealId).map((r) => r.docId)); const items = (await shownItems(dealId, latest, done)).map(({ id }) => { const l = latest.get(id); return unmoored(l, (d) => has.has(d)) ? 'unsettled' : l?.result; }); const count = (r: Outcome) => items.filter((x) => x === r).length;
-        const also = await alsoIn(dealId, o.docs.records(dealId));
-        const reportStatus = reportReadStatus(dealId, all, o.docs.records(dealId));
+        const records = o.docs.records(dealId);
+        const also = await alsoIn(dealId, records);
+        const reportStatus = reportReadStatus(dealId, all, records);
         return ok({
           folders: [...folders.values()],
           ...(also.length ? { alsoIn: also } : {}),
