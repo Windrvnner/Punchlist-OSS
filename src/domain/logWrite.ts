@@ -7,7 +7,7 @@
  */
 import type { Question } from './model';
 import type { ReadTable, SheetEdit } from './sheets';
-import { prepareImport, IMPORT_FIELDS, sameText, type Mapping, type ImportField, type ImportRow } from './importExport';
+import { prepareImport, IMPORT_FIELDS, sameText, type Mapping, type ImportField } from './importExport';
 import { matchQuestions } from './qaMatch';
 
 /** every field the app keeps up to date in the log, where the log has a column for it */
@@ -92,14 +92,49 @@ export function logHolds(table: Pick<ReadTable, 'rows'>, mapping: Mapping, quest
   return out;
 }
 
-// A filled Response cell is the first answer when the app has none and has never written one (#1392).
-function isFirstLogResponse(field: ImportField, app: string, sent: string | undefined, log: string): boolean {
-  return field === 'response' && !app.trim() && sent === undefined && !!log.trim();
+// Status and priority can be written in the log's own case.
+function sameField(field: ImportField, first: string, second: string): boolean {
+  return field === 'status' || field === 'priority'
+    ? first.toLowerCase() === second.toLowerCase()
+    : sameText(first, second);
 }
 
-// A response taken from the log can later be withdrawn there (#1392).
-function hasLogEdit(field: ImportField, log: string, sent: string): boolean {
-  return !!log.trim() || (field === 'response' && !!sent.trim());
+function logSaysSame(field: ImportField, log: string, read: string, app: string): boolean {
+  // Leave a date the import could not settle (11/02 either way) as the log writes it.
+  if ((field === 'received' || field === 'responded') && !read && log.trim()) return true;
+  return sameField(field, read, app) || sameText(log, app);
+}
+
+function hasLogEdit(field: ImportField, log: string, sent: string | undefined): boolean {
+  // A tracked response can be withdrawn or changed to whitespace in the log (#1392).
+  return !!log.trim() || (field === 'response' && sent !== undefined && log !== sent);
+}
+
+function logStillHoldsSent(field: ImportField, log: string, sent: string, read: string | undefined): boolean {
+  return sameText(log, sent) || (!!read && sameField(field, read, sent));
+}
+
+// A first response comes from the log exactly as written, including spaces and tabs (#1392).
+function isFirstLogResponse(field: ImportField, app: string, log: string): boolean {
+  return field === 'response' && log !== '' && log !== app;
+}
+
+function logCellAction(
+  field: ImportField, app: string, log: string, sent: string | undefined, read: string | undefined,
+): 'skip' | 'same' | 'take' | 'keep' | 'write' {
+  if (!app.trim() && sent === undefined) {
+    return isFirstLogResponse(field, app, log) ? 'take' : 'skip';
+  }
+  if (logSaysSame(field, log, read ?? log, app)) return 'same';
+
+  const stillSent = sent !== undefined && logStillHoldsSent(field, log, sent, read);
+  if (!stillSent && hasLogEdit(field, log, sent)) {
+    const appUnchanged = sent !== undefined && (sameText(app, sent) || sameField(field, app, sent));
+    return appUnchanged ? 'take' : 'keep';
+  }
+  // High on a question that came in with no priority is the app's own default.
+  if (field === 'priority' && !log.trim() && app === 'High' && sent === undefined) return 'skip';
+  return 'write';
 }
 
 /**
@@ -118,40 +153,28 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
   // each row as the import reads it (dates, statuses and priorities in the app's terms), so a cell written another way
   // ("11/12/2026", "Outstanding", "H") that says what the app holds is not taken for a change
   const read = new Map(prepareImport(table.rows, mapping, table.rows.map((_, i) => i)).rows.map((r) => [r.line!, r] as const));
-  // a value as the import reads it against the app's: a status or priority in the app's terms, whatever case it is written in
-  const same = (k: ImportField, a: string, b: string) => (k === 'status' || k === 'priority'
-    ? a.toLowerCase() === b.toLowerCase()
-    : sameText(a, b));
-  const sameAs = (k: ImportField, i: number, v: string) => { const r = read.get(i) as ImportRow | undefined; const was = r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : cell(table.rows[i], k); if (k === 'n') return numberParts(cell(table.rows[i], 'n'))?.n === Number(v);
-    if ((k === 'received' || k === 'responded') && !was && cell(table.rows[i], k).trim()) return true;   // a date the import could not settle (11/02 either way) is left as the log writes it
-    return same(k, was, v) || sameText(cell(table.rows[i], k), v); };
-  // a log cell's value as the import reads it ("11/12/2026" as 2026-11-12, "Outstanding" as open), else as written
-  const readAs = (k: ImportField, i: number) => { const r = read.get(i) as ImportRow | undefined; return r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : ''; };
   for (const q of questions) {
     const i = rowOf.get(q.id); if (i === undefined) continue;
+    const imported = read.get(i) as unknown as Record<string, unknown> | undefined;
     const r = table.rows[i]; const before = sent.get(q.id) ?? {}; const now: Record<string, string> = {}; let filled = false, changed = false, theirs = false;
     for (const k of FIELDS) {
       const c = col(k); if (c == null) continue; const v = cellValue(q, k); const has = cell(r, k);
       if (k === 'n') { if (has.trim()) now.n = has; continue; }                       // a row keeps the number the log gave it
-      const firstResponse = isFirstLogResponse(k, v, before[k], has);
-      if (!firstResponse && !v.trim() && before[k] === undefined) continue;
-      if (!firstResponse && sameAs(k, i, v)) {
+      const readValue = imported ? String(imported[k] ?? '') : undefined;
+      const action = logCellAction(k, v, has, before[k], readValue);
+      if (action === 'skip') continue;
+      if (action === 'same' || action === 'take') {
+        if (action === 'take') (out.taken[q.id] ??= {})[k] = has;
         now[k] = has;
         continue;
       }
-      // the cell still holds what the app last put there, as written or as the import reads it
-      const ours = before[k] !== undefined
-        && (sameText(has, before[k]) || (!!readAs(k, i) && same(k, readAs(k, i), before[k])));
-      // someone changed it in the log; where the app still holds what it last sent, only the log changed: the app takes it
-      if (firstResponse || (!ours && before[k] !== undefined && hasLogEdit(k, has, before[k])
-        && (sameText(v, before[k]) || same(k, v, before[k])))) {
-        (out.taken[q.id] ??= {})[k] = has;
-        now[k] = has;
+      if (action === 'keep') {
+        theirs = true;
+        (out.keptFields[q.id] ??= []).push(k);
+        (out.keptText[q.id] ??= {})[k] = has;
+        if (before[k] !== undefined) now[k] = before[k];
         continue;
       }
-      if (has.trim() && !ours) { theirs = true; (out.keptFields[q.id] ??= []).push(k); (out.keptText[q.id] ??= {})[k] = has; if (before[k] !== undefined) now[k] = before[k]; continue; }   // someone else's: never overwritten
-      // a blank Priority stays blank: the app's High on a question that came in with none is its default, not a value anyone gave
-      if (k === 'priority' && !has.trim() && v === 'High' && before[k] === undefined) continue;
       out.steps.push({ kind: 'cell', row: table.lines[i] - 1, col: c, value: v, ...dated(k) }); now[k] = v;
       if (k === 'response' && !has.trim()) filled = true; else changed = true;
     }

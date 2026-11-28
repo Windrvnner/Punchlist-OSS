@@ -336,8 +336,7 @@ it('takes all 25 first responses typed only in a 2,376-question log (#1392)', as
     expect(questions.every((question) => question.response === '')).toBe(true);
 
     const responses = new Map(Array.from({ length: 25 }, (_, at) => [
-      1 + at * 97, `  See counsel’s note (section ${at + 1}).
-Signed copy enclosed.  `,
+      1 + at * 97, at === 0 ? ' \t ' : `  See counsel’s note (section ${at + 1}).\nSigned copy enclosed.  `,
     ]));
     const edited = rows.map((row, at) => [...row.slice(0, 3), responses.get(at + 1) ?? '']);
     const save = mockLogUpdate(app, edited);
