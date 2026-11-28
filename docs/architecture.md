@@ -202,7 +202,8 @@ write-up keeps any verified sibling issues and leaves the read unfinished. The c
 the next attempt sends the same whole report and asks for the remaining issues. A completed read combines the kept
 issues with the final reply. A finding retains its report ID and original issue signature through edits and deletion,
 so a restart can recognize a write that landed before its report checkpoint. A newer draft compares with the last
-completed draft and any verified intervening issues. The deal progress port lists exhausted reads (#1212).
+completed draft and any verified intervening issues. Deal progress exposes exhausted reads, and the Documents
+section on Overview lists their names in one disclosure (#1212).
 
 ## Checklist items and links
 
