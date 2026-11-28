@@ -28,6 +28,16 @@ function blocks(reply: string): string[] {
   return out;
 }
 
+function jsonObjects(text: string, fenced: string[]) {
+  const open = text.indexOf('{');
+  const close = text.lastIndexOf('}');
+  const candidates = [...fenced.filter((f) => f.startsWith('{')), ...blocks(text)];
+  if (open >= 0 && close > open) candidates.push(text.slice(open, close + 1));
+  // The final candidate may be a reply cut off before it closed.
+  if (open >= 0) candidates.push(text.slice(open));
+  return new Set(candidates);
+}
+
 /**
  * The object in a reply. `keys` are the fields that were asked for: of the objects found, the first that has one of them
  * is the answer, so an aside in braces is not mistaken for it. A reply that is nothing but a list is taken as the
@@ -39,13 +49,12 @@ export function readJson(reply: string, keys: string[], allowUnkeyed = false): R
   const fenced = [...text.matchAll(/```[a-zA-Z0-9]*\s*([\s\S]*?)(?:```|$)/g)].map((m) => m[1].trim()).filter(Boolean);
   // a reply that is a list and nothing else
   for (const whole of [text, ...fenced]) if (whole.startsWith('[')) { const v = parse(whole); if (Array.isArray(v)) return { [keys[0]]: v }; }
-  const open = text.indexOf('{'); const close = text.lastIndexOf('}');
-  const candidates = [...fenced.filter((f) => f.startsWith('{')), ...blocks(text), ...(open >= 0 && close > open ? [text.slice(open, close + 1)] : []), ...(open >= 0 ? [text.slice(open)] : [])];   // the last is a reply cut off before it closed
   let fallback: Record<string, unknown> | null = null;
-  for (const c of candidates.filter((x, i, all) => all.indexOf(x) === i)) {
-    const v = parse(c); if (!isObject(v)) continue;
-    if (keys.some((k) => k in v)) return v;
-    fallback ??= v;
+  for (const candidate of jsonObjects(text, fenced)) {
+    const value = parse(candidate);
+    if (!isObject(value)) continue;
+    if (keys.some((key) => key in value)) return value;
+    fallback ??= value;
   }
   return keys.length && !allowUnkeyed ? null : fallback;
 }

@@ -915,9 +915,22 @@ export function nodeAi(o: AiOptions) {
       if (wrong) return askCorrectedReply<T>(input, keys, read.got, wrong);
     }
     if (read.got || read.unusable || !fix || !String(raw ?? '').trim()) return read.got;
+    return repairAnswer<T>(input, keys, shape, raw);
+  }
+
+  /** Ask to resend the same reply when its JSON cannot be read. */
+  async function repairAnswer<T>(input: Ask, keys: string[], shape: string | undefined, raw: string) {
+    const format = shape ? ` in this shape: ${shape}` : ` with these fields: ${keys.join(', ')}`;
+    const prompt = `The reply below was meant to be one JSON object${format}. It cannot be read as written. `
+      + `Send it again as valid JSON, changing nothing else. If it is not an answer at all, reply {}.\n\n${raw}`;
     let fixed: string;
-    try { fixed = await complete({ kind: 'fix', model: input.model, system: JSON_ONLY, prompt: `The reply below was meant to be one JSON object${shape ? ` in this shape: ${shape}` : ` with these fields: ${keys.join(', ')}`}. It cannot be read as written. Send it again as valid JSON, changing nothing else. If it is not an answer at all, reply {}.\n\n${raw}` }); }
-    catch (e) { if (isCutOff(e)) throw cutReply(e, keys); if (unreachable(e)) throw e; return null; }
+    try {
+      fixed = await complete({ kind: 'fix', model: input.model, system: JSON_ONLY, prompt });
+    } catch (e) {
+      if (isCutOff(e)) throw cutReply(e, keys);
+      if (unreachable(e)) throw e;
+      return null;
+    }
     if (unfinished(fixed)) throw cutReply(cutOff('The repaired reply stopped before its end', fixed), keys);
     return (await usableJson<T>(fixed, keys, input.unusable)).got;
   }
