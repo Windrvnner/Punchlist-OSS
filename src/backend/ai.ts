@@ -76,6 +76,7 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
+import { withStoredCleanDrafts } from './agentBatches';
 import { AI_DRAFTED, questionIdsIn, questionsForIds, responseHeader } from './qaRow';
 import { citesUnsent, docHandle, docsUnusable, namesOnlyShown, sentAs, unknownIds, unknownInPairs } from './recordIds';
 import type { DealDoc, Looked, Unusable } from './agentKit';
@@ -1587,7 +1588,7 @@ export function nodeAi(o: AiOptions) {
    * draft's tracked changes are listed as `share` leaves them (#1381). `spansDeals`: the prompt spans several deals,
    * so each document is named with its deal (#1162).
    */
-  async function send(sent: Sent[], spansDeals: boolean, share: ChangeShare):
+  async function send(sent: Sent[], spansDeals: boolean, share: ChangeShare, cleanDrafts?: AgentKit['cleanDrafts']):
     Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
     const idOf = (s: Sent) => docHandle(s, spansDeals);
@@ -1596,7 +1597,7 @@ export function nodeAi(o: AiOptions) {
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
-      for (const s of mine) {
+      for (const s of withStoredCleanDrafts(mine, ids, cleanDrafts?.(dealId))) {
         const id = ids[s.rec.docId]; if (!id) continue; files.push(id); got.push(s);
         const rec = o.docs.records(dealId).find((r) => r.docId === s.rec.docId) ?? s.rec;          // a Word file's pages are counted when it is first sent, just now
         lines.push(`${idOf(s)}: ${where(rec)}${rec.pages ? ` (${rec.pages} pages)` : ''}`);
