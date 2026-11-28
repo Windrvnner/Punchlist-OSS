@@ -500,7 +500,7 @@ function mergedText(reply: { text?: unknown } | null): string {
 }
 
 function readCorrection(
-  prompt: string, reply: Record<string, unknown> | null, again: { wrong: string },
+  prompt: string, reply: unknown, again: { wrong: string },
 ): string {
   if (!reply) return prompt;
   const previous = JSON.stringify(reply);
@@ -900,13 +900,19 @@ export function nodeAi(o: AiOptions) {
     }
   }
   /** a reply read as JSON, or none (`unusable`) when its caller cannot use it once its tries ran out (#1105) */
-  async function usableJson<T>(text: string, keys: string[], unusable?: Unusable) {
+  async function usableJson<T>(text: string, keys: string[], unusable?: Unusable, allowUnkeyed = false) {
     if (unusable && await unusable(text)) return { got: null, unusable: true };
-    return { got: json<T>(text, ...keys), unusable: false };
+    return { got: readJson(text, keys, allowUnkeyed) as T | null, unusable: false };
   }
-  async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
+  async function askJson<T = Record<string, unknown>>(
+    input: Ask, keys: string[], shape?: string, fix = true, correction?: (reply: T) => string | undefined,
+  ): Promise<T | null> {
     const raw = await whole(input, keys);
-    const read = await usableJson<T>(raw, keys, input.unusable);
+    const read = await usableJson<T>(raw, keys, input.unusable, !!correction);
+    if (read.got && correction) {
+      const wrong = correction(read.got);
+      if (wrong) return askCorrectedReply<T>(input, keys, read.got, wrong);
+    }
     if (read.got || read.unusable || !fix || !String(raw ?? '').trim()) return read.got;
     let fixed: string;
     try { fixed = await complete({ kind: 'fix', model: input.model, system: JSON_ONLY, prompt: `The reply below was meant to be one JSON object${shape ? ` in this shape: ${shape}` : ` with these fields: ${keys.join(', ')}`}. It cannot be read as written. Send it again as valid JSON, changing nothing else. If it is not an answer at all, reply {}.\n\n${raw}` }); }
@@ -1097,7 +1103,7 @@ export function nodeAi(o: AiOptions) {
       say: async (report) => { await say(dealId, { report }); },
       claim: (keys) => claimReports(dealId, keys),
       release: async (keys) => { if (o.shared) await release(dealId, keys).catch(() => undefined); },
-      ask: (input, keys) => askJson(input, keys),
+      ask: (input, keys, correction) => askJson(input, keys, undefined, true, correction),
       unusable: (sent, keys, shown) => docsUnusable(sent, false, keys, where, shown),
       send: async (rec, share) => {
         const r = await send(sentOf(dealId, [rec]), false, share);
@@ -1753,6 +1759,12 @@ export function nodeAi(o: AiOptions) {
     }
   }
 
+  /** Send the same request with the previous reply and what to correct. */
+  function askCorrectedReply<T>(ask: Ask, keys: string[], reply: T | null, wrong: string): Promise<T | null> {
+    const prompt = readCorrection(ask.prompt, reply, { wrong });
+    return askJson<T>({ ...ask, prompt }, keys, undefined, false);
+  }
+
   /**
    * One JSON reply that `usable` accepts: one it rejects is sent back once with what is wrong, as `draft` does (#1058).
    * The send-back is read as written, with no second reading; the caller decides what a reply still unusable means.
@@ -1762,8 +1774,7 @@ export function nodeAi(o: AiOptions) {
   ): Promise<T | null> {
     const reply = await askJson<T>(ask, keys);
     if (usable(reply)) return reply;
-    const prompt = readCorrection(ask.prompt, reply, { wrong });
-    return askJson<T>({ ...ask, prompt }, keys, undefined, false);
+    return askCorrectedReply<T>(ask, keys, reply, wrong);
   }
 
   function readCanRetry(model: string, again: { escalate: string; retrySharedModel?: boolean } | undefined): boolean {

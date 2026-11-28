@@ -95,10 +95,14 @@ export interface ReportKit {
   where: (rec: DocRecord) => string;
   models: { fast: string; standard: string };
   /**
-   * one call, its reply read as JSON; null when it cannot be read. Throws when the service fails, or with
-   * `code: 'cutoff'` and `partial` when the reply was cut off
+   * Read a reply as JSON. The initial parsed reply is sent back once if `correction` gives a reason.
+   * Returns null when it cannot be read. Throws on service failure or with `code: 'cutoff'` and `partial` on a cut.
    */
-  ask: (input: AskInput, keys: string[]) => Promise<Record<string, unknown> | null>;
+  ask: (
+    input: AskInput,
+    keys: string[],
+    correction?: (reply: Record<string, unknown>) => string | undefined,
+  ) => Promise<Record<string, unknown> | null>;
   /**
    * a reply naming an id it was not shown (the documents sent, and with `shown` those ids), or citing a document it
    * was not given, as `ask` refuses it (#1162)
