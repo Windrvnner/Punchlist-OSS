@@ -197,15 +197,16 @@ function priorItems(questions: string[], technology: string) {
   }));
 }
 
-async function technologyReview(questions: string[], name: string) {
+async function technologyReview(questions: string[], name: string, compare = false) {
   app.store.services.ai.readList = async ({ lines }) => ok({
     lines: lines.map((_, index) => ({ n: index + 1, k: 'item' })),
   });
+  app.store.services.ai.sameMeaning = async () => ok({ pairs: [] });
   const session = open();
   session.setLayer('technology');
   session.setName(name);
   session.setAskReword(false);
-  session.setAskSame(false);
+  session.setAskSame(compare);
   session.setPaste(questions.join('\n'));
   await session.pasted();
   await session.next();
@@ -290,4 +291,93 @@ it('refuses a queued Import when an earlier write changes the reviewed list (#56
   expect(app.store.get().firmList[id].items[0]).toEqual(updatedItems[0]);
   expect(session.view.work.error).toContain('The list changed');
   expect(keptImport(key)).toBeDefined();
+});
+
+it('keeps checked wording while remapping the section of the same row (#56)', async () => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  app.store.services.ai.readList = async () => fail({ kind: 'failed', message: 'Unavailable' });
+  const text = 'Provide the executed EPC contract and appendices.';
+  const reword = vi.fn(async () => ok([{ at: 0, text, why: '' }]));
+  app.store.services.ai.reword = reword;
+  const rows = questions.map((question) => ['Operations', 'Financing', question]);
+  const encoded = await csvCodec.write('Sheet1', [['Section', 'Alternate area', 'Item'], ...rows]);
+  if (!encoded.ok) throw new Error(encoded.error.message);
+  const session = open();
+  await session.load(new File([encoded.value.bytes.slice().buffer], 'Portfolio checklist.csv'));
+  session.setAskReword(true);
+  session.setAskSame(false);
+  await session.chooseColumns();
+  await session.next();
+  session.flipReword(0);
+  session.backToList();
+  session.pickColumn('section', 1);
+  await session.next();
+  expect(session.view.listReview.useReword.has(0)).toBe(true);
+  expect(reword).toHaveBeenCalledTimes(1);
+  await session.bringIn();
+  const items = app.store.get().firmList[listId('broad', '')]?.items;
+  expect(items).toHaveLength(2_000);
+  expect(items?.[0]).toEqual({ text, was: questions[0], section: 'Financing' });
+});
+
+async function savePriorList(layer: 'broad' | 'technology', name: string, items: { text: string }[]) {
+  expect((await app.store.dispatch(BringInList, {
+    list: { layer, name, items, file: 'Prior requests.csv', fileDate: '' },
+  })).ok).toBe(true);
+  return listId(layer, name);
+}
+
+function peerChangesList(id: string, items: { text: string }[]) {
+  const before = app.store.get().firmList[id];
+  app.repo.peer.change('firmList', id, { ...before, items, rev: before.rev + 1 }, ELSEWHERE);
+}
+
+it('preserves a synced destination addition even without previously approved wording (#56)', async () => {
+  const items = [{ text: 'Verify the original grid connection letter.' }];
+  const id = await savePriorList('technology', 'Wind', items);
+  const session = await technologyReview(portfolioQuestions().slice(0, 2_000), 'Wind');
+  const added = [...items, { text: 'Provide the latest grid operator consent.' }];
+  peerChangesList(id, added);
+  await app.store.refreshSync();
+
+  expect(session.view.canBringIn).toBe(true);
+  await session.bringIn();
+  expect(app.store.get().firmList[id].items).toHaveLength(2);
+  expect(app.store.get().firmList[id].items).toEqual(added);
+  expect(keptImport(key)).toBeDefined();
+  expect(session.view.work.error).toContain('The list changed');
+});
+
+it.each(['before Import', 'at commit'])('preserves rows when General changes %s (#56)', async (when) => {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const general = questions.slice(0, 120).map((text) => ({ text }));
+  const id = await savePriorList('broad', '', general);
+  const session = await technologyReview(questions, 'Wind', true);
+  expect(session.view.listReview.review?.pairs).toHaveLength(120);
+  for (let index = 0; index < 120; index++) session.flipRemove(index);
+  const changed = [{ text: 'Confirm all lender notice periods and deliverables.' }, ...general.slice(1)];
+
+  if (when === 'before Import') {
+    peerChangesList(id, changed);
+    await app.store.refreshSync();
+    await session.bringIn();
+  } else {
+    const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
+    const importing = session.bringIn();
+    await held.entered;
+    peerChangesList(id, changed);
+    held.release();
+    await importing;
+  }
+
+  const wind = listId('technology', 'Wind');
+  expect(app.store.get().firmList[wind]?.items.length ?? 0).toBe(0);
+  expect(keptImport(key)).toBeDefined();
+  expect(session.view.listReview.review?.generalTexts[0]).toBe(questions[0]);
+  await app.store.refreshSync();
+  session.backToList();
+  await session.next();
+  expect(session.view.listReview.review?.pairs).toHaveLength(119);
+  await session.bringIn();
+  expect(app.store.get().firmList[wind].items[0]?.text).toBe(questions[0]);
 });
