@@ -70,10 +70,9 @@ export interface AgentKit {
   words(text: string, dealId?: string): Set<string>;
   /**
    * put documents in the store and list them for a prompt, each by its id (`spansDeals`: with its deal), a draft's
-   * tracked changes as `share` leaves them (#1381); `got` are those really there. A chat read requires a known clean
-   * draft to be available before giving the model its blackline (#1213).
+   * tracked changes as `share` leaves them (#1381); `got` are those really there
    */
-  send(sent: Sent[], spansDeals: boolean, share: ChangeShare, cleanDrafts?: AgentKit['cleanDrafts']):
+  send(sent: Sent[], spansDeals: boolean, share: ChangeShare):
     Promise<{ files: string[]; listing: string; got: Sent[] }>;
   /** keep the citations that can be stood behind, renumbering the markers in the text */
   fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean): { text: string; sources: Source[] };
