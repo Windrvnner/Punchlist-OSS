@@ -52,24 +52,51 @@ export interface KeptAsk {
   add: { col: number; value: string }[];
 }
 
-/** a column's key: its heading, spacing and case aside, and which of the columns so headed it is */
-const keys = (columns: string[]) => { const seen = new Map<string, number>(); return columns.map((c) => { const h = c.replace(/\s+/g, ' ').trim().toLowerCase(); const k = (seen.get(h) ?? 0) + 1; seen.set(h, k); return `${h}#${k}`; }); };
+/** The exact heading and its occurrence in the table. */
+function keys(columns: string[]): string[] {
+  const seen = new Map<string, number>();
+  return columns.map((heading) => {
+    const count = (seen.get(heading) ?? 0) + 1;
+    seen.set(heading, count);
+    return `${heading}#${count}`;
+  });
+}
 
-/** A selected duplicate or unnamed key must occupy the same positions in the versions being merged (#282). */
-function logColumnKey(
-  choice: string | number, log: KeptTable, current: string[], earlier: { table: KeptTable; keys: string[] }[],
-): string {
-  if (typeof choice === 'string') return current[log.columns.indexOf(choice)] ?? '';
-  const key = current[choice];
-  if (!key) return '';
-  const heading = key.slice(0, key.lastIndexOf('#'));
-  const group = (table: KeptTable, keys: string[]) => keys.flatMap((candidate, index) =>
-    candidate.slice(0, candidate.lastIndexOf('#')) === heading ? [[table.cols[index], table.columns[index]]] : []);
-  const selected = group(log, current);
-  const previous = earlier.map(({ table, keys }) => group(table, keys));
-  if (heading && selected.length === 1 && previous.every((columns) => columns.length <= 1)) return key;
-  const positions = JSON.stringify(selected);
-  return previous.every((columns) => JSON.stringify(columns) === positions) ? key : '';
+/** Retained edits follow exact headings. Repeated and unnamed headings need the same sheet positions (#282). */
+function sameKeptColumn(heading: string, base: KeptTable, kept: KeptTable, log: KeptTable) {
+  const positions = ({ columns, cols }: KeptTable) =>
+    columns.flatMap((label, index) => label === heading ? [cols[index]] : []);
+  const current = positions(log);
+  const earlier = [positions(base), positions(kept)];
+  if (heading.trim() && current.length === 1 && earlier.every((columns) => columns.length <= 1)) return true;
+  return earlier.every((columns) => columns.length === current.length
+    && columns.every((column, index) => column === current[index]));
+}
+
+type ColumnChoice = string | number;
+type KeptColumnChoices = { text: ColumnChoice; number: ColumnChoice; by: ColumnChoice };
+
+function keptColumns(base: KeptTable, kept: KeptTable, log: KeptTable, choices: KeptColumnChoices) {
+  const kb = keys(base.columns);
+  const kk = keys(kept.columns);
+  const kl = keys(log.columns);
+  const indexes = (choice: ColumnChoice): [number, number, number] | null => {
+    const index = typeof choice === 'number' ? choice : choice ? log.columns.indexOf(choice) : -1;
+    const key = kl[index];
+    if (!key) return [-1, -1, -1];
+    if (!sameKeptColumn(log.columns[index], base, kept, log)) return null;
+    return [kb.indexOf(key), kk.indexOf(key), index];
+  };
+  const question = indexes(choices.text);
+  const numbers = indexes(choices.number);
+  const senders = indexes(choices.by);
+  if (!question || question.includes(-1) || !numbers || !senders) return null;
+  const both = kk.flatMap((key, index) => {
+    const current = kl.indexOf(key);
+    if (current < 0 || !sameKeptColumn(kept.columns[index], base, kept, log)) return [];
+    return [{ k: index, b: kb.indexOf(key), l: current }];
+  });
+  return { kb, kk, question, numbers, senders, both };
 }
 /** a row that asks a question: a heading or a blank line stands for none, as the log update reads it (logWrite.ts) */
 const hasQuestion = (r: string[], text: number) => (r[text] ?? '').trim() !== '';
@@ -215,33 +242,51 @@ function unchangedHeadings(kept: string[][], kt: number, base: string[][], bt: n
 export const cell = (row: number, col: number, s: string): SheetEdit =>
   /^-?(?:0|[1-9]\d{0,14})(?:\.\d+)?$/.test(s) && String(Number(s)) === s ? { kind: 'cell', row, col, value: Number(s) } : /^\d{4}-\d{2}-\d{2}$/.test(s) ? { kind: 'cell', row, col, value: s, date: true } : { kind: 'cell', row, col, value: s };
 
+function appendKeptRows(
+  out: KeptMerge, rows: number[], last: number, cellsOf: (row: number) => { col: number; value: string }[],
+) {
+  if (!rows.length) return;
+  out.steps.push({ kind: 'rows', after: last, count: rows.length });
+  rows.forEach((row, index) => {
+    for (const { col, value } of cellsOf(row)) out.steps.push(cell(last + 1 + index, col, value));
+  });
+  out.added = rows.length;
+}
+
+function projectKeptCells(
+  kept: KeptTable, log: KeptTable, columns: { k: number; l: number }[],
+  formula: (row: number, column: number) => boolean,
+) {
+  const logOrder = [...columns].sort((left, right) => left.l - right.l);
+  return (row: number) => logOrder.flatMap(({ k, l }) => {
+    const value = kept.rows[row][k] ?? '';
+    return value !== '' && !formula(row, k) ? [{ col: log.cols[l], value }] : [];
+  });
+}
+
 /**
- * Their edit (`kept`, made from `base`) brought into `log`. `text`: the heading of the question column, as `log` has it.
+ * Their edit (`kept`, made from `base`) brought into `log`. `text`, `number` and `by` select columns in `log`.
  * `fixed(row, col)`: a cell of the log's sheet that must not be written (a formula, a cell under a merge); one they changed
  * counts as both changed. `formula(row, col)`: a cell of their sheet that holds a formula (its text, or true), whose value is never taken for
- * their change, nor written into a row they added. `number`: the heading of the question number column, if the log has one;
- * `by`: of Submitted by. `baseFormula`: as `formula`, for the version they edited.
+ * their change, nor written into a row they added. `baseFormula`: as `formula`, for the version they edited.
  */
 export function mergeKept(
-  base: KeptTable, kept: KeptTable, log: KeptTable, text: string | number,
+  base: KeptTable, kept: KeptTable, log: KeptTable, text: ColumnChoice,
   fixed: (row: number, col: number) => boolean = () => false,
   formula: (row: number, col: number) => string | boolean = () => false,
-  number: string | number = '', baseFormula?: (row: number, col: number) => string | boolean,
-  by: string | number = '',
+  number: ColumnChoice = '', baseFormula?: (row: number, col: number) => string | boolean, by: ColumnChoice = '',
 ): KeptMerge {
   const out: KeptMerge = { steps: [], clashes: [], cells: 0, added: 0, left: 0, ask: [] };
-  const kb = keys(base.columns), kk = keys(kept.columns), kl = keys(log.columns);
-  const earlier = [{ table: base, keys: kb }, { table: kept, keys: kk }];
-  const tk = logColumnKey(text, log, kl, earlier);
-  const bt = kb.indexOf(tk), kt = kk.indexOf(tk), lt = kl.indexOf(tk);
-  // no question column in common: nothing can be lined up, so whatever they changed is left out
-  if (!tk || bt < 0 || kt < 0 || lt < 0) { out.left = JSON.stringify([kept.columns, kept.rows]) === JSON.stringify([base.columns, base.rows]) ? 0 : 1; return out; }
-  // The columns they and the log have, by where each is in its table's rows (`b`: in the version they edited, -1 for one
-  // added since, which counts as empty there). A heading the three have a different number of (a second "Note" put in) is
-  // left out: which of them is which can't be told.
-  const head = (k: string) => k.slice(0, k.lastIndexOf('#')); const many = (ks: string[], h: string) => ks.filter((k) => head(k) === h).length;
-  const sure = (k: string) => { const h = head(k), n = many(kk, h); return n === many(kl, h) && (n === many(kb, h) || (n === 1 && !many(kb, h))); };
-  const both = kk.map((k, c) => ({ k: c, b: kb.indexOf(k), l: kl.indexOf(k) })).filter((c) => c.l >= 0 && (c.k === kt || sure(kk[c.k])));
+  const columns = keptColumns(base, kept, log, { text, number, by });
+  // With no shared question column or an ambiguous selected key, the edit stays in the archive (#282).
+  if (!columns) {
+    out.left = JSON.stringify([kept.columns, kept.rows]) === JSON.stringify([base.columns, base.rows]) ? 0 : 1;
+    return out;
+  }
+  const { kb, kk, question, numbers, senders, both } = columns;
+  const [bt, kt, lt] = question;
+  const [nb, nkk, nll] = numbers;
+  const [bb, bkk, bll] = senders;
   const goes = new Set(both.map((c) => c.k));
   const keptWorked = (j: number, c: number) => !!formula(kept.lines[j] - 1, kept.cols[c]), logWorked = (j: number, c: number) => fixed(log.lines[j] - 1, log.cols[c]);
   /**
@@ -259,10 +304,6 @@ export function mergeKept(
     if (!all && goes.has(c)) return; const b = kb.indexOf(k); const was = i !== undefined && b >= 0 ? base.rows[i][b] ?? '' : '';
     if (keptWorked(j, c) ? typed(j, c, i) : (kept.rows[j][c] ?? '') !== was) out.left++;
   });
-  const nkey = number === '' ? '' : logColumnKey(number, log, kl, earlier);
-  const nb = kb.indexOf(nkey), nkk = kk.indexOf(nkey), nll = kl.indexOf(nkey);
-  const bkey = by === '' ? '' : logColumnKey(by, log, kl, earlier);
-  const bb = kb.indexOf(bkey), bkk = kk.indexOf(bkey), bll = kl.indexOf(bkey);
   const [baseForKept, keptCols] = lookupCols([bt, kt], [nb, nkk], [bb, bkk]);
   const ks = lineUp(base.rows, baseForKept, kept.rows, keptCols).out;
   const [baseForLog, logCols] = lookupCols([bt, lt], [nb, nll], [bb, bll]);
@@ -316,7 +357,7 @@ export function mergeKept(
     const rest = [...free]; const pairs: [number, number | undefined][] = free.length === kj.length ? kj.map((j, n) => [j, free[n]]) : kj.map((j) => { const n = rest.findIndex((i) => asWas(j, i)); return [j, n >= 0 ? rest.splice(n, 1)[0] : undefined]; });
     for (const [j, i] of pairs) { used[j] = 1; if (i !== undefined) told.add(i); if (i === undefined || !asWas(j, i)) asks.push({ j, b: i }); }
   }
-  const cellsOf = (j: number) => kl.map((k, l) => ({ k: kk.indexOf(k), l })).filter((c) => goes.has(c.k) && !keptWorked(j, c.k)).map((c) => ({ col: log.cols[c.l], value: kept.rows[j][c.k] ?? '' })).filter((c) => c.value !== '');
+  const cellsOf = projectKeptCells(kept, log, both, keptWorked);
   /**
    * Their row `a.j` (made from row `a.b` of the version they edited, when that is known) placed by the person: in one of
    * `rows` of the log (by default, those that read so, but another party's), as a row of its own, or left out. Each row
@@ -394,13 +435,7 @@ export function mergeKept(
       if (!now.trim() && !fixed(row, col)) { out.steps.push(cell(row, col, v)); out.cells++; written.set(`${row},${col}`, v); } else clash.add(same);
     }
   });
-  if (fresh.length) {
-    const last = log.lastRow - 1;                                                       // below the last row the log uses, as an update adds questions
-    out.steps.push({ kind: 'rows', after: last, count: fresh.length });
-    const cols = kl.map((k, l) => ({ k: kk.indexOf(k), l })).map((c) => (goes.has(c.k) ? c : { k: -1, l: c.l }));
-    fresh.forEach((j, i) => { const r = kept.rows[j]; for (const c of cols) { const v = c.k >= 0 && !keptWorked(j, c.k) ? r[c.k] ?? '' : ''; if (v !== '') out.steps.push(cell(last + 1 + i, log.cols[c.l], v)); } });
-    out.added = fresh.length;
-  }
+  appendKeptRows(out, fresh, log.lastRow - 1, cellsOf);
   out.clashes = [...clash].sort((a, b) => a - b);
   return out;
 }
