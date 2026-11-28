@@ -2,7 +2,7 @@ import { findList, key, listId, type FirmList, type Layer } from '../domain/chec
 import { alphabetical } from '../domain/order';
 import { sameContent } from '../domain/versions';
 import type { RemovalChoice, Review, WordingChoice } from './checklistImport';
-import { usableFirm } from './commands/checklist';
+import { usableFirm, type ListReviewRevisions } from './commands/checklist';
 import { versionsWord, type State } from './state';
 
 /** 'The general list', or 'The Solar list' */
@@ -17,6 +17,7 @@ export interface ListTarget {
   named: boolean;
   /** the list of that name the firm has now, if any */
   replaces: ReturnType<typeof findList>;
+  revision: number | null;
   /** the list in two versions, when it is: it waits for a choice before it can be brought in */
   split: State['conflicts'][string] | undefined;
   splitSays: string;
@@ -24,6 +25,7 @@ export interface ListTarget {
   hasGeneral: boolean;
   /** the general list's items, which another list's items are checked against for duplicates */
   generalTexts: string[];
+  generalRevision: number;
 }
 
 export function listTarget(state: State, firm: FirmList, layer: Layer, name: string): ListTarget {
@@ -41,6 +43,7 @@ export function listTarget(state: State, firm: FirmList, layer: Layer, name: str
   const listNames = alphabetical(firm.lists.filter((list) => list.layer === layer).map((list) => list.name));
   return {
     id, layer, name, named, replaces, split, splitSays, generalTexts, listNames, hasGeneral: !!general,
+    revision: state.firmList[id]?.rev ?? null, generalRevision: general?.rev ?? 0,
   };
 }
 
@@ -113,12 +116,18 @@ export function keepChecklistReviewChoices(previous: Review | null, review: Revi
   return { review: { ...review, pendingWording, pendingRemovals }, useReword, remove };
 }
 
-/** A checked General removal still has its match when the exact reviewed wording remains in General (#56). */
-export function reviewChanged(review: Review, target: ListTarget, remove: Set<number>) {
+/** Capture the revisions once the destination and the exact checked General matches have been verified (#41, #56). */
+export function reviewedListRevisions(
+  review: Review, target: ListTarget, remove: Set<number>,
+): ListReviewRevisions | null {
   if (review.destination !== target.id || !sameContent(review.destinationItems, target.replaces?.items ?? null)) {
-    return true;
+    return null;
   }
-  if (!remove.size) return false;
+  const destination = target.revision;
+  if (!remove.size) return { destination };
+  const checked = review.pairs.filter(({ a, inAgainst }) => inAgainst && remove.has(a));
+  if (!checked.length) return { destination };
   const general = new Set(target.generalTexts);
-  return review.pairs.some(({ a, b, inAgainst }) => inAgainst && remove.has(a) && !general.has(review.generalTexts[b]));
+  if (checked.some(({ b }) => !general.has(review.generalTexts[b]))) return null;
+  return { destination, general: target.generalRevision };
 }

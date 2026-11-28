@@ -10,6 +10,7 @@ import { listId } from '../../src/domain/checklist';
 import { fail, ok } from '../../src/domain/result';
 import { checklistSpreadsheet } from '../fixtures/checklistSpreadsheet';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
+import { ELSEWHERE } from '../adapters/memRepo';
 import { holdRecoveryWrite, recoveryApp } from './recoveryKit';
 
 const key = importKey.checklist();
@@ -117,6 +118,66 @@ async function reviewPortfolio() {
   expect(reopened.view.listReview.remove.has(2375)).toBe(true);
   return reopened;
 }
+
+it('refuses a queued Import when an earlier write changes the reviewed list (#56)', async () => {
+  const id = listId('broad', '');
+  const list = { layer: 'broad' as const, name: '', file: 'Prior requests.csv', fileDate: '' };
+  const items = [{ text: 'Provide the original grid connection agreement.' }];
+  expect((await app.store.dispatch(BringInList, { list: { ...list, items } })).ok).toBe(true);
+  const session = await reviewPortfolio();
+  const updated = [{ text: 'Provide the executed amendment to the grid connection agreement.' }];
+  const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'firmList'));
+  const first = app.store.dispatch(BringInList, { list: { ...list, items: updated } });
+  await held.entered;
+  const queued = session.bringIn();
+  held.release();
+  expect((await first).ok).toBe(true);
+  await queued;
+  expect(app.store.get().firmList[id].items[0]).toEqual(updated[0]);
+  expect(app.store.get().firmList[id].items).toHaveLength(1);
+  expect(session.view.work.error).toContain('The list changed');
+  expect(keptImport(key)).toBeDefined();
+});
+
+it.each(['unchanged', 'changed', 'locked'])('checks a repeat import without writing a version (%s)', async (state) => {
+  const changed = state !== 'unchanged';
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const id = listId('broad', '');
+  expect((await app.store.dispatch(BringInList, {
+    list: { layer: 'broad', name: '', items: questions.map((text) => ({ text })), file: '', fileDate: '' },
+  })).ok).toBe(true);
+  const saved = app.store.get().firmList[id];
+  app.store.services.ai.readList = async ({ lines }) => ok({
+    lines: lines.map((_, index) => ({ n: index + 1, k: 'item' })),
+  });
+  const review = open();
+  review.setAskReword(false);
+  review.setAskSame(false);
+  review.setPaste(questions.join('\n'));
+  await review.pasted();
+  await review.next();
+  const updated = 'Provide the executed amendment to the grid connection agreement.';
+  const priorFiles = new Set(app.saved.shared.list());
+  if (changed) {
+    const items = [{ text: updated }, ...saved.items.slice(1)];
+    app.repo.peer.change('firmList', id, { ...saved, items, rev: saved.rev + 1 }, ELSEWHERE);
+  }
+  const lockedFile = state === 'locked' && app.saved.shared.list().find((file) => !priorFiles.has(file));
+  const read = app.saved.shared.read.bind(app.saved.shared);
+  const readSpy = vi.spyOn(app.saved.shared, 'read').mockImplementation((file) => {
+    if (file === lockedFile) throw Object.assign(new Error('Locked by another process'), { code: 'EBUSY' });
+    return read(file);
+  });
+  const localWrite = vi.spyOn(app.saved.local, 'write');
+  try { await review.bringIn(); }
+  finally { readSpy.mockRestore(); }
+  if (state === 'locked') expect(review.view.work.error).toContain('can’t be opened');
+  expect(localWrite.mock.calls.some(([file]) => file === 'ops.json')).toBe(false);
+  expect(!!keptImport(key)).toBe(changed);
+  await app.store.refreshSync();
+  expect(app.store.get().firmList[id].items[0].text).toBe(changed ? updated : questions[0]);
+  expect(app.store.get().firmList[id].rev).toBe(saved.rev + Number(changed));
+});
 
 it('brings in the restored review, holds the draft until the write, and offers Undo All', async () => {
   const session = await reviewPortfolio();

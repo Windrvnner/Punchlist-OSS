@@ -7,6 +7,7 @@
 import type { Store } from './store';
 import {
   BringInList, AddDealItems, RegroupDealItems, SetItemsOff, dealsForBringIn, missingItems, regrouped, usableFirm,
+  type ListReviewRevisions,
 } from './commands/checklist';
 import {
   firmOf, itemId, itemsFor, key, LAYERS, listId, type FirmLayerList, type Layer, type ListItem,
@@ -27,9 +28,10 @@ export { listTarget, theList, type ListTarget } from './checklistReview';
 export interface BringInResult { opIds: string[]; items: number; deals: number; /** deals the items could not be added to, by name, and why */ missed: { deal: string; why: string }[] }
 
 type ListForImport = Pick<FirmLayerList, 'layer' | 'name' | 'items' | 'file' | 'fileDate'>;
-export async function bringIn(store: Store, list: ListForImport) {
+export async function bringIn(store: Store, list: ListForImport, reviewed?: ListReviewRevisions) {
   const id = listId(list.layer, list.name);
-  const r = await store.dispatch(BringInList, { list }, { quiet: true, idempotencyKey: 'bring-in-list' });
+  const input = { list, reviewed };
+  const r = await store.dispatch(BringInList, input, { quiet: true, idempotencyKey: 'bring-in-list' });
   if (!r.ok) return r;
   // a list brought in again unchanged writes nothing, so there is nothing of it to undo: only an operation in the journal is
   const opIds = store.get().ops[r.value.opId] ? [r.value.opId] : []; let items = 0; let deals = 0; const missed: BringInResult['missed'] = [];
@@ -455,12 +457,13 @@ export function checklistShelf(state: State) {
 
 export async function submitChecklist(
   store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string,
+  reviewed?: ListReviewRevisions,
 ) {
   const kept = keptImport(importKey);
   const name = target.layer === 'broad' ? '' : target.name;
   // The draft stays kept until the list is written, so a reload or a failure mid-write loses nothing (#931).
   // Kept after a write, it is offered again; bringing in the same list again writes nothing.
-  const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' });
+  const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' }, reviewed);
   if (result.ok && kept && keptUnchanged(kept, keptImport(importKey))) dropImport(importKey);
   return result;
 }
