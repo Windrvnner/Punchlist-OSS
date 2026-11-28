@@ -36,6 +36,9 @@ A blackline is called this deal's own only when that is confirmed; otherwise the
 - Part 1's precedent-folder rule: a folder named Precedent, Precedents or Precedent Documents once a leading number and punctuation are taken off ("12. Precedents", never "Conditions Precedent").
 - The "reading" tag, its chip and tooltip ([`ResearchView`](../src/ui/research.tsx)), and the rule in [`check`](../src/backend/ai.ts).
 - [`blacklineLine`](../src/backend/ai.ts) and the listing lines in [`send`](../src/backend/ai.ts).
+- [`batchesOf`](../src/backend/agentBatches.ts) keeps a blackline and its clean draft together in chat searches,
+  folder reads, the `read` tool, and first-turn attachments. The `read` tool names each requested file deferred
+  to another batch (#1213).
 - The parent design's cap of two places in any pick for a document of another project.
 
 ## New
