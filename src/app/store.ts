@@ -243,8 +243,12 @@ export class Store {
     this.conversations = services.conversations ?? localConversations(services.local);
     for (const c of [...commands, Undo]) this.commands.set(c.name, c);
     services.ai = this.watchModel(services.ai);
-    services.repo.watch((ch) => void (ch.kind === 'sync'
-      ? this.refreshSync() : this.reloadRecord(ch.kind, ch.id, true)));
+    services.repo.watch((change) => {
+      if (change.kind === 'sync') void this.refreshSync();
+      else if (change.kind === 'progress') {
+        if (this.state.dealLoad[change.id] === 'loaded') void this.refreshProgress(change.id);
+      } else void this.reloadRecord(change.kind, change.id, true);
+    });
   }
 
   // ---- state access -------------------------------------------------------
@@ -1663,9 +1667,13 @@ export class Store {
     const c = await this.services.ai.checklist?.(dealId); if (!c) return;
     this.set({ ...this.state, checklists: { ...this.state.checklists, [dealId]: c.ok ? c.value : 'failed' } });
   }
-  /** How far the review of the deal has got: documents read, core documents read. Read-only; nothing is shown for a backend that does not say. */
+  private progressSeq = new Map<string, number>();
+  /** How far the review has got. A newer refresh supersedes an older request. */
   async refreshProgress(dealId: string) {
-    const p = await this.services.ai.progress?.(dealId); if (!p?.ok) return;
+    const request = (this.progressSeq.get(dealId) ?? 0) + 1;
+    this.progressSeq.set(dealId, request);
+    const p = await this.services.ai.progress?.(dealId);
+    if (!p?.ok || this.progressSeq.get(dealId) !== request) return;
     this.set({ ...this.state, progress: { ...this.state.progress, [dealId]: p.value } });
   }
   /** When everything on the deal was last checked. Read-only; a check that is running keeps its place. */
