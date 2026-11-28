@@ -9,6 +9,7 @@ import {
 import { keepChecklistImport, readKeptChecklist, type ChecklistChoices } from './checklistKept';
 import { LIST_CHANGED_SINCE_REVIEW } from './commands/checklist';
 import { NOT_DONE, showChecklistOutcome } from './checklistOutcome';
+import { keepChecklistReviewChoices } from './checklistReview';
 import { dropImport, importKey } from './keptImports';
 import {
   checklistCellRows, checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
@@ -385,8 +386,9 @@ export class ChecklistImportSession {
   private showReview = (change: ChecklistReviewChange) => {
     if (change.kind === 'fresh') {
       this.error = '';
+      const checked = keepChecklistReviewChoices(this.review, change.review, change.checked, this.choices);
       this.review = change.review;
-      this.choose({ shown: true, askedFor: change.signature, useReword: change.checked, remove: new Set() });
+      this.choose({ shown: true, askedFor: change.signature, ...checked });
     } else if (change.kind === 'retry') {
       this.review = change.review;
       if (change.failure) this.error = `${NOT_DONE[change.failure]} again`;

@@ -313,13 +313,14 @@ it('holds Next, duplicates and wording while a worksheet read runs, whatever els
     requests.newToken();
     expect(requests.tableReadPending()).toBe(true);
     await session.next(plan, show);
-    const review = { destination: target.id, destinationItems: null, generalTexts: [], items, rewords: [], pairs: [] };
+    const review = {
+      choicesKey: '', destination: target.id, destinationItems: null, generalTexts: [], items, rewords: [], pairs: [],
+    };
     await session.duplicates({ ...review, asked: { reword: 'off', same: 'failed' } }, [], show);
     await session.wording({ ...review, asked: { reword: 'failed', same: 'off' } }, show);
     expect(show).not.toHaveBeenCalled();
     expect(reword).not.toHaveBeenCalled();
     expect(sameMeaning).not.toHaveBeenCalled();
-
     await vi.waitFor(() => expect(releases).toHaveLength(1));
     releases[0]();
     await read;
