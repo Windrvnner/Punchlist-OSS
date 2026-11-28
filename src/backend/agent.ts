@@ -191,16 +191,16 @@ class Answering {
   }
 
   /**
-   * What the person gave (attachments, a finding's own documents) is attached from the first turn, and the question
-   * itself is searched for in everything.
+   * The first batch of documents the person gave (attachments, a finding's own documents) is attached from the first
+   * turn, and the question itself is searched for in everything.
    */
   private async firstSteps(): Promise<void> {
     const { kit, question, run } = this;
     const must = question.deals.flatMap((dealId) => (question.must[dealId] ?? [])
       .map((docId) => kit.records(dealId).find((r) => r.docId === docId))
       .filter((r): r is DocRecord => !!r)
-      .map((rec) => run.idOf(run.open(dealId, rec))));
-    if (must.length) run.done.push(run.read(must, this.limits.width));
+      .map((rec) => ({ dealId, rec })));
+    if (must.length) run.done.push(run.readBatch(must, this.limits.width));
     if (!this.stopped) run.done.push(await search(run, 'all', question.message));
   }
 

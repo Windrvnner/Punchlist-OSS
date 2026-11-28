@@ -10,7 +10,7 @@ import type { AgentKit, AgentQuestion, DealDoc, Run, Sent } from './agentKit';
 import { oneLine } from './agentPrompts';
 import { questionIdsIn } from './qaRow';
 import { docHandle } from './recordIds';
-import { sameDoc } from './agentBatches';
+import { batchesOf, sameDoc } from './agentBatches';
 
 /** a document's key across deals, as a folder read keeps what it has read */
 export const dealDocKey = (doc: { dealId: string; rec: DocRecord }) => `${doc.dealId}|${doc.rec.docId}`;
@@ -162,21 +162,30 @@ export class AgentRun {
   read(named: string[], width: number): string {
     const recs = this.question.deals.flatMap((dealId) =>
       this.kit.records(dealId).map((rec) => ({ dealId, rec })));
-    const picked: Sent[] = [];
+    const picked: DealDoc[] = [];
     const missing: string[] = [];
     for (const name of named) {
       // a name is tried as the model wrote it first, so a document whose own name starts or ends with a bracket or
       // quote is found; only when nothing matches is the model's wrapping quote or bracket taken off
       const said = name.trim();
       const unwrapped = said.replace(/^["'`[]+|["'`\]]+$/g, '');
-      const sent = this.opened.find((x) => this.idOf(x) === name)
+      const doc = this.opened.find((x) => this.idOf(x) === name)
         ?? this.byPath(said, recs) ?? this.byPath(unwrapped, recs);
-      if (sent && !picked.includes(sent)) picked.push(sent);
-      else if (!sent) missing.push(unwrapped);
+      if (doc) picked.push(doc);
+      else missing.push(unwrapped);
     }
-    const paired = this.withCleanDrafts(picked);
-    this.whole = paired.slice(0, width);
-    for (const s of this.whole) this.touched.add(s);
+    const attached = this.readBatch(picked, width);
+    const notFound = missing.length
+      ? `\nNot found: ${missing.join('; ')}. Name a document by its id or its path as listed.`
+      : '';
+    return `${attached}${notFound}`;
+  }
+
+  /** attach the first batch of resolved documents and report any that still need a read */
+  readBatch(picked: DealDoc[], width: number): string {
+    const unique = [...new Map(picked.map((doc) => [dealDocKey(doc), doc])).values()];
+    const batch = batchesOf(unique, this.kit.cleanDrafts, width)[0]?.recs ?? [];
+    this.whole = batch.map(({ dealId, rec }) => this.open(dealId, rec));
     for (const s of this.whole) {
       const pages = s.rec.pages ? `${s.rec.pages} pages` : '';
       this.steps.push({ kind: 'read', text: `Reviewed ${s.rec.name}`, result: pages, done: true });
@@ -184,29 +193,22 @@ export class AgentRun {
     const attached = this.whole.length
       ? `You asked to read ${this.whole.map((s) => this.idOf(s)).join(', ')}: they are attached to this message.`
       : 'No document was attached.';
-    const capped = picked.length > width ? ` Only the first ${width} were attached: ${width} at most at a time.` : '';
-    const notFound = missing.length
-      ? ` Not found: ${missing.join('; ')}. Name a document by its id or its path as listed.`
-      : '';
-    return `${attached}${capped}${notFound}`;
+    const deferred = unique.filter((doc) => !batch.some((sent) => sameDoc(doc, sent)));
+    if (!deferred.length) return attached;
+    const names = deferred.map((doc) => `- ${this.readPath(doc)}`);
+    return `${attached}\nAsk to read the remaining documents in another batch.\n${names.join('\n')}`;
   }
 
   /** a document named by its whole path or its whole file name, in any case; anything else is not found */
-  private byPath(said: string, recs: DealDoc[]): Sent | undefined {
+  private byPath(said: string, recs: DealDoc[]): DealDoc | undefined {
     const low = said.toLowerCase();
-    const found = recs.find((x) => this.kit.where(x.rec).toLowerCase() === low || x.rec.name.toLowerCase() === low);
-    return found ? this.open(found.dealId, found.rec) : undefined;
+    return recs.find((doc) => this.readPath(doc).toLowerCase() === low)
+      ?? recs.find(({ rec }) => this.kit.where(rec).toLowerCase() === low || rec.name.toLowerCase() === low);
   }
 
-  /** these documents with each blackline's clean draft put just before it, each once */
-  private withCleanDrafts(picked: Sent[]): Sent[] {
-    if (!this.kit.cleanDrafts) return picked;
-    const deals = new Set(picked.map((s) => s.dealId));
-    const cleans = new Map([...deals].map((dealId) => [dealId, this.kit.cleanDrafts!(dealId)]));
-    const paired = picked.flatMap((s) => {
-      const clean = cleans.get(s.dealId)?.get(s.rec.docId);
-      return clean ? [this.open(s.dealId, clean), s] : [s];
-    });
-    return paired.filter((s, i, all) => all.indexOf(s) === i);
+  /** the path for another read, qualified when two deals could have the same path */
+  private readPath(doc: DealDoc): string {
+    const path = this.kit.where(doc.rec);
+    return this.spansDeals ? `${doc.dealId}/${path}` : path;
   }
 }
