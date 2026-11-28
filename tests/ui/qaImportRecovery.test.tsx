@@ -5,6 +5,7 @@ import { act } from 'preact/test-utils';
 import './keptTextSession';
 import { StoreContext } from '../../src/ui/hooks';
 import { ImportDialog } from '../../src/ui/qaImport';
+import { App } from '../../src/ui/app';
 import { keptImport, keepImport, importKey, keptImportsReady } from '../../src/app/keptImports';
 import { readImportBytes } from '../../src/app/transfer';
 import {
@@ -49,6 +50,20 @@ async function openImport(app: RecoveryApp, dealId: string) {
   ));
   await vi.waitFor(() => expect(screen.innerHTML).toContain('id="im-go"'));
   expect(screen.querySelector<HTMLButtonElement>('#im-go')?.disabled).toBe(false);
+  return screen;
+}
+
+async function retryInterruptedImport(app: RecoveryApp) {
+  const screen = document.createElement('div');
+  document.body.append(screen);
+  screens.push(screen);
+  await act(() => render(<App store={app.store} />, screen));
+  const retry = screen.querySelector<HTMLButtonElement>('.intop .tundo');
+  expect(retry?.textContent).toBe('Retry');
+  await act(() => retry!.click());
+  await vi.waitFor(() => expect(screen.querySelector('#im-go')).not.toBeNull());
+  expect(Object.values(app.store.get().questions)).toHaveLength(0);
+  expect(screen.querySelector('.intop')).toBeNull();
   return screen;
 }
 
@@ -134,7 +149,7 @@ describe('Q&A import recovery handoff', () => {
       await next.store.boot();
       await next.store.loadDeal(dealId, { gaps: false });
       keepImport(importKey.qa(dealId), retained);
-      const restored = await openImport(next, dealId);
+      const restored = phase === 'pending' ? await retryInterruptedImport(next) : await openImport(next, dealId);
       await act(() => restored.querySelector<HTMLButtonElement>('#im-go')!.click());
       await vi.waitFor(() => expect(keptImport(importKey.qa(dealId))).toBeUndefined());
       expect(Object.values(next.store.get().questions)).toHaveLength(2);

@@ -141,8 +141,14 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   // what the change files hold: an import refused for want of room writes nothing to them
   const stored = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('dil/2/shared/')).reduce((n, k) => n + localStorage.getItem(k).length, 0)); const storedBefore = await stored();
   await page.click('#im-go'); await page.waitForFunction(() => /Couldn’t import/.test(document.getElementById('im-line').textContent));
-  const full = { n: (await qs(page, dealId)).length, toast: await page.textContent('#toast'), stored: await stored(), storedBefore };
-  say('import-storage-full-atomic', full.n === beforeImport.length && full.stored === storedBefore && storedBefore > 0 && /storage is full/.test(full.toast), JSON.stringify(full));
+  const full = {
+    n: (await qs(page, dealId)).length, stored: await stored(), storedBefore,
+    footer: await page.textContent('#im-line'), notices: await page.locator('.toasts .toast').allTextContents(),
+  };
+  const onlyFormReportsFailure = /storage is full/i.test(full.footer)
+    && !full.notices.some((notice) => /storage is full|Couldn’t save/i.test(notice));
+  say('import-storage-full-atomic', full.n === beforeImport.length && full.stored === storedBefore
+    && storedBefore > 0 && onlyFormReportsFailure, JSON.stringify(full));
   await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('qaQuotaFixture')) localStorage.removeItem(k); });
   await page.click('#im-go'); await page.waitForFunction(() => !document.querySelector('.imdlg'));
   say('import-after-room', (await qs(page, dealId)).length === 4);
